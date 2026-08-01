@@ -81,26 +81,39 @@ async def seed_database(session: AsyncSession) -> None:
         await session.flush()
         logger.info("Seeded admin user %s", admin_email)
 
-    for email, name, role in (
+    demo_users: tuple[tuple[str, str, Role], ...] = (
+        ("admin@order-elite.local", "Админ Демо", Role.ADMIN),
+        ("manager@order-elite.local", "Менеджер Демо", Role.OPERATOR),
         ("anna@order-elite.local", "Анна Операторова", Role.OPERATOR),
         ("igor@order-elite.local", "Игорь Смотров", Role.VIEWER),
-    ):
+    )
+    for email, name, role in demo_users:
+        # Prefer SEED_ADMIN_* credentials when seeding the configured admin email.
+        password = (
+            settings.seed_admin_password
+            if email == admin_email
+            else "demo"
+        )
         exists = await session.execute(select(User).where(User.email == email))
-        if exists.scalar_one_or_none() is None:
-            session.add(
-                User(
-                    email=email,
-                    name=name,
-                    password_hash=hash_password(settings.seed_admin_password),
-                    role=role.value,
-                    access_role_id=by_slug[role.value].id,
-                )
+        user = exists.scalar_one_or_none()
+        if user is None:
+            user = User(
+                email=email,
+                name=name,
+                password_hash=hash_password(password),
+                role=role.value,
+                access_role_id=by_slug[role.value].id,
             )
+            session.add(user)
+            await session.flush()
+            logger.info("Seeded demo user %s (%s)", email, role.value)
+        elif email != admin_email and not user.password_hash:
+            user.password_hash = hash_password(password)
 
     await migrate_users_to_access_roles(session, by_slug)
     await migrate_user_channels_to_roles(session)
 
-    for email in ("anna@order-elite.local", "igor@order-elite.local"):
+    for email, _name, _role in demo_users:
         u = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if u is None:
             continue
