@@ -364,7 +364,7 @@ onUnmounted(() => {
             >
               <ContactAvatar
                 v-if="row.message.direction === 'in' && !row.message.isInternal"
-                :name="appeal?.contact_name"
+                :name="appeal?.contact_name || '?'"
                 :url="appeal?.contact_avatar_url"
                 size="sm"
               />
