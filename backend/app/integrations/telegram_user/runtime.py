@@ -1,0 +1,444 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from telethon import TelegramClient, events
+from telethon.errors import SessionPasswordNeededError
+from telethon.tl.custom.message import Message as TlMessage
+
+from app.config import get_settings
+from app.db import SessionLocal
+from app.integrations.base import IntegrationError
+from app.integrations.max_personal.auth_qr import BridgePasswordProvider
+from app.integrations.telegram_user.inbox import ingest_telethon_message
+from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
+from app.realtime.publish import emit_event, message_created_event
+from app.security import decrypt_secret, encrypt_secret
+
+logger = logging.getLogger(__name__)
+
+_MTPROTO_FAIL_HINT = (
+    "Не удалось подключиться к серверам Telegram (MTProto). "
+    "HTTP Bot API может работать, а DC для личного аккаунта — нет (файрвол/провайдер). "
+    "Включите VPN или задайте TELEGRAM_PROXY в backend/.env "
+    "(например socks5://127.0.0.1:1080)."
+)
+
+
+def _telethon_proxy() -> dict[str, Any] | tuple[str, str, int] | None:
+    """Parse TELEGRAM_PROXY into a Telethon proxy config."""
+    raw = (get_settings().telegram_proxy or "").strip()
+    if not raw:
+        return None
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(raw)
+    scheme = (parsed.scheme or "").lower()
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        raise IntegrationError(
+            "TELEGRAM_PROXY должен быть URL вида socks5://host:1080 или http://host:8080"
+        )
+    if scheme in {"socks5", "socks5h"}:
+        proxy_type = "socks5"
+    elif scheme in {"socks4", "socks4a"}:
+        proxy_type = "socks4"
+    elif scheme in {"http", "https"}:
+        proxy_type = "http"
+    else:
+        raise IntegrationError(f"Неподдерживаемый TELEGRAM_PROXY scheme: {scheme}")
+
+    cfg: dict[str, Any] = {
+        "proxy_type": proxy_type,
+        "addr": host,
+        "port": int(port),
+        "rdns": True,
+    }
+    if parsed.username:
+        cfg["username"] = unquote(parsed.username)
+    if parsed.password:
+        cfg["password"] = unquote(parsed.password)
+    return cfg
+
+
+@dataclass
+class RuntimeState:
+    channel_id: int
+    status: str = "connecting"  # connecting | qr_pending | need_2fa | online | error
+    qr_url: str | None = None
+    hint: str | None = None
+    error: str | None = None
+    identity: str | None = None
+    client: TelegramClient | None = None
+    task: asyncio.Task | None = None
+    password_bridge: BridgePasswordProvider = field(default_factory=BridgePasswordProvider)
+    qr_shown: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class TelegramUserRuntime:
+    def __init__(self) -> None:
+        self._states: dict[int, RuntimeState] = {}
+        self._lock = asyncio.Lock()
+
+    def get_state(self, channel_id: int) -> RuntimeState | None:
+        return self._states.get(channel_id)
+
+    def get_client(self, channel_id: int) -> TelegramClient | None:
+        state = self._states.get(channel_id)
+        if state and state.status == "online" and state.client:
+            return state.client
+        return None
+
+    async def start_qr_connect(self, channel_id: int) -> RuntimeState:
+        settings = get_settings()
+        if not settings.telegram_api_id or not settings.telegram_api_hash:
+            raise IntegrationError(
+                "Задайте TELEGRAM_API_ID и TELEGRAM_API_HASH в .env (my.telegram.org)"
+            )
+
+        async with self._lock:
+            existing = self._states.get(channel_id)
+            if existing and existing.task and not existing.task.done():
+                return existing
+
+            work_dir = Path(settings.telegram_user_data_dir) / f"ch_{channel_id}"
+            work_dir.mkdir(parents=True, exist_ok=True)
+            session_path = work_dir / "session"
+            session_file = Path(f"{session_path}.session")
+            if session_file.exists():
+                session_file.unlink()
+            journal = Path(f"{session_path}.session-journal")
+            if journal.exists():
+                journal.unlink()
+
+            state = RuntimeState(channel_id=channel_id, status="connecting")
+            self._states[channel_id] = state
+            state.task = asyncio.create_task(
+                self._run_client(channel_id, work_dir, fresh=True),
+                name=f"telegram-user-{channel_id}",
+            )
+
+        state = self._states[channel_id]
+        try:
+            await asyncio.wait_for(state.qr_shown.wait(), timeout=45)
+        except TimeoutError as exc:
+            state.status = "error"
+            detail = state.error or ""
+            if "Connection" in detail or "failed" in detail.lower() or "TimeoutError" in detail:
+                state.error = _MTPROTO_FAIL_HINT
+            else:
+                state.error = (
+                    "Timeout waiting for Telegram QR. "
+                    + _MTPROTO_FAIL_HINT
+                )
+            await self._update_channel(
+                channel_id,
+                status=ChannelStatus.ERROR.value,
+                last_error=state.error,
+            )
+            raise IntegrationError(state.error) from exc
+
+        if not state.qr_url:
+            state.status = "error"
+            state.error = state.error or _MTPROTO_FAIL_HINT
+            await self._update_channel(
+                channel_id,
+                status=ChannelStatus.ERROR.value,
+                last_error=state.error,
+            )
+            raise IntegrationError(state.error)
+
+        state.status = "qr_pending"
+        await self._update_channel(
+            channel_id,
+            status=ChannelStatus.QR_PENDING.value,
+            identity="ожидает скана QR",
+        )
+        return state
+
+    async def submit_2fa(self, channel_id: int, password: str) -> None:
+        state = self._states.get(channel_id)
+        if not state:
+            raise IntegrationError("QR session not found")
+        await state.password_bridge.submit(password)
+
+    async def restore_online_channels(self) -> None:
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Channel).where(
+                    Channel.transport == ChannelTransport.TGAPI.value,
+                    Channel.status == ChannelStatus.ONLINE.value,
+                    Channel.credentials_enc.is_not(None),
+                )
+            )
+            channels = list(result.scalars().all())
+
+        for channel in channels:
+            try:
+                await self._restore_channel(channel.id)
+            except Exception:
+                logger.exception("Failed to restore telegram user channel %s", channel.id)
+
+    async def ensure_client(self, channel_id: int) -> TelegramClient:
+        client = self.get_client(channel_id)
+        if client and client.is_connected():
+            return client
+        await self._restore_channel(channel_id)
+        for _ in range(50):
+            client = self.get_client(channel_id)
+            if client and client.is_connected():
+                return client
+            await asyncio.sleep(0.2)
+        raise IntegrationError("Telegram personal client is offline; reconnect channel")
+
+    async def stop_all(self) -> None:
+        tasks = []
+        for state in list(self._states.values()):
+            if state.client:
+                tasks.append(asyncio.create_task(state.client.disconnect()))
+            if state.task and not state.task.done():
+                state.task.cancel()
+                tasks.append(state.task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._states.clear()
+
+    async def stop_channel(self, channel_id: int) -> None:
+        """Disconnect a single Telegram user channel (e.g. after DB delete)."""
+        state = self._states.pop(channel_id, None)
+        if state is None:
+            return
+        tasks = []
+        if state.client:
+            tasks.append(asyncio.create_task(state.client.disconnect()))
+        if state.task and not state.task.done():
+            state.task.cancel()
+            tasks.append(state.task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("Telegram user channel %s stopped", channel_id)
+
+    async def _restore_channel(self, channel_id: int) -> None:
+        async with self._lock:
+            existing = self._states.get(channel_id)
+            if existing and existing.task and not existing.task.done():
+                return
+            meta = await self._load_session_meta(channel_id)
+            if not meta:
+                return
+            work_dir = Path(meta["work_dir"])
+            state = RuntimeState(channel_id=channel_id, status="connecting")
+            self._states[channel_id] = state
+            state.task = asyncio.create_task(
+                self._run_client(channel_id, work_dir, fresh=False),
+                name=f"telegram-user-restore-{channel_id}",
+            )
+
+    async def _run_client(self, channel_id: int, work_dir: Path, *, fresh: bool) -> None:
+        settings = get_settings()
+        state = self._states[channel_id]
+        session_path = str(work_dir / "session")
+        proxy = None
+        try:
+            proxy = _telethon_proxy()
+        except IntegrationError as exc:
+            state.status = "error"
+            state.error = str(exc)
+            state.qr_shown.set()
+            await self._update_channel(
+                channel_id,
+                status=ChannelStatus.ERROR.value,
+                last_error=state.error,
+            )
+            return
+
+        client_kwargs: dict[str, Any] = {}
+        if proxy is not None:
+            client_kwargs["proxy"] = proxy
+            logger.info("Telegram user channel=%s using proxy type=%s", channel_id, proxy.get("proxy_type") if isinstance(proxy, dict) else proxy[0])
+
+        client = TelegramClient(
+            session_path,
+            settings.telegram_api_id,
+            settings.telegram_api_hash,
+            **client_kwargs,
+        )
+        state.client = client
+
+        @client.on(events.NewMessage)
+        async def on_new_message(event: events.NewMessage.Event) -> None:
+            message: TlMessage = event.message
+            if message is None:
+                return
+            async with SessionLocal() as session:
+                channel = await session.get(Channel, channel_id)
+                if channel is None:
+                    return
+                me = await client.get_me()
+                my_id = int(me.id) if me else None
+                created = await ingest_telethon_message(
+                    session,
+                    channel=channel,
+                    client=client,
+                    message=message,
+                    my_user_id=my_id,
+                )
+                event_payload = None
+                if created is not None:
+                    result = await session.execute(
+                        select(Dialog)
+                        .options(selectinload(Dialog.current_appeal))
+                        .where(Dialog.id == created.dialog_id)
+                    )
+                    dialog = result.scalar_one_or_none()
+                    await session.refresh(created, attribute_names=["attachments"])
+                    if dialog is not None:
+                        event_payload = message_created_event(dialog, created, channel.transport)
+                await session.commit()
+                if event_payload is not None:
+                    await emit_event(event_payload)
+
+        try:
+            await client.connect()
+            if fresh or not await client.is_user_authorized():
+                await self._qr_login(channel_id, client)
+            await self._mark_online(channel_id, client, work_dir)
+            # Keep client alive until cancelled
+            await client.run_until_disconnected()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state.status = "error"
+            err = str(exc)
+            if "Connection" in err or "failed" in err.lower():
+                state.error = _MTPROTO_FAIL_HINT
+            else:
+                state.error = err
+            state.qr_shown.set()
+            await self._update_channel(
+                channel_id,
+                status=ChannelStatus.ERROR.value,
+                last_error=state.error,
+            )
+            logger.exception("Telegram user client failed channel=%s", channel_id)
+        finally:
+            try:
+                if client.is_connected():
+                    await client.disconnect()
+            except Exception:
+                pass
+
+    async def _qr_login(self, channel_id: int, client: TelegramClient) -> None:
+        state = self._states[channel_id]
+        qr_login = await client.qr_login()
+        state.qr_url = qr_login.url
+        state.qr_shown.set()
+        state.status = "qr_pending"
+        logger.info("Telegram QR ready for channel %s", channel_id)
+
+        while True:
+            try:
+                await qr_login.wait(timeout=25)
+                return
+            except asyncio.TimeoutError:
+                try:
+                    await qr_login.recreate()
+                    state.qr_url = qr_login.url
+                    state.status = "qr_pending"
+                    logger.info("Telegram QR refreshed channel=%s", channel_id)
+                except Exception as exc:
+                    raise IntegrationError(f"Failed to refresh Telegram QR: {exc}") from exc
+            except SessionPasswordNeededError:
+                state.status = "need_2fa"
+                state.hint = "Пароль двухфакторной аутентификации Telegram"
+                await self._update_channel(
+                    channel_id,
+                    status=ChannelStatus.CONNECTING.value,
+                    last_error="Требуется пароль 2FA",
+                )
+                password = await state.password_bridge.get_password(state.hint)
+                await client.sign_in(password=password)
+                return
+
+    async def _mark_online(self, channel_id: int, client: TelegramClient, work_dir: Path) -> None:
+        state = self._states[channel_id]
+        me = await client.get_me()
+        external_id = str(me.id) if me else None
+        username = getattr(me, "username", None) if me else None
+        first = getattr(me, "first_name", None) if me else None
+        phone = getattr(me, "phone", None) if me else None
+        identity = (
+            (f"@{username}" if username else None)
+            or (str(phone) if phone else None)
+            or (str(first) if first else None)
+            or (f"id:{external_id}" if external_id else "Telegram")
+        )
+        creds = {
+            "work_dir": str(work_dir),
+            "session_name": "session",
+            "external_id": external_id,
+        }
+        state.status = "online"
+        state.identity = identity
+        state.error = None
+        state.qr_url = None
+        await self._update_channel(
+            channel_id,
+            status=ChannelStatus.ONLINE.value,
+            identity=identity,
+            external_id=external_id,
+            credentials_enc=encrypt_secret(json.dumps(creds)),
+            connected_at=utcnow(),
+            last_error=None,
+        )
+        logger.info("Telegram personal channel %s online as %s", channel_id, identity)
+
+    async def _load_session_meta(self, channel_id: int) -> dict[str, Any] | None:
+        async with SessionLocal() as session:
+            channel = await session.get(Channel, channel_id)
+            if not channel or not channel.credentials_enc:
+                return None
+            try:
+                return json.loads(decrypt_secret(channel.credentials_enc))
+            except Exception:
+                return None
+
+    async def _update_channel(
+        self,
+        channel_id: int,
+        *,
+        status: str | None = None,
+        identity: str | None = None,
+        external_id: str | None = None,
+        credentials_enc: str | None = None,
+        connected_at: Any = None,
+        last_error: str | None = ...,  # type: ignore[assignment]
+    ) -> None:
+        async with SessionLocal() as session:
+            channel = await session.get(Channel, channel_id)
+            if channel is None:
+                return
+            if status is not None:
+                channel.status = status
+            if identity is not None:
+                channel.identity = identity
+            if external_id is not None:
+                channel.external_id = external_id
+            if credentials_enc is not None:
+                channel.credentials_enc = credentials_enc
+            if connected_at is not None:
+                channel.connected_at = connected_at
+            if last_error is not ...:
+                channel.last_error = last_error
+            await session.commit()
+
+
+runtime = TelegramUserRuntime()

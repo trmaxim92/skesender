@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-surface: #f3f5f8;
+  --color-panel: #ffffff;
+  --color-ink: #152033;
+  --color-muted: #667085;
+  --color-line: #e4e8ef;
+  --color-brand: #1a6dff;
+  --color-brand-soft: #e8f0ff;
+  --color-bubble-out: #6b7280;
+  --color-bubble-note: #fff8e8;
+  --color-bubble-note-border: #e8d5a8;
+  --color-bubble-note-ink: #5c4a1f;
+  --color-read-tick: #8af0ff;
+  --color-ok: #12b76a;
+  --color-warn: #f79009;
+  --color-danger: #f04438;
+  --color-max: #471aff;
+  --color-tg: #2aabee;
+  --color-vk: #0077ff;
+  --color-wa: #25d366;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+@keyframes unread-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(18 183 106 / 45%);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 6px rgb(18 183 106 / 0%);
+  }
+}
+
+.unread-badge {
+  animation: unread-pulse 1.8s ease-in-out infinite;
+}

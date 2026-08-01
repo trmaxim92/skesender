@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OE notify smoke</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.45;
+      }
+      button {
+        margin: 0.35rem 0.35rem 0.35rem 0;
+        padding: 0.55rem 0.9rem;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      pre {
+        background: #f4f4f5;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .hint {
+        color: #52525b;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Пуш smoke-тест</h1>
+    <p class="hint">
+      Открой через Vite: <code>http://localhost:5173/notify-test.html</code>
+    </p>
+    <p>
+      <button type="button" id="perm">1. Запросить разрешение</button>
+      <button type="button" id="show">2. Показать Notification</button>
+      <button type="button" id="hide">3. Через 2с (уйди со вкладки)</button>
+    </p>
+    <pre id="log">…</pre>
+    <script>
+      const logEl = document.getElementById('log')
+      function log(line) {
+        const stamp = new Date().toLocaleTimeString()
+        logEl.textContent = `[${stamp}] ${line}\n` + logEl.textContent
+      }
+      function dump() {
+        log(
+          `Notification in window: ${'Notification' in window}; permission=${
+            'Notification' in window ? Notification.permission : 'n/a'
+          }; visibility=${document.visibilityState}; focused=${document.hasFocus()}`,
+        )
+      }
+      dump()
+      document.getElementById('perm').onclick = async () => {
+        if (!('Notification' in window)) {
+          log('API не поддерживается')
+          return
+        }
+        const p = await Notification.requestPermission()
+        log(`requestPermission → ${p}`)
+        dump()
+      }
+      document.getElementById('show').onclick = () => {
+        if (!('Notification' in window)) return log('нет API')
+        if (Notification.permission !== 'granted') return log('нет permission=granted')
+        try {
+          const n = new Notification('Order Elite smoke', {
+            body: 'Если видишь этот тост — браузер умеет пуши',
+            tag: 'oe-smoke-' + Date.now(),
+          })
+          n.onclick = () => {
+            log('click on notification')
+            n.close()
+          }
+          log('new Notification() ok')
+        } catch (e) {
+          log('throw: ' + e)
+        }
+      }
+      document.getElementById('hide').onclick = () => {
+        log('через 2с покажем тост — переключись на другую вкладку/окно')
+        setTimeout(() => {
+          if (Notification.permission !== 'granted') return log('нет permission')
+          new Notification('Order Elite (фон)', {
+            body: `visibility=${document.visibilityState}`,
+            tag: 'oe-smoke-bg-' + Date.now(),
+          })
+          log(`фоновый тост создан, visibility=${document.visibilityState}`)
+        }, 2000)
+      }
+    </script>
+  </body>
+</html>
