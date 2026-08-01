@@ -12,3 +12,4 @@ python-multipart==0.0.20
 telethon==1.44.0
 PySocks==1.7.1
 alembic==1.16.4
+maxapi-python>=2.3.1
