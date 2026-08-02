@@ -10,7 +10,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.tl import functions, types
 from telethon.tl.custom.message import Message as TlMessage
 
 from app.config import get_settings
@@ -180,14 +181,14 @@ class TelegramUserRuntime:
         state = self._states.pop(channel_id, None)
         if state is None:
             return
-        tasks = []
+        pending: list[Any] = []
         if state.client:
-            tasks.append(asyncio.create_task(state.client.disconnect()))
+            pending.append(asyncio.ensure_future(state.client.disconnect()))
         if state.task and not state.task.done():
             state.task.cancel()
-            tasks.append(state.task)
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            pending.append(state.task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         logger.info("Telegram user channel %s stopped", channel_id)
 
     async def _restore_channel(self, channel_id: int) -> None:
@@ -224,10 +225,20 @@ class TelegramUserRuntime:
             )
             return
 
-        client_kwargs: dict[str, Any] = {}
+        client_kwargs: dict[str, Any] = {
+            # QR finalize often hits short FloodWaits repeatedly; don't give up after 5 tries.
+            "request_retries": 15,
+            "connection_retries": 10,
+            "retry_delay": 2,
+            "flood_sleep_threshold": 24 * 60 * 60,
+        }
         if proxy is not None:
             client_kwargs["proxy"] = proxy
-            logger.info("Telegram user channel=%s using proxy type=%s", channel_id, proxy.get("proxy_type") if isinstance(proxy, dict) else proxy[0])
+            logger.info(
+                "Telegram user channel=%s using proxy type=%s",
+                channel_id,
+                proxy.get("proxy_type") if isinstance(proxy, dict) else proxy[0],
+            )
 
         client = TelegramClient(
             session_path,
@@ -274,12 +285,30 @@ class TelegramUserRuntime:
             await client.connect()
             if fresh or not await client.is_user_authorized():
                 await self._qr_login(channel_id, client)
+            # After a flaky QR finalize Telegram may already have authorized the session.
+            if not await client.is_user_authorized():
+                raise IntegrationError("Telegram QR login did not authorize the session")
             await self._mark_online(channel_id, client, work_dir)
             # Keep client alive until cancelled
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            # Last chance: scan succeeded on phone but finalize RPC failed.
+            try:
+                if client.is_connected() and await client.is_user_authorized():
+                    logger.warning(
+                        "Telegram user channel=%s recovered authorized session after error: %s",
+                        channel_id,
+                        exc,
+                    )
+                    await self._mark_online(channel_id, client, work_dir)
+                    await client.run_until_disconnected()
+                    return
+            except Exception:
+                logger.exception(
+                    "Telegram user channel=%s recovery check failed", channel_id
+                )
             state.status = "error"
             err = str(exc)
             if "Connection" in err or "failed" in err.lower():
@@ -310,7 +339,9 @@ class TelegramUserRuntime:
 
         while True:
             try:
-                await qr_login.wait(timeout=25)
+                # Wait until token expiry (not a short fixed timeout) so we don't
+                # spam ExportLoginTokenRequest via recreate and hit flood limits.
+                await qr_login.wait()
                 return
             except asyncio.TimeoutError:
                 try:
@@ -318,7 +349,22 @@ class TelegramUserRuntime:
                     state.qr_url = qr_login.url
                     state.status = "qr_pending"
                     logger.info("Telegram QR refreshed channel=%s", channel_id)
+                except FloodWaitError as exc:
+                    logger.warning(
+                        "Telegram QR recreate flood wait %ss channel=%s",
+                        exc.seconds,
+                        channel_id,
+                    )
+                    await asyncio.sleep(int(exc.seconds) + 1)
+                    await qr_login.recreate()
+                    state.qr_url = qr_login.url
                 except Exception as exc:
+                    if await client.is_user_authorized():
+                        logger.warning(
+                            "QR recreate failed but session authorized channel=%s",
+                            channel_id,
+                        )
+                        return
                     raise IntegrationError(f"Failed to refresh Telegram QR: {exc}") from exc
             except SessionPasswordNeededError:
                 state.status = "need_2fa"
@@ -331,6 +377,68 @@ class TelegramUserRuntime:
                 password = await state.password_bridge.get_password(state.hint)
                 await client.sign_in(password=password)
                 return
+            except (ValueError, TypeError, FloodWaitError) as exc:
+                # Phone already accepted login; finalize RPC may flood / fail.
+                if await client.is_user_authorized():
+                    logger.warning(
+                        "QR wait error but authorized channel=%s: %s",
+                        channel_id,
+                        exc,
+                    )
+                    return
+                try:
+                    await self._finalize_qr_login(client, qr_login)
+                    return
+                except SessionPasswordNeededError:
+                    state.status = "need_2fa"
+                    state.hint = "Пароль двухфакторной аутентификации Telegram"
+                    await self._update_channel(
+                        channel_id,
+                        status=ChannelStatus.CONNECTING.value,
+                        last_error="Требуется пароль 2FA",
+                    )
+                    password = await state.password_bridge.get_password(state.hint)
+                    await client.sign_in(password=password)
+                    return
+                except Exception as finalize_exc:
+                    if await client.is_user_authorized():
+                        return
+                    logger.warning(
+                        "Telegram QR finalize retry channel=%s: %s",
+                        channel_id,
+                        finalize_exc,
+                    )
+                    await asyncio.sleep(3)
+                    if await client.is_user_authorized():
+                        return
+                    raise
+
+    async def _finalize_qr_login(self, client: TelegramClient, qr_login: Any) -> None:
+        """Complete QR login after UpdateLoginToken, surviving short flood waits."""
+        for attempt in range(1, 12):
+            try:
+                resp = await client(qr_login._request)
+                if isinstance(resp, types.auth.LoginTokenMigrateTo):
+                    await client._switch_dc(resp.dc_id)
+                    resp = await client(
+                        functions.auth.ImportLoginTokenRequest(resp.token)
+                    )
+                if isinstance(resp, types.auth.LoginTokenSuccess):
+                    await client._on_login(resp.authorization.user)
+                    return
+                if await client.is_user_authorized():
+                    return
+                raise TypeError(f"Unexpected QR login response: {type(resp).__name__}")
+            except FloodWaitError as exc:
+                wait_s = int(exc.seconds) + 1
+                logger.warning(
+                    "QR finalize flood wait %ss (attempt %s)", wait_s, attempt
+                )
+                await asyncio.sleep(wait_s)
+            except SessionPasswordNeededError:
+                raise
+        if not await client.is_user_authorized():
+            raise IntegrationError("Telegram QR finalize failed after retries")
 
     async def _mark_online(self, channel_id: int, client: TelegramClient, work_dir: Path) -> None:
         state = self._states[channel_id]
