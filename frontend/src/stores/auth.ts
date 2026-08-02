@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { loginRequest, mapUser, meRequest } from '@/api/auth'
+import { loginRequest, mapUser, meRequest, updateMeRequest, changePasswordRequest } from '@/api/auth'
 import { ApiError, setToken } from '@/api/client'
 import {
   FIRST_SECTION_PATHS,
@@ -101,6 +101,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function updateProfile(name: string) {
+    const me = await updateMeRequest(name.trim())
+    user.value = mapUser(me)
+    localStorage.setItem(USER_KEY, JSON.stringify(user.value))
+  }
+
+  async function changePassword(currentPassword: string, newPassword: string) {
+    await changePasswordRequest(currentPassword, newPassword)
+  }
+
   function logout() {
     user.value = null
     token.value = null
@@ -120,5 +130,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     hydrate,
+    updateProfile,
+    changePassword,
   }
 })

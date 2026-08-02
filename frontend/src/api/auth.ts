@@ -84,6 +84,20 @@ export async function meRequest() {
   return api<ApiUser>('/api/auth/me')
 }
 
+export async function updateMeRequest(name: string) {
+  return api<ApiUser>('/api/auth/me', {
+    method: 'PATCH',
+    json: { name },
+  })
+}
+
+export async function changePasswordRequest(currentPassword: string, newPassword: string) {
+  return api<void>('/api/auth/me/password', {
+    method: 'POST',
+    json: { current_password: currentPassword, new_password: newPassword },
+  })
+}
+
 export async function listChannelsRequest() {
   return api<ApiChannel[]>('/api/channels')
 }

@@ -74,6 +74,16 @@ const router = createRouter({
           redirect: '/departments',
         },
         {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('@/views/profile/ProfileView.vue'),
+        },
+        {
+          path: 'profile/templates',
+          name: 'profile-templates',
+          component: () => import('@/views/profile/MyTemplatesView.vue'),
+        },
+        {
           path: 'templates',
           redirect: '/profile/templates',
         },
@@ -82,11 +92,6 @@ const router = createRouter({
           name: 'close-template',
           component: () => import('@/views/settings/CloseTemplateView.vue'),
           meta: { permission: 'section.settings' },
-        },
-        {
-          path: 'profile/templates',
-          name: 'profile-templates',
-          component: () => import('@/views/profile/MyTemplatesView.vue'),
         },
         {
           path: 'webhooks',

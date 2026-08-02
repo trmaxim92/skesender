@@ -18,23 +18,15 @@ import {
   FormInput,
   IdCard,
   TextQuote,
-  Bell,
-  BellOff,
-  Volume2,
-  VolumeX,
+  UserRound,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
 import {
-  ensureNotificationPermission,
   isPushEnabled,
-  isSoundEnabled,
   notificationPermission,
-  playIncomingSound,
   setPushEnabled,
-  setSoundEnabled,
-  testOsPush,
   unlockNotifyAudio,
 } from '@/utils/notify'
 
@@ -110,6 +102,8 @@ const onSettingsSection = computed(
 )
 
 const title = computed(() => {
+  if (route.path === '/profile' || route.path.startsWith('/profile?')) return 'Профиль'
+  if (route.name === 'profile') return 'Профиль'
   if (route.path.startsWith('/profile/templates')) return 'Мои шаблоны'
   if (route.name === 'appeal-detail') return 'Обращение'
   if (route.path.startsWith('/users')) return 'Пользователи'
@@ -134,10 +128,6 @@ const initials = computed(() => {
 })
 
 const chatsUnread = computed(() => chats.totalUnread)
-const soundOn = ref(isSoundEnabled())
-const pushPermission = ref(notificationPermission())
-const pushOn = ref(isPushEnabled() && pushPermission.value === 'granted')
-const pushTestHint = ref('')
 const inAppToast = ref<{
   text: string
   kind: 'ok' | 'warn' | 'err' | 'message'
@@ -146,7 +136,7 @@ const inAppToast = ref<{
   initials?: string
 } | null>(null)
 let inAppToastTimer: number | null = null
-if (isPushEnabled() && pushPermission.value !== 'granted') {
+if (isPushEnabled() && notificationPermission() !== 'granted') {
   setPushEnabled(false)
 }
 
@@ -170,55 +160,6 @@ watch(
   },
   { immediate: true },
 )
-
-async function toggleSound() {
-  unlockNotifyAudio()
-  soundOn.value = !soundOn.value
-  setSoundEnabled(soundOn.value)
-  if (soundOn.value) playIncomingSound()
-}
-
-async function togglePush() {
-  pushTestHint.value = ''
-  if (!pushOn.value) {
-    const perm = await ensureNotificationPermission()
-    pushPermission.value = perm
-    if (perm !== 'granted') {
-      pushOn.value = false
-      setPushEnabled(false)
-      pushTestHint.value =
-        perm === 'denied'
-          ? 'Браузер заблокировал уведомления для localhost'
-          : 'Разрешение не выдано'
-      return
-    }
-    pushOn.value = true
-    setPushEnabled(true)
-    const test = await testOsPush()
-    pushTestHint.value = test.ok
-      ? 'Тестовый пуш отправлен — проверь системный тост'
-      : `Тест не прошёл: ${test.reason}`
-    return
-  }
-  pushOn.value = false
-  setPushEnabled(false)
-}
-
-async function runPushTest() {
-  pushTestHint.value = 'Запрос…'
-  try {
-    const test = await testOsPush()
-    pushPermission.value = notificationPermission()
-    if (test.ok) {
-      pushOn.value = true
-      pushTestHint.value = `OK (${test.reason}), permission=${test.permission}. Смотри зелёный тост справа и центр уведомлений Windows.`
-    } else {
-      pushTestHint.value = `Не ок: ${test.reason}`
-    }
-  } catch (e) {
-    pushTestHint.value = `Ошибка: ${e instanceof Error ? e.message : String(e)}`
-  }
-}
 
 function onInAppToast(ev: Event) {
   const detail = (ev as CustomEvent<{
@@ -305,20 +246,6 @@ function onDocClick(e: MouseEvent) {
   if (el && !el.contains(e.target as Node)) profileOpen.value = false
 }
 
-function syncPushStateFromBrowser() {
-  pushPermission.value = notificationPermission()
-  if (pushPermission.value !== 'granted') {
-    pushOn.value = false
-    if (isPushEnabled()) setPushEnabled(false)
-  } else {
-    pushOn.value = isPushEnabled()
-  }
-}
-
-watch(profileOpen, (open) => {
-  if (open) syncPushStateFromBrowser()
-})
-
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
@@ -327,7 +254,9 @@ onMounted(() => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onSwMessage)
   }
-  syncPushStateFromBrowser()
+  if (isPushEnabled() && notificationPermission() !== 'granted') {
+    setPushEnabled(false)
+  }
   if (auth.canSection('/chats')) {
     chats.connectRealtime()
     void chats.fetchUnreadSummary()
@@ -541,6 +470,14 @@ onUnmounted(() => {
             </div>
             <div class="p-1.5">
               <RouterLink
+                to="/profile"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
+                @click="profileOpen = false"
+              >
+                <UserRound class="size-4 text-muted" />
+                Профиль и настройки
+              </RouterLink>
+              <RouterLink
                 to="/profile/templates"
                 class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
                 @click="profileOpen = false"
@@ -548,59 +485,6 @@ onUnmounted(() => {
                 <TextQuote class="size-4 text-muted" />
                 Мои шаблоны
               </RouterLink>
-              <button
-                type="button"
-                class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
-                @click="toggleSound"
-              >
-                <Volume2 v-if="soundOn" class="size-4 text-muted" />
-                <VolumeX v-else class="size-4 text-muted" />
-                <span class="min-w-0 flex-1 text-left">Звук входящих</span>
-                <span class="text-[11px] font-semibold" :class="soundOn ? 'text-ok' : 'text-muted'">
-                  {{ soundOn ? 'вкл' : 'выкл' }}
-                </span>
-              </button>
-              <button
-                type="button"
-                class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
-                :title="
-                  pushPermission === 'denied'
-                    ? 'Разрешение заблокировано в настройках браузера'
-                    : undefined
-                "
-                @click="togglePush"
-              >
-                <Bell v-if="pushOn && pushPermission !== 'denied'" class="size-4 text-muted" />
-                <BellOff v-else class="size-4 text-muted" />
-                <span class="min-w-0 flex-1 text-left">Пуш-уведомления</span>
-                <span
-                  class="text-[11px] font-semibold"
-                  :class="pushOn && pushPermission === 'granted' ? 'text-ok' : 'text-muted'"
-                >
-                  {{
-                    pushPermission === 'denied'
-                      ? 'блок'
-                      : pushOn && pushPermission === 'granted'
-                        ? 'вкл'
-                        : 'выкл'
-                  }}
-                </span>
-              </button>
-              <button
-                type="button"
-                class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
-                @click="runPushTest"
-              >
-                <Bell class="size-4 text-muted" />
-                <span class="min-w-0 flex-1 text-left">Проверить пуш</span>
-              </button>
-              <p
-                v-if="pushTestHint"
-                class="px-3 pb-2 text-[11px] leading-snug"
-                :class="pushTestHint.startsWith('OK') ? 'text-ok' : 'text-danger'"
-              >
-                {{ pushTestHint }}
-              </p>
               <button
                 type="button"
                 class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/5"
