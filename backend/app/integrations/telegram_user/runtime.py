@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.errors import AuthKeyUnregisteredError, FloodWaitError, SessionPasswordNeededError
 from telethon.tl import functions, types
 from telethon.tl.custom.message import Message as TlMessage
 
@@ -32,6 +32,32 @@ _MTPROTO_FAIL_HINT = (
     "Задайте TELEGRAM_PROXY в backend/.env "
     "(EU SOCKS или локальный WARP: socks5://127.0.0.1:40000)."
 )
+
+_AUTH_KEY_HINT = (
+    "Сессия Telegram сброшена (ключ не зарегистрирован). "
+    "В приложении Telegram: Настройки → Устройства — завершите сессии Desktop/trmaxim, "
+    "удалите этот канал в SkySender и подключите заново одним сканом QR."
+)
+
+
+def _wipe_session_files(work_dir: Path) -> None:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    for path in work_dir.glob("session*"):
+        try:
+            path.unlink()
+        except OSError:
+            logger.warning("Cannot remove telegram session file %s", path)
+
+
+def _is_auth_key_error(exc: BaseException) -> bool:
+    if isinstance(exc, AuthKeyUnregisteredError):
+        return True
+    text = str(exc).lower()
+    return (
+        "key is not registered" in text
+        or "authkeyunregistered" in text
+        or "ключ не зарегистрирован" in text
+    )
 
 
 @dataclass
@@ -72,17 +98,18 @@ class TelegramUserRuntime:
         async with self._lock:
             existing = self._states.get(channel_id)
             if existing and existing.task and not existing.task.done():
-                return existing
+                if existing.status in {"qr_pending", "connecting", "need_2fa"} and existing.qr_url:
+                    return existing
+                # Stuck/error task — cancel and start clean.
+                existing.task.cancel()
+                try:
+                    await existing.task
+                except Exception:
+                    pass
+                self._states.pop(channel_id, None)
 
             work_dir = Path(settings.telegram_user_data_dir) / f"ch_{channel_id}"
-            work_dir.mkdir(parents=True, exist_ok=True)
-            session_path = work_dir / "session"
-            session_file = Path(f"{session_path}.session")
-            if session_file.exists():
-                session_file.unlink()
-            journal = Path(f"{session_path}.session-journal")
-            if journal.exists():
-                journal.unlink()
+            _wipe_session_files(work_dir)
 
             state = RuntimeState(channel_id=channel_id, status="connecting")
             self._states[channel_id] = state
@@ -285,18 +312,31 @@ class TelegramUserRuntime:
             await client.connect()
             if fresh or not await client.is_user_authorized():
                 await self._qr_login(channel_id, client)
-            # After a flaky QR finalize Telegram may already have authorized the session.
-            if not await client.is_user_authorized():
-                raise IntegrationError("Telegram QR login did not authorize the session")
+            await self._stabilize_authorized_session(client)
             await self._mark_online(channel_id, client, work_dir)
             # Keep client alive until cancelled
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            # Last chance: scan succeeded on phone but finalize RPC failed.
+            # Do not "recover" on AuthKeyUnregistered — local session flag lies.
+            if _is_auth_key_error(exc):
+                _wipe_session_files(work_dir)
+                state.status = "error"
+                state.error = _AUTH_KEY_HINT
+                state.qr_shown.set()
+                await self._update_channel(
+                    channel_id,
+                    status=ChannelStatus.ERROR.value,
+                    last_error=state.error,
+                )
+                logger.exception("Telegram auth key unregistered channel=%s", channel_id)
+                return
+
+            recovery_exc: BaseException | None = None
             try:
                 if client.is_connected() and await client.is_user_authorized():
+                    await self._stabilize_authorized_session(client)
                     logger.warning(
                         "Telegram user channel=%s recovered authorized session after error: %s",
                         channel_id,
@@ -305,16 +345,23 @@ class TelegramUserRuntime:
                     await self._mark_online(channel_id, client, work_dir)
                     await client.run_until_disconnected()
                     return
-            except Exception:
+            except Exception as recover_fail:
+                recovery_exc = recover_fail
                 logger.exception(
                     "Telegram user channel=%s recovery check failed", channel_id
                 )
             state.status = "error"
-            err = str(exc)
-            if "Connection" in err or "failed" in err.lower():
-                state.error = _MTPROTO_FAIL_HINT
+            if _is_auth_key_error(exc) or (
+                recovery_exc is not None and _is_auth_key_error(recovery_exc)
+            ):
+                _wipe_session_files(work_dir)
+                state.error = _AUTH_KEY_HINT
             else:
-                state.error = err
+                err = str(exc)
+                if "Connection" in err or "failed" in err.lower():
+                    state.error = _MTPROTO_FAIL_HINT
+                else:
+                    state.error = err
             state.qr_shown.set()
             await self._update_channel(
                 channel_id,
@@ -328,6 +375,22 @@ class TelegramUserRuntime:
                     await client.disconnect()
             except Exception:
                 pass
+
+    async def _stabilize_authorized_session(self, client: TelegramClient) -> None:
+        """Reconnect and verify get_me after QR — avoids stale AuthKeyUnregistered."""
+        try:
+            if client.is_connected():
+                await client.disconnect()
+        except Exception:
+            pass
+        await asyncio.sleep(0.8)
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise IntegrationError("Telegram QR login did not authorize the session")
+        me = await client.get_me()
+        if me is None:
+            raise IntegrationError(_AUTH_KEY_HINT)
+        logger.info("Telegram session stabilized as id=%s", getattr(me, "id", None))
 
     async def _qr_login(self, channel_id: int, client: TelegramClient) -> None:
         """QR login with flood-tolerant finalize.
@@ -365,6 +428,28 @@ class TelegramUserRuntime:
                 base64.urlsafe_b64encode(token).decode("utf-8").rstrip("=")
             )
 
+        async def _session_really_authorized() -> bool:
+            """is_user_authorized() can be true after _on_login while GetState still 401s."""
+            try:
+                if not await client.is_user_authorized():
+                    return False
+                me = await client.get_me()
+                return me is not None
+            except Exception as exc:
+                if _is_auth_key_error(exc):
+                    client._authorized = False  # type: ignore[attr-defined]
+                    logger.warning(
+                        "Telegram session looked authorized but key unregistered channel=%s",
+                        channel_id,
+                    )
+                    return False
+                raise
+
+        async def _accept_login(authorization_user: Any) -> None:
+            await client._on_login(authorization_user)
+            if not await _session_really_authorized():
+                raise IntegrationError(_AUTH_KEY_HINT)
+
         resp = await _export_token()
         if not isinstance(resp, types.auth.LoginToken):
             raise IntegrationError(
@@ -384,7 +469,7 @@ class TelegramUserRuntime:
         client.add_event_handler(_on_login_token, events.Raw(types.UpdateLoginToken))
         try:
             while True:
-                if await client.is_user_authorized():
+                if await _session_really_authorized():
                     return
 
                 expires = getattr(resp, "expires", None)
@@ -402,7 +487,7 @@ class TelegramUserRuntime:
                 except asyncio.TimeoutError:
                     resp = await _export_token()
                     if isinstance(resp, types.auth.LoginTokenSuccess):
-                        await client._on_login(resp.authorization.user)
+                        await _accept_login(resp.authorization.user)
                         return
                     if isinstance(resp, types.auth.LoginTokenMigrateTo):
                         await client._switch_dc(resp.dc_id)
@@ -410,7 +495,7 @@ class TelegramUserRuntime:
                             functions.auth.ImportLoginTokenRequest(resp.token)
                         )
                         if isinstance(imported, types.auth.LoginTokenSuccess):
-                            await client._on_login(imported.authorization.user)
+                            await _accept_login(imported.authorization.user)
                             return
                         raise IntegrationError(
                             f"QR DC migrate failed: {type(imported).__name__}"
@@ -429,7 +514,7 @@ class TelegramUserRuntime:
                 await asyncio.sleep(1.5)
                 got_fresh_token = False
                 for attempt in range(1, 20):
-                    if await client.is_user_authorized():
+                    if await _session_really_authorized():
                         return
                     resp = await _export_token()
 
@@ -440,7 +525,7 @@ class TelegramUserRuntime:
                         )
 
                     if isinstance(resp, types.auth.LoginTokenSuccess):
-                        await client._on_login(resp.authorization.user)
+                        await _accept_login(resp.authorization.user)
                         return
 
                     if isinstance(resp, types.auth.LoginToken):
@@ -466,7 +551,7 @@ class TelegramUserRuntime:
 
                 if got_fresh_token:
                     continue
-                if await client.is_user_authorized():
+                if await _session_really_authorized():
                     return
                 raise IntegrationError(
                     "Не удалось завершить вход по QR после скана. "
@@ -482,6 +567,8 @@ class TelegramUserRuntime:
             )
             password = await state.password_bridge.get_password(state.hint)
             await client.sign_in(password=password)
+            if not await _session_really_authorized():
+                raise IntegrationError(_AUTH_KEY_HINT)
         finally:
             client.remove_event_handler(
                 _on_login_token, events.Raw(types.UpdateLoginToken)
