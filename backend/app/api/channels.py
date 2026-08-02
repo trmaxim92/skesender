@@ -18,7 +18,9 @@ from app.models import Channel, ChannelStatus, ChannelTransport, Department, Dia
 from app.rbac import (
     ACTION_MANAGE_CHANNELS,
     ACTION_MANAGE_USERS,
+    SECTION_APPEALS,
     SECTION_CHANNELS,
+    SECTION_CHATS,
     SECTION_MAILING,
     accessible_channel_ids,
     ensure_channel_access,
@@ -88,10 +90,13 @@ async def list_channels(
     user: User = Depends(get_current_user),
 ) -> list[ChannelOut]:
     loaded = await load_user_rbac(db, user)
+    # Read-only channel list for chats/appeals/filter/outbound — not the settings section.
     if not (
-        user_can(loaded, SECTION_CHANNELS)
-        or user_can(loaded, ACTION_MANAGE_USERS)
+        user_can(loaded, SECTION_CHATS)
+        or user_can(loaded, SECTION_APPEALS)
         or user_can(loaded, SECTION_MAILING)
+        or user_can(loaded, SECTION_CHANNELS)
+        or user_can(loaded, ACTION_MANAGE_USERS)
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     stmt = (

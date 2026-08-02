@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useEmployeesStore } from '@/stores/employees'
 import type { AccessRole, PermissionCode } from '@/types'
 
@@ -13,6 +13,10 @@ const roleAllChannels = ref(false)
 const roleChannelIds = ref<number[]>([])
 const roleSaving = ref(false)
 
+const emptyChannelAclWarn = computed(
+  () => roleEditorOpen.value && !roleAllChannels.value && roleChannelIds.value.length === 0,
+)
+
 onMounted(() => {
   void employees.fetchRoles()
 })
@@ -24,8 +28,8 @@ watch(roleAllChannels, (all) => {
 function openCreateRole() {
   editingRoleId.value = null
   roleName.value = ''
-  rolePerms.value = ['section.chats', 'section.appeals']
-  roleAllChannels.value = false
+  rolePerms.value = ['section.chats', 'section.appeals', 'action.write']
+  roleAllChannels.value = true
   roleChannelIds.value = []
   roleEditorOpen.value = true
 }
@@ -102,7 +106,7 @@ async function saveRole() {
             <h3 class="text-sm font-semibold">{{ r.name }}</h3>
             <p class="text-[11px] text-muted">
               {{ r.isSystem ? 'Системная' : 'Пользовательская' }}
-              ·
+              · диалоги:
               {{
                 r.allChannels
                   ? 'все каналы'
@@ -156,13 +160,16 @@ async function saveRole() {
           placeholder="Название"
           class="mb-3 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none"
         />
-        <label class="mb-2 flex items-center gap-2 text-sm">
-          <input v-model="roleAllChannels" type="checkbox" />
-          Доступ ко всем каналам
-        </label>
-        <div v-if="!roleAllChannels" class="mb-3 rounded-xl border border-line bg-surface p-3">
-          <div class="mb-2 text-xs font-semibold text-muted">Доступ к каналам</div>
-          <div class="flex flex-wrap gap-2">
+        <div class="mb-3 rounded-xl border border-line bg-surface p-3">
+          <div class="mb-1 text-xs font-semibold text-muted">Доступ к диалогам в каналах</div>
+          <p class="mb-2 text-[11px] text-muted">
+            Это не раздел настроек «Каналы». Здесь — какие чаты видит сотрудник.
+          </p>
+          <label class="mb-2 flex items-center gap-2 text-sm">
+            <input v-model="roleAllChannels" type="checkbox" />
+            Доступ ко всем каналам
+          </label>
+          <div v-if="!roleAllChannels" class="flex flex-wrap gap-2">
             <label
               v-for="ch in employees.allChannels"
               :key="ch.id"
@@ -177,9 +184,15 @@ async function saveRole() {
             </label>
             <span v-if="!employees.allChannels.length" class="text-xs text-muted">Нет каналов</span>
           </div>
+          <p v-if="emptyChannelAclWarn" class="mt-2 text-xs text-danger">
+            Операторы с этой ролью не увидят ни одного чата — включите «все каналы» или выберите каналы.
+          </p>
         </div>
         <div class="mb-4 max-h-48 space-y-1.5 overflow-auto">
           <div class="mb-1 text-xs font-semibold text-muted">Права разделов</div>
+          <p class="mb-2 text-[11px] text-muted">
+            «Раздел „Каналы“ (настройки)» — только экран подключения/удаления каналов, не доступ к чатам.
+          </p>
           <label
             v-for="item in employees.catalog"
             :key="item.code"

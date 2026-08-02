@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,7 +42,7 @@ SECTION_LABELS: dict[str, str] = {
     SECTION_CHATS: "Чаты",
     SECTION_APPEALS: "Обращения",
     SECTION_MAILING: "Рассылки",
-    SECTION_CHANNELS: "Каналы",
+    SECTION_CHANNELS: "Раздел «Каналы» (настройки)",
     SECTION_EMPLOYEES: "Сотрудники",
     SECTION_TEMPLATES: "Шаблоны",
     SECTION_WEBHOOKS: "Webhooks",
@@ -59,7 +59,6 @@ LEGACY_PERMISSIONS: dict[str, set[str]] = {
         SECTION_CHATS,
         SECTION_APPEALS,
         SECTION_MAILING,
-        SECTION_CHANNELS,
         SECTION_TEMPLATES,
         ACTION_WRITE,
     },
@@ -79,12 +78,12 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
     {
         "slug": "operator",
         "name": "Оператор",
-        "all_channels": False,
+        # Dialog ACL is separate from the Channels settings section.
+        "all_channels": True,
         "permissions": [
             SECTION_CHATS,
             SECTION_APPEALS,
             SECTION_MAILING,
-            SECTION_CHANNELS,
             SECTION_TEMPLATES,
             ACTION_WRITE,
         ],
@@ -196,15 +195,30 @@ async def seed_access_roles(session: AsyncSession) -> dict[str, AccessRole]:
             for code in spec["permissions"]:
                 session.add(RolePermission(role_id=role.id, code=code))
         else:
+            # Keep all_channels in sync with system role defs (operator: True).
+            role.all_channels = bool(spec["all_channels"])
             existing = (
                 await session.execute(
                     select(RolePermission.code).where(RolePermission.role_id == role.id)
                 )
             ).scalars().all()
             have = set(existing)
-            for code in spec["permissions"]:
+            wanted = set(spec["permissions"])
+            for code in wanted:
                 if code not in have:
                     session.add(RolePermission(role_id=role.id, code=code))
+            # Narrow remove: drop rights that no longer belong on this system role.
+            # Custom roles are never touched (they have different slug / is_system=False).
+            obsolete = have - wanted
+            if obsolete and role.is_system:
+                # Only strip SECTION_CHANNELS from operator — other removals stay opt-in.
+                if role.slug == "operator" and SECTION_CHANNELS in obsolete:
+                    await session.execute(
+                        delete(RolePermission).where(
+                            RolePermission.role_id == role.id,
+                            RolePermission.code == SECTION_CHANNELS,
+                        )
+                    )
         by_slug[spec["slug"]] = role
     await session.flush()
     return by_slug
