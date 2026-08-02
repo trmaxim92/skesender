@@ -139,6 +139,23 @@ watch(
           <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
         </select>
       </label>
+      <label v-if="channels.selectedTransport === 'tgapi'" class="block">
+        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+          Прокси <span class="normal-case font-normal">(необязательно)</span>
+        </span>
+        <input
+          v-model="channels.proxyUrl"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="socks5://user:pass@host:port или host:port:user:pass"
+          class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 font-mono text-sm outline-none ring-brand focus:ring-2"
+        />
+        <span class="mt-1.5 block text-xs text-muted">
+          EU SOCKS5 для личного аккаунта (если с сервера MTProto режется). Пусто — общий
+          TELEGRAM_PROXY из сервера.
+        </span>
+      </label>
       <p v-if="channels.connectError" class="text-sm text-danger">{{ channels.connectError }}</p>
       <div class="flex justify-end gap-2">
         <button

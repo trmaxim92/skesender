@@ -286,6 +286,17 @@ async def start_telegram_qr(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(ACTION_MANAGE_CHANNELS)),
 ) -> MaxQrStartResponse:
+    from app.integrations.telegram_proxy import normalize_proxy_url
+
+    proxy_raw = (body.proxy or "").strip() or None
+    if proxy_raw:
+        try:
+            proxy_raw = normalize_proxy_url(proxy_raw)
+        except IntegrationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
     dept_id = await _resolve_department_id(db, body.department_id)
     channel = Channel(
         name=body.name or "Telegram аккаунт",
@@ -301,7 +312,9 @@ async def start_telegram_qr(
     await db.refresh(channel)
 
     try:
-        state = await telegram_user_runtime.start_qr_connect(channel.id)
+        state = await telegram_user_runtime.start_qr_connect(
+            channel.id, proxy=proxy_raw
+        )
     except IntegrationError as exc:
         channel.status = ChannelStatus.ERROR.value
         channel.last_error = str(exc)

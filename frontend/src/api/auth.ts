@@ -156,10 +156,18 @@ export async function startMaxQrRequest(name?: string, departmentId?: number | n
   })
 }
 
-export async function startTelegramQrRequest(name?: string, departmentId?: number | null) {
+export async function startTelegramQrRequest(
+  name?: string,
+  departmentId?: number | null,
+  proxy?: string | null,
+) {
   return api<MaxQrStartResponse>('/api/channels/tgapi/qr/start', {
     method: 'POST',
-    json: { name: name || null, department_id: departmentId ?? null },
+    json: {
+      name: name || null,
+      department_id: departmentId ?? null,
+      proxy: proxy?.trim() || null,
+    },
   })
 }
 

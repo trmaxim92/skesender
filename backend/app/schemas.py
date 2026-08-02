@@ -151,6 +151,8 @@ class ChannelConnectResult(BaseModel):
 class MaxQrStartRequest(BaseModel):
     name: str | None = None
     department_id: int | None = None
+    # Optional SOCKS/HTTP proxy for Telegram · аккаунт (ignored by MAX QR).
+    proxy: str | None = None
 
 
 class MaxQrStartResponse(BaseModel):

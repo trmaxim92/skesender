@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.integrations.base import IntegrationError
 from app.integrations.max_personal.auth_qr import BridgePasswordProvider
-from app.integrations.telegram_proxy import telethon_proxy
+from app.integrations.telegram_proxy import redact_proxy_url, telethon_proxy
 from app.integrations.telegram_user.inbox import ingest_telethon_message
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
 from app.realtime.publish import emit_event, message_created_event
@@ -69,6 +69,7 @@ class RuntimeState:
     hint: str | None = None
     error: str | None = None
     identity: str | None = None
+    proxy_url: str | None = None
     client: TelegramClient | None = None
     task: asyncio.Task | None = None
     password_bridge: BridgePasswordProvider = field(default_factory=BridgePasswordProvider)
@@ -89,12 +90,19 @@ class TelegramUserRuntime:
             return state.client
         return None
 
-    async def start_qr_connect(self, channel_id: int) -> RuntimeState:
+    async def start_qr_connect(
+        self, channel_id: int, *, proxy: str | None = None
+    ) -> RuntimeState:
         settings = get_settings()
         if not settings.telegram_api_id or not settings.telegram_api_hash:
             raise IntegrationError(
                 "Задайте TELEGRAM_API_ID и TELEGRAM_API_HASH в .env (my.telegram.org)"
             )
+
+        proxy_url = (proxy or "").strip() or None
+        if proxy_url:
+            # Validate early so UI gets a clear error before QR wait.
+            telethon_proxy(proxy_url)
 
         async with self._lock:
             existing = self._states.get(channel_id)
@@ -112,7 +120,9 @@ class TelegramUserRuntime:
             work_dir = Path(settings.telegram_user_data_dir) / f"ch_{channel_id}"
             _wipe_session_files(work_dir)
 
-            state = RuntimeState(channel_id=channel_id, status="connecting")
+            state = RuntimeState(
+                channel_id=channel_id, status="connecting", proxy_url=proxy_url
+            )
             self._states[channel_id] = state
             state.task = asyncio.create_task(
                 self._run_client(channel_id, work_dir, fresh=True),
@@ -228,7 +238,10 @@ class TelegramUserRuntime:
             if not meta:
                 return
             work_dir = Path(meta["work_dir"])
-            state = RuntimeState(channel_id=channel_id, status="connecting")
+            proxy_url = (meta.get("proxy") or "").strip() or None
+            state = RuntimeState(
+                channel_id=channel_id, status="connecting", proxy_url=proxy_url
+            )
             self._states[channel_id] = state
             state.task = asyncio.create_task(
                 self._run_client(channel_id, work_dir, fresh=False),
@@ -239,9 +252,13 @@ class TelegramUserRuntime:
         settings = get_settings()
         state = self._states[channel_id]
         session_path = str(work_dir / "session")
+        if not state.proxy_url and not fresh:
+            meta = await self._load_session_meta(channel_id)
+            if meta and meta.get("proxy"):
+                state.proxy_url = str(meta["proxy"]).strip() or None
         proxy = None
         try:
-            proxy = telethon_proxy()
+            proxy = telethon_proxy(state.proxy_url)
         except IntegrationError as exc:
             state.status = "error"
             state.error = str(exc)
@@ -269,9 +286,10 @@ class TelegramUserRuntime:
         if proxy is not None:
             client_kwargs["proxy"] = proxy
             logger.info(
-                "Telegram user channel=%s using proxy type=%s",
+                "Telegram user channel=%s using proxy type=%s source=%s",
                 channel_id,
                 proxy.get("proxy_type") if isinstance(proxy, dict) else proxy[0],
+                redact_proxy_url(state.proxy_url) if state.proxy_url else "env",
             )
 
         client = TelegramClient(
@@ -683,6 +701,8 @@ class TelegramUserRuntime:
             "session_name": "session",
             "external_id": external_id,
         }
+        if state.proxy_url:
+            creds["proxy"] = state.proxy_url
         state.status = "online"
         state.identity = identity
         state.error = None

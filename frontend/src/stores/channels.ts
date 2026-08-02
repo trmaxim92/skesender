@@ -28,6 +28,7 @@ export const useChannelsStore = defineStore('channels', () => {
   const channelName = ref('')
   const departmentId = ref<number | null>(null)
   const botToken = ref('')
+  const proxyUrl = ref('')
   const connecting = ref(false)
   const qrPendingId = ref<number | null>(null)
   const qrUrl = ref('')
@@ -67,6 +68,7 @@ export const useChannelsStore = defineStore('channels', () => {
     channelName.value = ''
     departmentId.value = null
     botToken.value = ''
+    proxyUrl.value = ''
     qrUrl.value = ''
     qrStatus.value = ''
     qrHint.value = ''
@@ -167,7 +169,11 @@ export const useChannelsStore = defineStore('channels', () => {
       const dept = departmentId.value
       const isTelegram = selectedTransport.value === 'tgapi'
       const result = isTelegram
-        ? await startTelegramQrRequest(name || 'Telegram аккаунт', dept)
+        ? await startTelegramQrRequest(
+            name || 'Telegram аккаунт',
+            dept,
+            proxyUrl.value.trim() || null,
+          )
         : await startMaxQrRequest(name || 'MAX аккаунт', dept)
       const mapped = mapChannel(result.channel)
       channels.value.unshift(mapped)
@@ -278,6 +284,7 @@ export const useChannelsStore = defineStore('channels', () => {
     channelName,
     departmentId,
     botToken,
+    proxyUrl,
     connecting,
     qrUrl,
     qrPendingId,
