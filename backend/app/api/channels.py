@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -406,6 +406,15 @@ async def delete_channel(
     if channel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
     transport = channel.transport
+
+    # ORM default would SET NULL on dialogs.channel_id (NOT NULL) → IntegrityError.
+    # Break appeal circular FK, then remove dialogs (messages/appeals cascade in DB).
+    await db.execute(
+        update(Dialog)
+        .where(Dialog.channel_id == channel_id)
+        .values(current_appeal_id=None)
+    )
+    await db.execute(delete(Dialog).where(Dialog.channel_id == channel_id))
     await db.delete(channel)
     await db.commit()
     # After DB delete so reconnect/restore sees a missing row and gives up.

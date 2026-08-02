@@ -248,7 +248,11 @@ class Channel(Base):
 
     created_by: Mapped[User | None] = relationship(back_populates="channels")
     department: Mapped[Department | None] = relationship(back_populates="channels")
-    dialogs: Mapped[list["Dialog"]] = relationship(back_populates="channel")
+    dialogs: Mapped[list["Dialog"]] = relationship(
+        back_populates="channel",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class Dialog(Base):
