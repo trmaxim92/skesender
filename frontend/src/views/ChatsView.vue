@@ -628,6 +628,7 @@ onUnmounted(() => {
             {{ claimBusy ? '…' : 'Забрать' }}
           </button>
           <button
+            v-if="canTransfer"
             type="button"
             class="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
             title="Передать другому менеджеру"
