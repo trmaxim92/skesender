@@ -257,6 +257,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/departments': 'section.employees',
   '/employees': 'section.employees',
   '/webhooks': 'section.webhooks',
+  '/settings': 'section.settings',
   '/settings/appeal-fields': 'section.settings',
   '/settings/client-fields': 'section.settings',
   '/settings/close-template': 'section.settings',
@@ -270,6 +271,7 @@ export const FIRST_SECTION_PATHS = [
   '/users',
   '/departments',
   '/webhooks',
+  '/settings',
   '/settings/appeal-fields',
   '/settings/close-template',
 ] as const

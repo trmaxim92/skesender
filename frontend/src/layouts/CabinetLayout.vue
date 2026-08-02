@@ -3,10 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   MessageSquare,
-  Radio,
   Users,
-  FileText,
-  Webhook,
   LogOut,
   Inbox,
   Megaphone,
@@ -15,12 +12,11 @@ import {
   ChevronDown,
   Settings,
   Building2,
-  FormInput,
-  IdCard,
   TextQuote,
   UserRound,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT } from '@/api/client'
+import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
 import { useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
 import {
@@ -46,23 +42,12 @@ const navFlat: NavLeaf[] = [
   { to: '/chats', label: 'Чаты', icon: MessageSquare },
   { to: '/appeals', label: 'Обращения', icon: Inbox },
   { to: '/mailing', label: 'Рассылки', icon: Megaphone },
-  { to: '/channels', label: 'Каналы', icon: Radio },
 ]
 
 const usersChildren: NavLeaf[] = [
   { to: '/users', label: 'Пользователи', icon: Users },
   { to: '/roles', label: 'Роли', icon: Shield },
   { to: '/departments', label: 'Отделы', icon: Building2 },
-]
-
-const settingsChildren: NavLeaf[] = [
-  { to: '/settings/appeal-fields', label: 'Поля обращения', icon: FormInput },
-  { to: '/settings/client-fields', label: 'Карточка клиента', icon: IdCard },
-  { to: '/settings/close-template', label: 'Закрытие обращения', icon: FileText },
-]
-
-const navTail: NavLeaf[] = [
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook },
 ]
 
 const collapsed = ref(localStorage.getItem(SIDEBAR_KEY) === '1')
@@ -73,20 +58,25 @@ const usersGroupExpanded = ref(
     route.path.startsWith('/departments'),
 )
 const settingsGroupExpanded = ref(
-  localStorage.getItem(SETTINGS_GROUP_KEY) !== '0',
+  localStorage.getItem(SETTINGS_GROUP_KEY) !== '0' || isSettingsPath(route.path),
 )
 const profileOpen = ref(false)
 const profileRoot = ref<HTMLElement | null>(null)
 
-const showUsersGroup = computed(() => auth.canSection('/users'))
-const showSettingsGroup = computed(
-  () =>
-    auth.can('section.settings') ||
-    auth.can('action.manage_users') ||
-    auth.canSection('/settings/appeal-fields'),
+const settingsGroupsVisible = computed(() =>
+  SETTINGS_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => auth.can(item.permission)),
+  })).filter((group) => group.items.length > 0),
 )
+
+const settingsFlatLeaves = computed(() =>
+  settingsGroupsVisible.value.flatMap((group) => group.items),
+)
+
+const showUsersGroup = computed(() => auth.canSection('/users'))
+const showSettingsGroup = computed(() => settingsGroupsVisible.value.length > 0)
 const navBefore = computed(() => navFlat.filter((item) => auth.canSection(item.to)))
-const navAfter = computed(() => navTail.filter((item) => auth.canSection(item.to)))
 
 const onUsersSection = computed(
   () =>
@@ -94,12 +84,7 @@ const onUsersSection = computed(
     route.path.startsWith('/roles') ||
     route.path.startsWith('/departments'),
 )
-const onSettingsSection = computed(
-  () =>
-    route.path.startsWith('/settings/appeal-fields') ||
-    route.path.startsWith('/settings/client-fields') ||
-    route.path.startsWith('/settings/close-template'),
-)
+const onSettingsSection = computed(() => isSettingsPath(route.path))
 
 const title = computed(() => {
   if (route.path === '/profile' || route.path.startsWith('/profile?')) return 'Профиль'
@@ -109,10 +94,9 @@ const title = computed(() => {
   if (route.path.startsWith('/users')) return 'Пользователи'
   if (route.path.startsWith('/roles')) return 'Роли'
   if (route.path.startsWith('/departments')) return 'Отделы'
-  if (route.path.startsWith('/settings/appeal-fields')) return 'Поля обращения'
-  if (route.path.startsWith('/settings/client-fields')) return 'Карточка клиента'
-  if (route.path.startsWith('/settings/close-template')) return 'Закрытие обращения'
-  const all = [...navFlat, ...usersChildren, ...settingsChildren, ...navTail]
+  const settingsTitle = settingsLeafTitle(route.path)
+  if (settingsTitle) return settingsTitle
+  const all = [...navFlat, ...usersChildren]
   return all.find((n) => route.path.startsWith(n.to))?.label ?? 'Кабинет'
 })
 
@@ -373,40 +357,68 @@ onUnmounted(() => {
 
         <div v-if="showSettingsGroup" class="mt-0.5">
           <template v-if="!collapsed">
-            <button
-              type="button"
-              class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
+            <div
+              class="flex w-full items-center gap-1 rounded-lg text-sm font-medium text-muted"
               :class="onSettingsSection ? 'text-ink' : ''"
-              @click="toggleSettingsGroup"
             >
-              <Settings class="size-4 shrink-0" />
-              <span class="min-w-0 flex-1 truncate text-left whitespace-nowrap">Настройки</span>
-              <ChevronDown
-                class="size-4 shrink-0 transition-transform duration-200"
-                :class="settingsGroupExpanded ? 'rotate-0' : '-rotate-90'"
-              />
-            </button>
+              <RouterLink
+                to="/settings"
+                class="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2.5 transition hover:bg-surface hover:text-ink"
+                active-class="!bg-brand-soft !text-brand"
+              >
+                <Settings class="size-4 shrink-0" />
+                <span class="truncate whitespace-nowrap">Настройки</span>
+              </RouterLink>
+              <button
+                type="button"
+                class="mr-1 rounded-lg p-2 transition hover:bg-surface hover:text-ink"
+                :title="settingsGroupExpanded ? 'Свернуть' : 'Развернуть'"
+                @click="toggleSettingsGroup"
+              >
+                <ChevronDown
+                  class="size-4 shrink-0 transition-transform duration-200"
+                  :class="settingsGroupExpanded ? 'rotate-0' : '-rotate-90'"
+                />
+              </button>
+            </div>
             <div
               class="grid transition-[grid-template-rows] duration-200 ease-out"
               :class="settingsGroupExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
             >
               <div class="overflow-hidden">
-                <RouterLink
-                  v-for="item in settingsChildren"
-                  :key="item.to"
-                  :to="item.to"
-                  class="ml-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-                  active-class="!bg-brand-soft !text-brand"
+                <div
+                  v-for="group in settingsGroupsVisible"
+                  :key="group.id"
+                  class="mt-1 first:mt-0"
                 >
-                  <component :is="item.icon" class="size-4 shrink-0" />
-                  <span class="truncate whitespace-nowrap">{{ item.label }}</span>
-                </RouterLink>
+                  <div class="ml-2 px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted/80">
+                    {{ group.title }}
+                  </div>
+                  <RouterLink
+                    v-for="item in group.items"
+                    :key="item.to"
+                    :to="item.to"
+                    class="ml-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
+                    active-class="!bg-brand-soft !text-brand"
+                  >
+                    <component :is="item.icon" class="size-4 shrink-0" />
+                    <span class="truncate whitespace-nowrap">{{ item.label }}</span>
+                  </RouterLink>
+                </div>
               </div>
             </div>
           </template>
           <template v-else>
             <RouterLink
-              v-for="item in settingsChildren"
+              to="/settings"
+              class="flex items-center justify-center rounded-lg px-2 py-2.5 text-muted transition hover:bg-surface hover:text-ink"
+              title="Настройки"
+              active-class="!bg-brand-soft !text-brand"
+            >
+              <Settings class="size-4 shrink-0" />
+            </RouterLink>
+            <RouterLink
+              v-for="item in settingsFlatLeaves"
               :key="item.to"
               :to="item.to"
               class="flex items-center justify-center rounded-lg px-2 py-2.5 text-muted transition hover:bg-surface hover:text-ink"
@@ -417,19 +429,6 @@ onUnmounted(() => {
             </RouterLink>
           </template>
         </div>
-
-        <RouterLink
-          v-for="item in navAfter"
-          :key="item.to"
-          :to="item.to"
-          class="flex items-center gap-2.5 rounded-lg py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-          :class="collapsed ? 'justify-center px-2' : 'px-3'"
-          :title="collapsed ? item.label : undefined"
-          active-class="!bg-brand-soft !text-brand"
-        >
-          <component :is="item.icon" class="size-4 shrink-0" />
-          <span v-if="!collapsed" class="truncate whitespace-nowrap">{{ item.label }}</span>
-        </RouterLink>
       </nav>
     </aside>
 

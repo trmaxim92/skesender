@@ -88,6 +88,11 @@ const router = createRouter({
           redirect: '/profile/templates',
         },
         {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/settings/SettingsHomeView.vue'),
+        },
+        {
           path: 'settings/close-template',
           name: 'close-template',
           component: () => import('@/views/settings/CloseTemplateView.vue'),
@@ -131,6 +136,15 @@ router.beforeEach(async (to) => {
     return auth.firstAllowedPath()
   }
   if (auth.isAuthenticated) {
+    if (to.name === 'settings') {
+      if (
+        !auth.can('section.settings') &&
+        !auth.can('section.channels') &&
+        !auth.can('section.webhooks')
+      ) {
+        return auth.firstAllowedPath()
+      }
+    }
     const perm = to.meta.permission as PermissionCode | undefined
     if (perm && !auth.can(perm)) {
       return auth.firstAllowedPath()
