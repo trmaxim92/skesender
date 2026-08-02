@@ -79,6 +79,14 @@ const canClaim = computed(
     !chats.activeDialog.assigneeId,
 )
 
+const canTransfer = computed(
+  () =>
+    canWrite.value &&
+    !!chats.activeDialog &&
+    chats.canCompose &&
+    chats.activeDialog.assigneeId === auth.user?.id,
+)
+
 const headerAppealNumber = computed(
   () => chats.viewingAppeal?.number ?? chats.activeDialog?.appealNumber ?? null,
 )

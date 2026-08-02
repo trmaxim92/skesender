@@ -1276,12 +1276,28 @@ async def assign_dialog(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dialog not found")
     await _require_dialog_access(user, dialog_obj, db)
 
-    if body.assignee_id is not None:
+    current_assignee = dialog_obj.assignee_id
+    new_assignee = body.assignee_id
+
+    if current_assignee is None:
+        # Unassigned: only self-claim (or no-op keep null).
+        if new_assignee is not None and new_assignee != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Свободное обращение можно только забрать себе",
+            )
+    elif current_assignee != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Передать обращение может только ответственный менеджер",
+        )
+
+    if new_assignee is not None:
         assignee = (
             await db.execute(
                 select(User)
                 .options(selectinload(User.department_memberships), selectinload(User.access_role))
-                .where(User.id == body.assignee_id)
+                .where(User.id == new_assignee)
             )
         ).scalar_one_or_none()
         if assignee is None or not assignee.is_active:
@@ -1297,7 +1313,7 @@ async def assign_dialog(
                     detail="Менеджер не состоит в отделе этого чата",
                 )
 
-    dialog_obj.assignee_id = body.assignee_id
+    dialog_obj.assignee_id = new_assignee
     await db.commit()
     result = await db.execute(
         select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog_id)
