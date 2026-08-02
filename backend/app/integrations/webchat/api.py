@@ -148,6 +148,7 @@ async def create_widget_session(
         visitor_id = f"v_{secrets.token_urlsafe(12)}"
 
     contact_name = (body.contact_name or "").strip() or "Посетитель сайта"
+    contact_phone = (body.contact_phone or "").strip() or None
     dialog = await get_or_create_dialog(
         db,
         channel=channel,
@@ -156,6 +157,10 @@ async def create_widget_session(
         contact_name=contact_name,
         contact_username=None,
     )
+    if contact_name:
+        dialog.contact_name = contact_name
+    if contact_phone:
+        dialog.contact_phone = contact_phone
     await ensure_open_appeal(db, dialog)
     await db.commit()
 

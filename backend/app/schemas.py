@@ -575,6 +575,7 @@ class WidgetSessionRequest(BaseModel):
     public_key: str = Field(min_length=8, max_length=128)
     visitor_id: str | None = Field(default=None, max_length=64)
     contact_name: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=64)
 
 
 class WidgetSessionOut(BaseModel):
