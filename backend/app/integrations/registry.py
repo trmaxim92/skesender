@@ -6,6 +6,7 @@ from app.integrations.max_personal.adapter import MaxPersonalAdapter
 from app.integrations.telegram_bot.adapter import TelegramBotAdapter
 from app.integrations.telegram_user.adapter import TelegramUserAdapter
 from app.integrations.vk.adapter import VkAdapter
+from app.integrations.webchat.adapter import WebchatAdapter
 from app.models import ChannelTransport
 
 _adapters: dict[ChannelTransport, ChannelAdapter] = {
@@ -14,6 +15,7 @@ _adapters: dict[ChannelTransport, ChannelAdapter] = {
     ChannelTransport.TELEGRAM: TelegramBotAdapter(),
     ChannelTransport.TGAPI: TelegramUserAdapter(),
     ChannelTransport.VK: VkAdapter(),
+    ChannelTransport.WEBCHAT: WebchatAdapter(),
 }
 
 

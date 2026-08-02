@@ -38,11 +38,29 @@ from app.schemas import (
     MaxQrStartResponse,
     MaxQrStatusResponse,
     TelegramConnectRequest,
+    WebchatConnectRequest,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/channels", tags=["channels"])
+
+
+def _webchat_public_key(ch: Channel) -> str | None:
+    if ch.transport != ChannelTransport.WEBCHAT.value:
+        return None
+    if ch.external_id:
+        return ch.external_id
+    if not ch.meta_json:
+        return None
+    try:
+        import json
+
+        meta = json.loads(ch.meta_json)
+        key = meta.get("public_key")
+        return str(key) if key else None
+    except Exception:
+        return None
 
 
 def to_channel_out(ch: Channel) -> ChannelOut:
@@ -60,6 +78,7 @@ def to_channel_out(ch: Channel) -> ChannelOut:
         has_credentials=bool(ch.credentials_enc),
         department_id=ch.department_id,
         department_name=dept.name if dept is not None else None,
+        public_key=_webchat_public_key(ch),
     )
 
 
@@ -133,10 +152,44 @@ async def update_channel(
             .where(Dialog.channel_id == channel.id)
             .values(department_id=new_dept)
         )
+    if body.status is not None:
+        if channel.transport != ChannelTransport.WEBCHAT.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Смену статуса поддерживает только канал «Виджет на сайт»",
+            )
+        if body.status not in (ChannelStatus.ONLINE, ChannelStatus.OFFLINE):
+            raise HTTPException(status_code=400, detail="Допустимы статусы online или offline")
+        channel.status = body.status.value
+        channel.last_error = None
     await db.commit()
     loaded = await _load_channel(db, channel_id)
     assert loaded is not None
     return to_channel_out(loaded)
+
+
+@router.post("/webchat", response_model=ChannelConnectResult)
+async def connect_webchat(
+    body: WebchatConnectRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(ACTION_MANAGE_CHANNELS)),
+) -> ChannelConnectResult:
+    adapter = get_adapter(ChannelTransport.WEBCHAT)
+    try:
+        channel, info = await adapter.connect(
+            db,
+            credentials={"allowed_origins": body.allowed_origins},
+            created_by_id=user.id,
+            name=body.name,
+        )
+        channel.department_id = await _resolve_department_id(db, body.department_id)
+        await db.commit()
+        channel = await _load_channel(db, channel.id)
+        assert channel is not None
+    except IntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ChannelConnectResult(channel=to_channel_out(channel), bot=info)
 
 
 @router.post("/maxbot", response_model=ChannelConnectResult)

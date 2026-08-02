@@ -33,6 +33,7 @@ class ChannelTransport(StrEnum):
     TELEGRAM = "telegram"
     TGAPI = "tgapi"
     VK = "vk"
+    WEBCHAT = "webchat"
 
 
 class ChannelStatus(StrEnum):

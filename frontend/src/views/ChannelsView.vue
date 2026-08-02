@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Copy, Pencil, Plus, Power, Trash2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
 import { transportLabel, type Channel, type Department } from '@/types'
@@ -25,6 +25,11 @@ const deleteChannel = ref<Channel | null>(null)
 const deleteBusy = ref(false)
 const deleteError = ref('')
 
+const snippetOpen = ref(false)
+const snippetChannel = ref<Channel | null>(null)
+const snippetCopied = ref(false)
+const toggleBusyId = ref<number | null>(null)
+
 onMounted(async () => {
   void channels.fetchChannels()
   try {
@@ -46,6 +51,7 @@ const transportTone = computed(() => ({
   telegram: 'bg-tg text-white',
   tgapi: 'bg-tg text-white',
   vk: 'bg-vk text-white',
+  webchat: 'bg-brand text-white',
 }))
 
 const sortedChannels = computed(() =>
@@ -56,6 +62,41 @@ const sortedChannels = computed(() =>
     return a.name.localeCompare(b.name, 'ru')
   }),
 )
+
+function embedSnippet(ch: Channel): string {
+  const key = ch.publicKey || ''
+  const src = `${window.location.origin}/widget.js`
+  return `<script src="${src}" data-key="${key}" async><\/script>`
+}
+
+function openSnippet(ch: Channel) {
+  snippetChannel.value = ch
+  snippetCopied.value = false
+  snippetOpen.value = true
+}
+
+function closeSnippet() {
+  snippetOpen.value = false
+  snippetChannel.value = null
+}
+
+async function copySnippet() {
+  if (!snippetChannel.value) return
+  try {
+    await navigator.clipboard.writeText(embedSnippet(snippetChannel.value))
+    snippetCopied.value = true
+  } catch {
+    snippetCopied.value = false
+  }
+}
+
+async function toggleWebchat(ch: Channel) {
+  if (toggleBusyId.value != null) return
+  const next = ch.status === 'online' ? 'offline' : 'online'
+  toggleBusyId.value = ch.id
+  await channels.updateChannel(ch.id, { status: next })
+  toggleBusyId.value = null
+}
 
 function openEdit(ch: Channel) {
   editChannel.value = ch
@@ -212,15 +253,85 @@ watch(
           </div>
         </div>
         <div class="flex items-center justify-between text-xs text-muted">
-          <span>{{ ch.hasCredentials ? 'токен сохранён' : 'без credentials' }}</span>
+          <span>
+            {{
+              ch.transport === 'webchat'
+                ? ch.publicKey || 'виджет'
+                : ch.hasCredentials
+                  ? 'токен сохранён'
+                  : 'без credentials'
+            }}
+          </span>
           <span v-if="ch.connectedAt">
             с {{ new Date(ch.connectedAt).toLocaleDateString('ru-RU') }}
           </span>
+        </div>
+        <div v-if="ch.transport === 'webchat' && canManage" class="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+            @click="openSnippet(ch)"
+          >
+            <Copy class="size-3.5" />
+            Код для сайта
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold transition"
+            :class="
+              ch.status === 'online'
+                ? 'text-ok hover:border-ok/40 hover:bg-ok/10'
+                : 'text-muted hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
+            "
+            :disabled="toggleBusyId === ch.id"
+            @click="toggleWebchat(ch)"
+          >
+            <Power class="size-3.5" />
+            {{
+              toggleBusyId === ch.id
+                ? '…'
+                : ch.status === 'online'
+                  ? 'Выключить'
+                  : 'Включить'
+            }}
+          </button>
         </div>
       </article>
     </div>
 
     <AddChannelModal v-if="channels.connectOpen && canManage" />
+
+    <Modal
+      v-if="snippetOpen && snippetChannel"
+      title="Код виджета"
+      @close="closeSnippet"
+    >
+      <div class="space-y-3">
+        <p class="text-sm text-muted">
+          Вставьте этот код перед <span class="font-mono">&lt;/body&gt;</span> на сайте.
+        </p>
+        <pre
+          class="overflow-x-auto rounded-xl border border-line bg-surface p-3 text-xs leading-relaxed text-ink"
+        >{{ embedSnippet(snippetChannel) }}</pre>
+        <p class="font-mono text-[11px] text-muted">Ключ: {{ snippetChannel.publicKey }}</p>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-xl px-4 py-2 text-sm text-muted hover:bg-surface"
+            @click="closeSnippet"
+          >
+            Закрыть
+          </button>
+          <button
+            type="button"
+            class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
+            @click="copySnippet"
+          >
+            {{ snippetCopied ? 'Скопировано' : 'Копировать' }}
+          </button>
+        </div>
+      </div>
+    </Modal>
 
     <Modal v-if="editOpen && editChannel" title="Редактировать канал" @close="closeEdit">
       <div class="space-y-4">

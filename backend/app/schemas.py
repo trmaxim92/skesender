@@ -114,6 +114,7 @@ class ChannelOut(BaseModel):
     has_credentials: bool = False
     department_id: int | None = None
     department_name: str | None = None
+    public_key: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -121,6 +122,7 @@ class ChannelOut(BaseModel):
 class ChannelUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     department_id: int | None = None
+    status: ChannelStatus | None = None
 
 
 class MaxBotConnectRequest(BaseModel):
@@ -133,6 +135,12 @@ class TelegramConnectRequest(BaseModel):
     token: str = Field(min_length=10)
     name: str | None = None
     department_id: int | None = None
+
+
+class WebchatConnectRequest(BaseModel):
+    name: str | None = None
+    department_id: int | None = None
+    allowed_origins: list[str] = Field(default_factory=list)
 
 
 class ChannelConnectResult(BaseModel):
@@ -562,3 +570,28 @@ class MailingCampaignCreateRequest(BaseModel):
     recipients_text: str = Field(min_length=1, max_length=2_000_000)
 
 
+
+class WidgetSessionRequest(BaseModel):
+    public_key: str = Field(min_length=8, max_length=128)
+    visitor_id: str | None = Field(default=None, max_length=64)
+    contact_name: str | None = Field(default=None, max_length=255)
+
+
+class WidgetSessionOut(BaseModel):
+    visitor_token: str
+    visitor_id: str
+    dialog_id: int
+    channel_name: str
+    channel_online: bool
+
+
+class WidgetMessageCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class WidgetMessageOut(BaseModel):
+    id: int
+    external_id: str | None = None
+    direction: MessageDirection
+    text: str
+    created_at: datetime

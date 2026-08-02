@@ -12,6 +12,7 @@ const qrDataUrl = ref('')
 const departments = ref<Department[]>([])
 
 const options: { transport: ChannelTransport; hint: string; ready: boolean }[] = [
+  { transport: 'webchat', hint: 'Чат-виджет для вставки на сайт', ready: true },
   { transport: 'maxbot', hint: 'Токен бота из кабинета MAX', ready: true },
   { transport: 'max', hint: 'Личный аккаунт по QR (PyMax)', ready: true },
   { transport: 'telegram', hint: 'Токен от @BotFather', ready: true },

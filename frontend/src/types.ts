@@ -17,7 +17,7 @@ export type PermissionCode =
 export type FieldType = 'text' | 'textarea' | 'number' | 'phone' | 'select' | 'date' | 'bool'
 export type FieldScope = 'client' | 'appeal'
 
-export type ChannelTransport = 'maxbot' | 'max' | 'telegram' | 'tgapi' | 'vk'
+export type ChannelTransport = 'maxbot' | 'max' | 'telegram' | 'tgapi' | 'vk' | 'webchat'
 
 export type ChannelStatus = 'online' | 'connecting' | 'qr_pending' | 'offline' | 'error'
 
@@ -93,6 +93,7 @@ export interface Channel {
   hasCredentials?: boolean
   departmentId?: number | null
   departmentName?: string | null
+  publicKey?: string | null
 }
 
 export interface Dialog {
@@ -222,6 +223,7 @@ export const transportLabel: Record<ChannelTransport, string> = {
   telegram: 'Telegram · бот',
   tgapi: 'Telegram · аккаунт',
   vk: 'ВКонтакте',
+  webchat: 'Виджет на сайт',
 }
 
 /** Short badge text for lists */
@@ -231,6 +233,7 @@ export const transportBadge: Record<ChannelTransport, string> = {
   telegram: 'TG',
   tgapi: 'TG',
   vk: 'VK',
+  webchat: 'WEB',
 }
 
 export const transportBadgeClass: Record<ChannelTransport, string> = {
@@ -239,6 +242,7 @@ export const transportBadgeClass: Record<ChannelTransport, string> = {
   telegram: 'bg-tg text-white',
   tgapi: 'bg-tg text-white',
   vk: 'bg-vk text-white',
+  webchat: 'bg-brand text-white',
 }
 
 export const roleLabel: Record<Role, string> = {

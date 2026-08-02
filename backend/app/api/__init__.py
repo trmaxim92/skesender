@@ -15,6 +15,7 @@ from app.api import (
     webhooks,
     ws,
 )
+from app.integrations.webchat import api as widget_api
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
@@ -30,3 +31,4 @@ api_router.include_router(settings_fields.router)
 api_router.include_router(templates.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(ws.router)
+api_router.include_router(widget_api.router)

@@ -72,6 +72,7 @@ async function save() {
           class="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-sm"
         >
           <option value="all">Все каналы</option>
+          <option value="webchat">Виджет на сайт</option>
           <option value="maxbot">MAX · бот</option>
           <option value="max">MAX · аккаунт</option>
           <option value="telegram">Telegram · бот</option>

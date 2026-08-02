@@ -308,6 +308,31 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def widget_cors(request, call_next):
+        """Allow any Origin for public widget API (Bearer token, no cookies)."""
+        if not request.url.path.startswith("/api/widget"):
+            return await call_next(request)
+        origin = request.headers.get("origin") or "*"
+        if request.method == "OPTIONS":
+            from starlette.responses import Response
+
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Origin",
+                    "Access-Control-Max-Age": "86400",
+                    "Vary": "Origin",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        return response
+
     app.include_router(api_router)
 
     @app.get("/health")

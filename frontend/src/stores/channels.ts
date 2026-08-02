@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   connectMaxBotRequest,
   connectTelegramBotRequest,
+  connectWebchatRequest,
   deleteChannelRequest,
   listChannelsRequest,
   mapChannel,
@@ -109,6 +110,25 @@ export const useChannelsStore = defineStore('channels', () => {
       connectStep.value = 'bot_token'
     } else if (transport === 'max' || transport === 'tgapi') {
       void startQr()
+    } else if (transport === 'webchat') {
+      void connectWebchat()
+    }
+  }
+
+  async function connectWebchat() {
+    connectError.value = ''
+    connecting.value = true
+    try {
+      const name = channelName.value.trim()
+      const dept = departmentId.value
+      const result = await connectWebchatRequest(name, dept)
+      const mapped = mapChannel(result.channel)
+      channels.value.unshift(mapped)
+      closeConnect()
+    } catch (e) {
+      connectError.value = e instanceof ApiError ? e.detail : 'Ошибка создания виджета'
+    } finally {
+      connecting.value = false
     }
   }
 
@@ -209,19 +229,25 @@ export const useChannelsStore = defineStore('channels', () => {
     }
   }
 
-  async function updateChannel(id: number, payload: { name?: string; departmentId?: number }) {
+  async function updateChannel(
+    id: number,
+    payload: { name?: string; departmentId?: number; status?: 'online' | 'offline' },
+  ) {
     try {
       const updated = await updateChannelRequest(id, {
         name: payload.name,
         department_id: payload.departmentId,
+        status: payload.status,
       })
       const idx = channels.value.findIndex((c) => c.id === id)
       if (idx >= 0) {
         channels.value[idx] = {
           ...channels.value[idx],
           name: updated.name,
+          status: updated.status as Channel['status'],
           departmentId: updated.department_id,
           departmentName: updated.department_name,
+          publicKey: updated.public_key ?? channels.value[idx].publicKey,
         }
       }
       return true

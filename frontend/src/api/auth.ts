@@ -28,6 +28,7 @@ interface ApiChannel {
   has_credentials: boolean
   department_id?: number | null
   department_name?: string | null
+  public_key?: string | null
 }
 
 interface TokenResponse {
@@ -69,6 +70,7 @@ export function mapChannel(ch: ApiChannel): Channel {
     hasCredentials: ch.has_credentials,
     departmentId: ch.department_id ?? null,
     departmentName: ch.department_name ?? null,
+    publicKey: ch.public_key ?? ch.external_id ?? null,
   }
 }
 
@@ -121,6 +123,13 @@ export async function connectTelegramBotRequest(
   return api<ChannelConnectResult>('/api/channels/telegram', {
     method: 'POST',
     json: { token, name: name || null, department_id: departmentId ?? null },
+  })
+}
+
+export async function connectWebchatRequest(name?: string, departmentId?: number | null) {
+  return api<ChannelConnectResult>('/api/channels/webchat', {
+    method: 'POST',
+    json: { name: name || null, department_id: departmentId ?? null, allowed_origins: [] },
   })
 }
 

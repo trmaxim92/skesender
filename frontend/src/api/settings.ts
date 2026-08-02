@@ -116,7 +116,7 @@ export async function deleteFieldRequest(id: number) {
 
 export async function updateChannelRequest(
   id: number,
-  payload: { name?: string; department_id?: number },
+  payload: { name?: string; department_id?: number; status?: string },
 ) {
   return api<{
     id: number
@@ -129,5 +129,6 @@ export async function updateChannelRequest(
     connected_at: string | null
     last_error: string | null
     has_credentials: boolean
+    public_key?: string | null
   }>(`/api/channels/${id}`, { method: 'PATCH', json: payload })
 }

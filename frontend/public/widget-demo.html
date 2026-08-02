@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkySender widget demo</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Georgia, 'Times New Roman', serif;
+        background: linear-gradient(160deg, #f8fafc, #e2e8f0);
+        color: #0f172a;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      main {
+        max-width: 36rem;
+      }
+      h1 {
+        font-size: 2rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        line-height: 1.5;
+        color: #475569;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        background: #fff;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.35rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Демо страницы с виджетом</h1>
+      <p>
+        Откройте код вставки канала «Виджет на сайт» и подставьте ключ в
+        <code>data-key</code> ниже (или передайте <code>?key=...</code>).
+      </p>
+    </main>
+    <script>
+      ;(function () {
+        var key = new URLSearchParams(location.search).get('key') || 'REPLACE_PUBLIC_KEY'
+        var s = document.createElement('script')
+        s.src = '/widget.js'
+        s.async = true
+        s.setAttribute('data-key', key)
+        document.body.appendChild(s)
+      })()
+    </script>
+  </body>
+</html>
