@@ -480,10 +480,28 @@ export const useChatsStore = defineStore('chats', () => {
     }
   }
 
+  function resolveAppealIdForDialog(dialogId: string, preferred?: number | null): number | null {
+    const dialog = dialogs.value.find((d) => d.id === dialogId)
+    const preferredId = preferred !== undefined ? preferred : viewingAppealId.value
+    if (preferredId != null) {
+      if (dialogAppeals.value.some((a) => a.id === preferredId)) return preferredId
+      if (dialog?.appealId === preferredId) return preferredId
+      // Stale appeal from another dialog — don't send it.
+    }
+    if (dialog?.appealId != null) return dialog.appealId
+    if (dialogAppeals.value.length) {
+      return dialogAppeals.value[dialogAppeals.value.length - 1]?.id ?? null
+    }
+    return null
+  }
+
   async function fetchMessages(dialogId: string, appealId?: number | null) {
     const reqId = ++messagesRequestId
     const requested = dialogId
-    const targetAppealId = appealId ?? viewingAppealId.value
+    const targetAppealId = resolveAppealIdForDialog(dialogId, appealId)
+    if (activeDialogId.value === dialogId && viewingAppealId.value !== targetAppealId) {
+      viewingAppealId.value = targetAppealId
+    }
     loadingMessages.value = true
     hasMoreMessages.value = false
     try {
@@ -520,7 +538,7 @@ export const useChatsStore = defineStore('chats', () => {
       const page = await listMessagesRequest(Number(dialogId), {
         limit: 50,
         beforeId: Number(oldest.id),
-        appealId: viewAppeal,
+        appealId: resolveAppealIdForDialog(dialogId, viewAppeal),
       })
       if (
         reqId !== olderRequestId ||
@@ -566,7 +584,8 @@ export const useChatsStore = defineStore('chats', () => {
     dialogAppeals.value = []
     const dialog = dialogs.value.find((d) => d.id === id)
     viewingAppealId.value = dialog?.appealId ?? null
-    await Promise.all([fetchDialogAppeals(id), fetchMessages(id, viewingAppealId.value)])
+    await fetchDialogAppeals(id)
+    await fetchMessages(id, viewingAppealId.value)
   }
 
   function setReplyTo(message: Message | null) {
@@ -612,18 +631,32 @@ export const useChatsStore = defineStore('chats', () => {
     await fetchDialogs({ reloadMessages: false })
     if (pinned) {
       activeDialogId.value = pinned
+      const dialog = dialogs.value.find((d) => d.id === pinned)
       if (!dialogs.value.some((d) => d.id === pinned)) {
         // Keep viewing claimed/transferred dialog outside current filter list.
-        await fetchMessages(pinned)
+        viewingAppealId.value = dialog?.appealId ?? viewingAppealId.value
+        await fetchDialogAppeals(pinned)
+        await fetchMessages(pinned, viewingAppealId.value)
       } else if (!messages.value.some((m) => m.dialogId === pinned)) {
-        await fetchMessages(pinned)
+        viewingAppealId.value = dialog?.appealId ?? null
+        await fetchDialogAppeals(pinned)
+        await fetchMessages(pinned, viewingAppealId.value)
       }
       return
     }
     if (activeDialogId.value && !dialogs.value.some((d) => d.id === activeDialogId.value)) {
       activeDialogId.value = dialogs.value[0]?.id ?? null
-      if (activeDialogId.value) await fetchMessages(activeDialogId.value)
-      else messages.value = []
+      if (activeDialogId.value) {
+        const dialog = dialogs.value.find((d) => d.id === activeDialogId.value)
+        viewingAppealId.value = dialog?.appealId ?? null
+        dialogAppeals.value = []
+        await fetchDialogAppeals(activeDialogId.value)
+        await fetchMessages(activeDialogId.value, viewingAppealId.value)
+      } else {
+        viewingAppealId.value = null
+        dialogAppeals.value = []
+        messages.value = []
+      }
     }
   }
 
@@ -632,8 +665,17 @@ export const useChatsStore = defineStore('chats', () => {
     await fetchDialogs({ reloadMessages: false })
     if (activeDialogId.value && !dialogs.value.some((d) => d.id === activeDialogId.value)) {
       activeDialogId.value = dialogs.value[0]?.id ?? null
-      if (activeDialogId.value) await fetchMessages(activeDialogId.value)
-      else messages.value = []
+      if (activeDialogId.value) {
+        const dialog = dialogs.value.find((d) => d.id === activeDialogId.value)
+        viewingAppealId.value = dialog?.appealId ?? null
+        dialogAppeals.value = []
+        await fetchDialogAppeals(activeDialogId.value)
+        await fetchMessages(activeDialogId.value, viewingAppealId.value)
+      } else {
+        viewingAppealId.value = null
+        dialogAppeals.value = []
+        messages.value = []
+      }
     }
   }
 
@@ -653,10 +695,8 @@ export const useChatsStore = defineStore('chats', () => {
     dialogAppeals.value = []
     const dialog = dialogs.value.find((d) => d.id === dialogId)
     viewingAppealId.value = dialog?.appealId ?? null
-    await Promise.all([
-      fetchDialogAppeals(dialogId),
-      fetchMessages(dialogId, viewingAppealId.value),
-    ])
+    await fetchDialogAppeals(dialogId)
+    await fetchMessages(dialogId, viewingAppealId.value)
     try {
       const data = await fetchSidebarRequest(Number(dialogId))
       const assigneeId = data.client.assignee_id ?? null
