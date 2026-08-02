@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.integrations.base import IntegrationError
 from app.integrations.max_personal.auth_qr import BridgePasswordProvider
+from app.integrations.telegram_proxy import telethon_proxy
 from app.integrations.telegram_user.inbox import ingest_telethon_message
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
 from app.realtime.publish import emit_event, message_created_event
@@ -27,46 +28,9 @@ logger = logging.getLogger(__name__)
 _MTPROTO_FAIL_HINT = (
     "Не удалось подключиться к серверам Telegram (MTProto). "
     "HTTP Bot API может работать, а DC для личного аккаунта — нет (файрвол/провайдер). "
-    "Включите VPN или задайте TELEGRAM_PROXY в backend/.env "
-    "(например socks5://127.0.0.1:1080)."
+    "Задайте TELEGRAM_PROXY в backend/.env "
+    "(EU SOCKS или локальный WARP: socks5://127.0.0.1:40000)."
 )
-
-
-def _telethon_proxy() -> dict[str, Any] | tuple[str, str, int] | None:
-    """Parse TELEGRAM_PROXY into a Telethon proxy config."""
-    raw = (get_settings().telegram_proxy or "").strip()
-    if not raw:
-        return None
-    from urllib.parse import unquote, urlparse
-
-    parsed = urlparse(raw)
-    scheme = (parsed.scheme or "").lower()
-    host = parsed.hostname
-    port = parsed.port
-    if not host or not port:
-        raise IntegrationError(
-            "TELEGRAM_PROXY должен быть URL вида socks5://host:1080 или http://host:8080"
-        )
-    if scheme in {"socks5", "socks5h"}:
-        proxy_type = "socks5"
-    elif scheme in {"socks4", "socks4a"}:
-        proxy_type = "socks4"
-    elif scheme in {"http", "https"}:
-        proxy_type = "http"
-    else:
-        raise IntegrationError(f"Неподдерживаемый TELEGRAM_PROXY scheme: {scheme}")
-
-    cfg: dict[str, Any] = {
-        "proxy_type": proxy_type,
-        "addr": host,
-        "port": int(port),
-        "rdns": True,
-    }
-    if parsed.username:
-        cfg["username"] = unquote(parsed.username)
-    if parsed.password:
-        cfg["password"] = unquote(parsed.password)
-    return cfg
 
 
 @dataclass
@@ -248,7 +212,7 @@ class TelegramUserRuntime:
         session_path = str(work_dir / "session")
         proxy = None
         try:
-            proxy = _telethon_proxy()
+            proxy = telethon_proxy()
         except IntegrationError as exc:
             state.status = "error"
             state.error = str(exc)

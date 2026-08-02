@@ -67,6 +67,7 @@ MAX_PERSONAL_DATA_DIR=./data/max_personal
 TELEGRAM_API_ID=26368063
 TELEGRAM_API_HASH=e16c6d63c89cf3a8bc15d6f6b118e55b
 TELEGRAM_USER_DATA_DIR=./data/telegram_user
+# socks5://user:pass@EU_HOST:1080  or  socks5://127.0.0.1:40000 (WARP)
 TELEGRAM_PROXY=
 EOF
 chmod 600 "$APP_DIR/backend/.env"

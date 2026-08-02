@@ -257,6 +257,12 @@ async def lifespan(_: FastAPI):
     # with external pub/sub + leader election). Do not run --workers > 1.
     settings = get_settings()
     logger.info("Starting %s (single-worker realtime/mailing)", settings.app_name)
+    try:
+        from app.integrations.telegram_proxy import log_telegram_proxy_status
+
+        await log_telegram_proxy_status()
+    except Exception:
+        logger.exception("Telegram proxy health check failed")
     await ensure_schema()
     async with SessionLocal() as session:
         await seed_database(session)

@@ -6,8 +6,17 @@ from typing import Any
 import httpx
 
 from app.integrations.base import IntegrationError
+from app.integrations.telegram_proxy import httpx_proxy
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
+
+def _http_client(timeout: float, *, follow_redirects: bool = False) -> httpx.AsyncClient:
+    kwargs: dict[str, Any] = {"timeout": timeout, "follow_redirects": follow_redirects}
+    proxy = httpx_proxy()
+    if proxy:
+        kwargs["proxy"] = proxy
+    return httpx.AsyncClient(**kwargs)
 
 
 class TelegramApiError(IntegrationError):
@@ -39,7 +48,7 @@ async def _call(
 ) -> dict[str, Any]:
     url = f"{_base_url(token)}/{method}"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with _http_client(timeout) as client:
             if files is not None:
                 response = await client.post(url, data=params or {}, files=files)
             elif json_body is not None:
@@ -225,7 +234,7 @@ async def get_file(token: str, file_id: str) -> dict[str, Any]:
 async def download_file(token: str, file_path: str) -> bytes:
     url = f"{TELEGRAM_API_BASE}/file/bot{token.strip()}/{file_path.lstrip('/')}"
     try:
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        async with _http_client(60.0, follow_redirects=True) as client:
             response = await client.get(url)
     except httpx.HTTPError as exc:
         raise TelegramApiError(f"Telegram file download error: {exc}") from exc

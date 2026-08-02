@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     telegram_api_id: int = 0
     telegram_api_hash: str = ""
     telegram_user_data_dir: str = str(BACKEND_DIR / "data" / "telegram_user")
-    # Optional MTProto proxy, e.g. socks5://user:pass@host:1080 or http://host:8080
+    # Optional proxy for Bot API + MTProto, e.g. socks5://user:pass@host:1080
+    # On RU hosts use EU SOCKS or local Cloudflare WARP proxy (see scripts/setup-*.sh)
     telegram_proxy: str = ""
     attachments_dir: str = str(BACKEND_DIR / "data" / "attachments")
     attachment_max_bytes: int = 50 * 1024 * 1024
