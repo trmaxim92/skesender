@@ -69,7 +69,7 @@
         if (!('Notification' in window)) return log('нет API')
         if (Notification.permission !== 'granted') return log('нет permission=granted')
         try {
-          const n = new Notification('Order Elite smoke', {
+          const n = new Notification('SkySender smoke', {
             body: 'Если видишь этот тост — браузер умеет пуши',
             tag: 'oe-smoke-' + Date.now(),
           })
@@ -86,7 +86,7 @@
         log('через 2с покажем тост — переключись на другую вкладку/окно')
         setTimeout(() => {
           if (Notification.permission !== 'granted') return log('нет permission')
-          new Notification('Order Elite (фон)', {
+          new Notification('SkySender (фон)', {
             body: `visibility=${document.visibilityState}`,
             tag: 'oe-smoke-bg-' + Date.now(),
           })

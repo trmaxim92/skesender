@@ -33,7 +33,7 @@ import {
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
 const USERS_GROUP_KEY = 'oe_nav_users_open'
 const SETTINGS_GROUP_KEY = 'oe_nav_settings_open'
-const BASE_TITLE = 'Order Elite'
+const BASE_TITLE = 'SkySender'
 
 const auth = useAuthStore()
 const chats = useChatsStore()
@@ -298,7 +298,7 @@ onUnmounted(() => {
           class="min-w-0 overflow-hidden transition-opacity duration-200"
           :class="collapsed ? 'pointer-events-none w-0 opacity-0' : 'flex-1 opacity-100'"
         >
-          <div class="truncate text-sm font-bold tracking-tight">Order Elite</div>
+          <div class="truncate text-sm font-bold tracking-tight">SkySender</div>
           <div class="truncate text-[11px] text-muted">омниканальный кабинет</div>
         </div>
       </div>
@@ -536,7 +536,7 @@ onUnmounted(() => {
           <div class="min-w-0 flex-1 pt-0.5">
             <div class="flex items-start justify-between gap-2">
               <div class="truncate text-[13px] font-semibold text-ink">
-                {{ inAppToast.title || (inAppToast.kind === 'err' ? 'Ошибка' : 'Order Elite') }}
+                {{ inAppToast.title || (inAppToast.kind === 'err' ? 'Ошибка' : 'SkySender') }}
               </div>
               <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted"
                 >сейчас</span

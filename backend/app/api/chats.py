@@ -754,7 +754,7 @@ async def send_dialog_message(
             len(uploads),
             send_error,
         )
-        response.headers["X-Order-Elite-Warning"] = (
+        response.headers["X-SkySender-Warning"] = (
             f"Отправлено {len(created)} из {len(uploads)}: {send_error}"
         )[:500]
     return outs[-1]

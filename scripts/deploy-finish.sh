@@ -19,7 +19,7 @@ mkdir -p data/max_personal data/telegram_user data/attachments
 
 cat > /etc/systemd/system/order-elite.service <<'UNIT'
 [Unit]
-Description=Order Elite API
+Description=SkySender API
 After=network.target postgresql.service
 Requires=postgresql.service
 

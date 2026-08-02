@@ -176,7 +176,7 @@ export async function sendMessageRequest(
         : `HTTP ${response.status}`
     throw new ApiError(response.status, detail)
   }
-  const warning = response.headers.get('X-Order-Elite-Warning') || undefined
+  const warning = response.headers.get('X-SkySender-Warning') || undefined
   return { message: data as ApiMessage, warning }
 }
 

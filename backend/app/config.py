@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "Order Elite"
+    app_name: str = "SkySender"
     debug: bool = True
     secret_key: str
     database_url: str

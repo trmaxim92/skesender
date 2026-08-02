@@ -38,7 +38,7 @@ async function submit() {
       @submit.prevent="submit"
     >
       <div class="mb-6">
-        <div class="mb-1 text-2xl font-bold tracking-tight">Order Elite</div>
+        <div class="mb-1 text-2xl font-bold tracking-tight">SkySender</div>
         <p class="text-sm text-muted">Вход в кабинет операторов</p>
       </div>
 

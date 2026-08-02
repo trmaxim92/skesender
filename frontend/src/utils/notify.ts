@@ -162,7 +162,7 @@ async function ensureNotifySw(): Promise<ServiceWorkerRegistration | null> {
 }
 
 function formatOsTitle(payload: IncomingNotifyPayload, force?: boolean): string {
-  if (force) return 'Order Elite'
+  if (force) return 'SkySender'
   const name = (payload.contactName || 'Клиент').trim()
   return name
 }
@@ -286,7 +286,7 @@ export async function testOsPush(): Promise<{ ok: boolean; reason: string; permi
   const result = await showOsNotification(
     {
       dialogId: 'test',
-      contactName: 'Order Elite',
+      contactName: 'SkySender',
       text: 'Так будут выглядеть входящие сообщения',
       isActiveDialog: false,
     },

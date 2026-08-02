@@ -1,4 +1,4 @@
-# Order Elite
+# SkySender
 
 CRM для переписки с клиентами (аналог Wazzup): FastAPI + Vue 3 + Tailwind.
 

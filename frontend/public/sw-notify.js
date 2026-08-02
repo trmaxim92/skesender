@@ -1,4 +1,4 @@
-/* Order Elite notify service worker */
+/* SkySender notify service worker */
 const ICON = '/oe-notify-icon.png'
 const BADGE = '/oe-badge.png'
 
@@ -41,7 +41,7 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('message', (event) => {
   const data = event.data
   if (!data || data.type !== 'oe:show-notification') return
-  const title = data.title || 'Order Elite'
+  const title = data.title || 'SkySender'
   const options = data.options || {}
   event.waitUntil(
     self.registration.showNotification(title, {

@@ -59,10 +59,10 @@ async def dispatch_webhook_event(event_type: str, payload: dict[str, Any]) -> No
             continue
         if event_type not in events:
             continue
-        headers = {"Content-Type": "application/json", "X-Order-Elite-Event": event_type}
+        headers = {"Content-Type": "application/json", "X-SkySender-Event": event_type}
         if row.secret:
             sig = hmac.new(row.secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-            headers["X-Order-Elite-Signature"] = f"sha256={sig}"
+            headers["X-SkySender-Signature"] = f"sha256={sig}"
         try:
             response = await client.post(row.url, content=raw, headers=headers)
             if response.status_code >= 400:

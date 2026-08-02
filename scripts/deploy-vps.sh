@@ -51,7 +51,7 @@ SQL
 
 echo "==> backend .env"
 cat > "$APP_DIR/backend/.env" <<EOF
-APP_NAME=Order Elite
+APP_NAME=SkySender
 DEBUG=false
 SECRET_KEY=${SECRET}
 DATABASE_URL=postgresql+asyncpg://orderelite:${DB_PASS}@127.0.0.1:5432/orderelite
@@ -90,7 +90,7 @@ npm run build
 echo "==> systemd"
 cat > /etc/systemd/system/order-elite.service <<'UNIT'
 [Unit]
-Description=Order Elite API
+Description=SkySender API
 After=network.target postgresql.service
 Requires=postgresql.service
 
