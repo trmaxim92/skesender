@@ -848,10 +848,17 @@ async def close_dialog_appeal(
         tpl_result = await db.execute(
             select(MessageTemplate)
             .where(MessageTemplate.kind == TemplateKind.APPEAL_CLOSED.value)
-            .order_by(MessageTemplate.updated_at.desc())
+            .order_by(
+                # Prefer system (shared) template over personal leftovers.
+                MessageTemplate.created_by_id.is_not(None),
+                MessageTemplate.updated_at.desc(),
+            )
         )
         templates = list(tpl_result.scalars().all())
-        tpl = next((t for t in templates if t.transport in {channel.transport, "all"}), None)
+        # Prefer ownerless system row, then transport match.
+        system = [t for t in templates if t.created_by_id is None]
+        pool = system or templates
+        tpl = next((t for t in pool if t.transport in {channel.transport, "all"}), None)
         if tpl is not None:
             reply_text = (
                 tpl.body.replace("{{operator}}", user.name)

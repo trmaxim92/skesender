@@ -43,7 +43,6 @@ export const useAuthStore = defineStore('auth', () => {
         code === 'section.chats' ||
         code === 'section.appeals' ||
         code === 'section.mailing' ||
-        code === 'section.templates' ||
         code === 'action.write'
       )
     }

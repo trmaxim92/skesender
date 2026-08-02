@@ -36,22 +36,11 @@ const myTemplates = useMyTemplatesStore()
 const auth = useAuthStore()
 
 const composerTemplateGroups = computed((): TemplateGroup[] => {
-  const transport = chats.activeDialog?.transport
-  const groups = [...myTemplates.forTransportGrouped(transport)]
-  const shared = templates.forTransport(transport)
-  if (shared.length) {
-    groups.push({
-      categoryId: '__shared__',
-      categoryName: 'Общие',
-      templates: shared,
-    })
-  }
-  return groups
+  return [...myTemplates.forTransportGrouped(chats.activeDialog?.transport)]
 })
 
 const composerTemplates = computed(() => [
   ...myTemplates.forTransport(chats.activeDialog?.transport),
-  ...templates.forTransport(chats.activeDialog?.transport),
 ])
 
 const canWrite = computed(() => auth.can('action.write'))
@@ -359,7 +348,7 @@ watch(
 onMounted(async () => {
   await Promise.all([
     chats.fetchOperators(),
-    templates.fetchTemplates(),
+    templates.fetchCloseTemplate(),
     myTemplates.fetchAll(),
     chats.fetchUnreadSummary(),
     channels.fetchChannels(),

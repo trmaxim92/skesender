@@ -29,7 +29,6 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     SECTION_MAILING,
     SECTION_CHANNELS,
     SECTION_EMPLOYEES,
-    SECTION_TEMPLATES,
     SECTION_WEBHOOKS,
     SECTION_SETTINGS,
     ACTION_WRITE,
@@ -44,7 +43,7 @@ SECTION_LABELS: dict[str, str] = {
     SECTION_MAILING: "Рассылки",
     SECTION_CHANNELS: "Раздел «Каналы» (настройки)",
     SECTION_EMPLOYEES: "Сотрудники",
-    SECTION_TEMPLATES: "Шаблоны",
+    SECTION_TEMPLATES: "Шаблоны (устарело)",
     SECTION_WEBHOOKS: "Webhooks",
     SECTION_SETTINGS: "Настройки",
     ACTION_WRITE: "Запись (ответы, рассылки)",
@@ -59,7 +58,6 @@ LEGACY_PERMISSIONS: dict[str, set[str]] = {
         SECTION_CHATS,
         SECTION_APPEALS,
         SECTION_MAILING,
-        SECTION_TEMPLATES,
         ACTION_WRITE,
     },
     Role.VIEWER.value: {
@@ -84,7 +82,6 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
             SECTION_CHATS,
             SECTION_APPEALS,
             SECTION_MAILING,
-            SECTION_TEMPLATES,
             ACTION_WRITE,
         ],
     },
@@ -210,13 +207,13 @@ async def seed_access_roles(session: AsyncSession) -> dict[str, AccessRole]:
             # Narrow remove: drop rights that no longer belong on this system role.
             # Custom roles are never touched (they have different slug / is_system=False).
             obsolete = have - wanted
-            if obsolete and role.is_system:
-                # Only strip SECTION_CHANNELS from operator — other removals stay opt-in.
-                if role.slug == "operator" and SECTION_CHANNELS in obsolete:
+            if obsolete and role.is_system and role.slug == "operator":
+                drop = obsolete & {SECTION_CHANNELS, SECTION_TEMPLATES}
+                if drop:
                     await session.execute(
                         delete(RolePermission).where(
                             RolePermission.role_id == role.id,
-                            RolePermission.code == SECTION_CHANNELS,
+                            RolePermission.code.in_(drop),
                         )
                     )
         by_slug[spec["slug"]] = role

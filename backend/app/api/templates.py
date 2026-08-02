@@ -5,23 +5,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import ChannelTransport, MessageTemplate, Role, User
-from app.rbac import ACTION_WRITE, SECTION_TEMPLATES, require_permission
-from app.schemas import TemplateCreateRequest, TemplateOut, TemplateUpdateRequest
+from app.models import ChannelTransport, MessageTemplate, TemplateKind, User
+from app.rbac import (
+    ACTION_MANAGE_USERS,
+    SECTION_CHATS,
+    SECTION_SETTINGS,
+    load_user_rbac,
+    require_permission,
+    user_can,
+)
+from app.schemas import TemplateOut, TemplateUpdateRequest
+from app.deps import get_current_user
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
 _ALLOWED_TRANSPORTS = {"all", *[t.value for t in ChannelTransport]}
+_DEFAULT_CLOSE_BODY = (
+    "Ваше обращение №{{appeal}} закрыто. Если вопрос останется — напишите нам снова."
+)
 
 
 def _validate_transport(value: str) -> str:
     if value not in _ALLOWED_TRANSPORTS:
         raise HTTPException(status_code=400, detail=f"Invalid transport: {value}")
     return value
-
-
-def _is_admin(user: User) -> bool:
-    return user.role == Role.ADMIN.value
 
 
 def _template_out(tpl: MessageTemplate) -> TemplateOut:
@@ -40,86 +47,86 @@ def _template_out(tpl: MessageTemplate) -> TemplateOut:
     )
 
 
-@router.get("", response_model=list[TemplateOut])
-async def list_templates(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission(SECTION_TEMPLATES)),
-) -> list[TemplateOut]:
-    """Общие шаблоны (командные / для рассылки ответов)."""
-    result = await db.execute(
+async def _get_system_close(db: AsyncSession) -> MessageTemplate | None:
+    """Prefer shared (ownerless) appeal_closed; fall back to any row."""
+    shared = await db.execute(
         select(MessageTemplate)
-        .where(MessageTemplate.created_by_id.is_(None))
+        .where(
+            MessageTemplate.kind == TemplateKind.APPEAL_CLOSED.value,
+            MessageTemplate.created_by_id.is_(None),
+        )
         .order_by(MessageTemplate.updated_at.desc())
+        .limit(1)
     )
-    return [_template_out(t) for t in result.scalars().all()]
+    row = shared.scalar_one_or_none()
+    if row is not None:
+        return row
+    any_row = await db.execute(
+        select(MessageTemplate)
+        .where(MessageTemplate.kind == TemplateKind.APPEAL_CLOSED.value)
+        .order_by(MessageTemplate.updated_at.desc())
+        .limit(1)
+    )
+    return any_row.scalar_one_or_none()
 
 
-@router.post("", response_model=TemplateOut, status_code=status.HTTP_201_CREATED)
-async def create_template(
-    body: TemplateCreateRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(ACTION_WRITE)),
-) -> TemplateOut:
-    # Shared catalog — no owner; also require section.templates via write+section for UI
-    if not _is_admin(user):
-        # Operators with write can add shared if they have templates section
-        from app.rbac import user_can
-
-        if not user_can(user, SECTION_TEMPLATES):
-            raise HTTPException(status_code=403, detail="Permission denied")
+async def ensure_system_close_template(db: AsyncSession) -> MessageTemplate:
+    existing = await _get_system_close(db)
+    if existing is not None:
+        if existing.created_by_id is not None:
+            existing.created_by_id = None
+            await db.flush()
+        return existing
     tpl = MessageTemplate(
-        name=body.name.strip(),
-        body=body.body.strip(),
-        transport=_validate_transport(body.transport),
-        kind=body.kind.value,
-        category_id=None,
+        name="Обращение закрыто",
+        body=_DEFAULT_CLOSE_BODY,
+        transport="all",
+        kind=TemplateKind.APPEAL_CLOSED.value,
         created_by_id=None,
     )
     db.add(tpl)
+    await db.flush()
+    return tpl
+
+
+@router.get("/close", response_model=TemplateOut)
+async def get_close_template(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TemplateOut:
+    """System close-appeal message — readable by anyone who can chat."""
+    loaded = await load_user_rbac(db, user)
+    if not (
+        user_can(loaded, SECTION_CHATS)
+        or user_can(loaded, SECTION_SETTINGS)
+        or user_can(loaded, ACTION_MANAGE_USERS)
+    ):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    tpl = await ensure_system_close_template(db)
     await db.commit()
     await db.refresh(tpl)
     return _template_out(tpl)
 
 
-@router.patch("/{template_id:int}", response_model=TemplateOut)
-async def update_template(
-    template_id: int,
+@router.put("/close", response_model=TemplateOut)
+async def update_close_template(
     body: TemplateUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(ACTION_WRITE)),
+    user: User = Depends(require_permission(SECTION_SETTINGS)),
 ) -> TemplateOut:
-    from app.rbac import user_can
-
-    if not _is_admin(user) and not user_can(user, SECTION_TEMPLATES):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    tpl = await db.get(MessageTemplate, template_id)
-    if tpl is None or tpl.created_by_id is not None:
-        raise HTTPException(status_code=404, detail="Template not found")
+    """Admin/settings: edit the single system close-appeal template."""
+    tpl = await ensure_system_close_template(db)
     if body.name is not None:
-        tpl.name = body.name.strip()
+        tpl.name = body.name.strip() or tpl.name
     if body.body is not None:
-        tpl.body = body.body.strip()
+        text = body.body.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Пустой текст шаблона")
+        tpl.body = text
     if body.transport is not None:
         tpl.transport = _validate_transport(body.transport)
-    if body.kind is not None:
-        tpl.kind = body.kind.value
+    tpl.kind = TemplateKind.APPEAL_CLOSED.value
+    tpl.created_by_id = None
     await db.commit()
     await db.refresh(tpl)
     return _template_out(tpl)
-
-
-@router.delete("/{template_id:int}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_template(
-    template_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(ACTION_WRITE)),
-) -> None:
-    from app.rbac import user_can
-
-    if not _is_admin(user) and not user_can(user, SECTION_TEMPLATES):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    tpl = await db.get(MessageTemplate, template_id)
-    if tpl is None or tpl.created_by_id is not None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    await db.delete(tpl)
-    await db.commit()

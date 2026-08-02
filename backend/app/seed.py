@@ -127,10 +127,13 @@ async def seed_database(session: AsyncSession) -> None:
         if exists_ud is None:
             session.add(UserDepartment(user_id=u.id, department_id=dept.id))
 
-    closed_tpl = await session.execute(
-        select(MessageTemplate).where(MessageTemplate.kind == TemplateKind.APPEAL_CLOSED.value).limit(1)
+    closed = await session.execute(
+        select(MessageTemplate)
+        .where(MessageTemplate.kind == TemplateKind.APPEAL_CLOSED.value)
+        .order_by(MessageTemplate.id.asc())
     )
-    if closed_tpl.scalar_one_or_none() is None:
+    closed_rows = list(closed.scalars().all())
+    if not closed_rows:
         session.add(
             MessageTemplate(
                 name="Обращение закрыто",
@@ -140,10 +143,26 @@ async def seed_database(session: AsyncSession) -> None:
                 ),
                 transport="all",
                 kind=TemplateKind.APPEAL_CLOSED.value,
-                created_by_id=admin.id if admin else None,
+                created_by_id=None,
             )
         )
-        logger.info("Seeded appeal_closed template")
+        logger.info("Seeded system appeal_closed template")
+    else:
+        # Promote first close template to shared system template.
+        primary = closed_rows[0]
+        if primary.created_by_id is not None:
+            primary.created_by_id = None
+            logger.info("Promoted appeal_closed template id=%s to system", primary.id)
+
+    # Drop leftover shared general templates from the old team catalog (keep personal).
+    stale = await session.execute(
+        select(MessageTemplate).where(
+            MessageTemplate.created_by_id.is_(None),
+            MessageTemplate.kind == TemplateKind.GENERAL.value,
+        )
+    )
+    for row in stale.scalars().all():
+        await session.delete(row)
 
     token = settings.seed_max_bot_token.strip()
     if not token:

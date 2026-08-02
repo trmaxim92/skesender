@@ -66,10 +66,10 @@ const usersChildren: NavLeaf[] = [
 const settingsChildren: NavLeaf[] = [
   { to: '/settings/appeal-fields', label: 'Поля обращения', icon: FormInput },
   { to: '/settings/client-fields', label: 'Карточка клиента', icon: IdCard },
+  { to: '/settings/close-template', label: 'Закрытие обращения', icon: FileText },
 ]
 
 const navTail: NavLeaf[] = [
-  { to: '/templates', label: 'Шаблоны', icon: FileText },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook },
 ]
 
@@ -105,7 +105,8 @@ const onUsersSection = computed(
 const onSettingsSection = computed(
   () =>
     route.path.startsWith('/settings/appeal-fields') ||
-    route.path.startsWith('/settings/client-fields'),
+    route.path.startsWith('/settings/client-fields') ||
+    route.path.startsWith('/settings/close-template'),
 )
 
 const title = computed(() => {
@@ -116,6 +117,7 @@ const title = computed(() => {
   if (route.path.startsWith('/departments')) return 'Отделы'
   if (route.path.startsWith('/settings/appeal-fields')) return 'Поля обращения'
   if (route.path.startsWith('/settings/client-fields')) return 'Карточка клиента'
+  if (route.path.startsWith('/settings/close-template')) return 'Закрытие обращения'
   const all = [...navFlat, ...usersChildren, ...settingsChildren, ...navTail]
   return all.find((n) => route.path.startsWith(n.to))?.label ?? 'Кабинет'
 })

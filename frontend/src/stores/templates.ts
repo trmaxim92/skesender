@@ -1,14 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import {
-  createTemplateRequest,
-  deleteTemplateRequest,
-  listTemplatesRequest,
-  updateTemplateRequest,
-  type ApiTemplate,
-} from '@/api/cabinet'
-import { ApiError } from '@/api/client'
-import type { ChannelTransport, Template, TemplateKind } from '@/types'
+import { api, ApiError } from '@/api/client'
+import type { ApiTemplate } from '@/api/cabinet'
+import type { ChannelTransport, Template } from '@/types'
 
 function mapTemplate(t: ApiTemplate): Template {
   return {
@@ -16,7 +10,7 @@ function mapTemplate(t: ApiTemplate): Template {
     name: t.name,
     body: t.body,
     transport: t.transport,
-    kind: t.kind ?? 'general',
+    kind: t.kind ?? 'appeal_closed',
     categoryId: null,
     categoryName: null,
     isMine: false,
@@ -24,92 +18,65 @@ function mapTemplate(t: ApiTemplate): Template {
   }
 }
 
-/** Общие шаблоны раздела «Шаблоны». */
+/** System close-appeal template (single shared row). */
 export const useTemplatesStore = defineStore('templates', () => {
-  const templates = ref<Template[]>([])
+  const closeTemplate = ref<Template | null>(null)
   const loading = ref(false)
   const error = ref('')
+  const saving = ref(false)
 
-  async function fetchTemplates() {
+  async function fetchCloseTemplate() {
     loading.value = true
     error.value = ''
     try {
-      const list = await listTemplatesRequest()
-      templates.value = list.map(mapTemplate)
+      const row = await api<ApiTemplate>('/api/templates/close')
+      closeTemplate.value = mapTemplate(row)
     } catch (e) {
-      error.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить шаблоны'
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить шаблон закрытия'
+      closeTemplate.value = null
     } finally {
       loading.value = false
     }
   }
 
-  async function addTemplate(
-    name: string,
-    body: string,
-    transport: ChannelTransport | 'all',
-    kind: TemplateKind = 'general',
-  ) {
+  async function saveCloseTemplate(payload: {
+    name?: string
+    body: string
+    transport?: ChannelTransport | 'all'
+  }) {
+    saving.value = true
+    error.value = ''
     try {
-      const created = await createTemplateRequest({ name, body, transport, kind })
-      templates.value.unshift(mapTemplate(created))
+      const row = await api<ApiTemplate>('/api/templates/close', {
+        method: 'PUT',
+        json: payload,
+      })
+      closeTemplate.value = mapTemplate(row)
       return true
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить'
       return false
+    } finally {
+      saving.value = false
     }
-  }
-
-  async function updateTemplate(
-    id: string,
-    payload: {
-      name?: string
-      body?: string
-      transport?: ChannelTransport | 'all'
-      kind?: TemplateKind
-    },
-  ) {
-    try {
-      const updated = await updateTemplateRequest(Number(id), payload)
-      const mapped = mapTemplate(updated)
-      templates.value = templates.value.map((t) => (t.id === id ? mapped : t))
-      return true
-    } catch (e) {
-      error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить'
-      return false
-    }
-  }
-
-  async function removeTemplate(id: string) {
-    try {
-      await deleteTemplateRequest(Number(id))
-      templates.value = templates.value.filter((t) => t.id !== id)
-    } catch (e) {
-      error.value = e instanceof ApiError ? e.detail : 'Не удалось удалить'
-    }
-  }
-
-  function forTransport(transport: ChannelTransport | null | undefined) {
-    return templates.value.filter(
-      (t) => t.kind === 'general' && (t.transport === 'all' || t.transport === transport),
-    )
   }
 
   function closeTemplateFor(transport: ChannelTransport | null | undefined) {
-    const list = templates.value.filter(
-      (t) => t.kind === 'appeal_closed' && (t.transport === 'all' || t.transport === transport),
-    )
-    return list[0] ?? null
+    const t = closeTemplate.value
+    if (!t) return null
+    if (t.transport === 'all' || t.transport === transport) return t
+    return null
   }
 
   return {
-    templates,
+    closeTemplate,
     loading,
     error,
-    fetchTemplates,
-    addTemplate,
-    updateTemplate,
-    removeTemplate,
-    forTransport,
+    saving,
+    fetchCloseTemplate,
+    saveCloseTemplate,
     closeTemplateFor,
+    /** @deprecated use fetchCloseTemplate */
+    fetchTemplates: fetchCloseTemplate,
   }
 })

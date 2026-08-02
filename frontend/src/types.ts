@@ -256,10 +256,10 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/roles': 'section.employees',
   '/departments': 'section.employees',
   '/employees': 'section.employees',
-  '/templates': 'section.templates',
   '/webhooks': 'section.webhooks',
   '/settings/appeal-fields': 'section.settings',
   '/settings/client-fields': 'section.settings',
+  '/settings/close-template': 'section.settings',
 }
 
 export const FIRST_SECTION_PATHS = [
@@ -269,9 +269,9 @@ export const FIRST_SECTION_PATHS = [
   '/channels',
   '/users',
   '/departments',
-  '/templates',
   '/webhooks',
   '/settings/appeal-fields',
+  '/settings/close-template',
 ] as const
 
 export const statusLabel: Record<ChannelStatus, string> = {

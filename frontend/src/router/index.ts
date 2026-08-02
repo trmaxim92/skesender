@@ -75,9 +75,13 @@ const router = createRouter({
         },
         {
           path: 'templates',
-          name: 'templates',
-          component: () => import('@/views/TemplatesView.vue'),
-          meta: { permission: 'section.templates' },
+          redirect: '/profile/templates',
+        },
+        {
+          path: 'settings/close-template',
+          name: 'close-template',
+          component: () => import('@/views/settings/CloseTemplateView.vue'),
+          meta: { permission: 'section.settings' },
         },
         {
           path: 'profile/templates',
