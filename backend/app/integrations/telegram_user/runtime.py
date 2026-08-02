@@ -34,9 +34,10 @@ _MTPROTO_FAIL_HINT = (
 )
 
 _AUTH_KEY_HINT = (
-    "Сессия Telegram сброшена (ключ не зарегистрирован). "
-    "В приложении Telegram: Настройки → Устройства — завершите сессии Desktop/trmaxim, "
-    "удалите этот канал в SkySender и подключите заново одним сканом QR."
+    "Telegram принял вход, но сразу сбросил MTProto-ключ (AuthKeyUnregistered). "
+    "Частая причина на RU-сервере — WARP с выходом в РФ (СПб): нужен EU SOCKS в TELEGRAM_PROXY. "
+    "В Telegram: Настройки → Устройства — завершите сессии SkySender/trmaxim, "
+    "затем подключите канал снова одним сканом QR."
 )
 
 
@@ -258,6 +259,12 @@ class TelegramUserRuntime:
             "connection_retries": 10,
             "retry_delay": 2,
             "flood_sleep_threshold": 0,
+            "use_ipv6": False,
+            "device_model": "SkySender",
+            "system_version": "Linux",
+            "app_version": "1.0",
+            "lang_code": "ru",
+            "system_lang_code": "ru",
         }
         if proxy is not None:
             client_kwargs["proxy"] = proxy
@@ -378,19 +385,103 @@ class TelegramUserRuntime:
 
     async def _stabilize_authorized_session(self, client: TelegramClient) -> None:
         """Reconnect and verify get_me after QR — avoids stale AuthKeyUnregistered."""
-        try:
-            if client.is_connected():
-                await client.disconnect()
-        except Exception:
-            pass
-        await asyncio.sleep(0.8)
-        await client.connect()
-        if not await client.is_user_authorized():
-            raise IntegrationError("Telegram QR login did not authorize the session")
-        me = await client.get_me()
-        if me is None:
-            raise IntegrationError(_AUTH_KEY_HINT)
+        me = await self._reconnect_until_authorized(client)
         logger.info("Telegram session stabilized as id=%s", getattr(me, "id", None))
+
+    async def _reconnect_until_authorized(
+        self, client: TelegramClient, *, attempts: int = 7
+    ) -> Any:
+        """After CheckPassword/QR, GetState often 401s once under WARP; retry on fresh TCP."""
+        last_exc: BaseException | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                if client.is_connected():
+                    await client.disconnect()
+            except Exception:
+                pass
+            await asyncio.sleep(min(0.5 * attempt, 2.5))
+            await client.connect()
+            try:
+                me = await client.get_me()
+                if me is not None:
+                    client._authorized = True  # type: ignore[attr-defined]
+                    return me
+                last_exc = IntegrationError("get_me returned empty after login")
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Telegram authorize reconnect attempt=%s/%s: %s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+                if not _is_auth_key_error(exc):
+                    raise
+        raise IntegrationError(_AUTH_KEY_HINT) from last_exc
+
+    async def _finalize_authorization(
+        self, client: TelegramClient, user: Any | None = None
+    ) -> None:
+        """Run Telethon _on_login when possible; recover if GetState immediately 401s."""
+        if user is not None:
+            try:
+                await client._on_login(user)
+                return
+            except Exception as exc:
+                if not _is_auth_key_error(exc):
+                    raise
+                logger.warning(
+                    "Telegram _on_login GetState failed after auth; reconnecting: %s",
+                    exc,
+                )
+                try:
+                    client._mb_entity_cache.set_self_user(
+                        user.id, user.bot, user.access_hash
+                    )
+                    client._authorized = True  # type: ignore[attr-defined]
+                    client.session.save()
+                except Exception:
+                    logger.exception("Failed to persist Telegram user after partial login")
+        await self._reconnect_until_authorized(client)
+
+    async def _complete_qr_2fa(self, client: TelegramClient, password: str) -> None:
+        """Finish QR login when ExportLoginToken raised SessionPasswordNeededError."""
+        from telethon.password import compute_check
+
+        pwd = await client(functions.account.GetPasswordRequest())
+        result = await client(
+            functions.auth.CheckPasswordRequest(compute_check(pwd, password))
+        )
+        settings = get_settings()
+        export_req = functions.auth.ExportLoginTokenRequest(
+            settings.telegram_api_id,
+            settings.telegram_api_hash,
+            [],
+        )
+        # After 2FA, Telegram may still need a successful LoginToken export/import.
+        try:
+            resp = await client(export_req)
+            if isinstance(resp, types.auth.LoginTokenMigrateTo):
+                await client._switch_dc(resp.dc_id)
+                resp = await client(
+                    functions.auth.ImportLoginTokenRequest(resp.token)
+                )
+            if isinstance(resp, types.auth.LoginTokenSuccess):
+                await self._finalize_authorization(client, resp.authorization.user)
+                return
+            logger.info(
+                "Post-2FA ExportLoginToken returned %s — using CheckPassword user",
+                type(resp).__name__,
+            )
+        except SessionPasswordNeededError:
+            logger.info("Post-2FA ExportLoginToken still wants password; using CheckPassword user")
+        except Exception as exc:
+            if _is_auth_key_error(exc):
+                logger.warning("Post-2FA ExportLoginToken auth-key error: %s", exc)
+            else:
+                logger.warning("Post-2FA ExportLoginToken failed: %s", exc)
+
+        await self._finalize_authorization(client, getattr(result, "user", None))
 
     async def _qr_login(self, channel_id: int, client: TelegramClient) -> None:
         """QR login with flood-tolerant finalize.
@@ -446,7 +537,7 @@ class TelegramUserRuntime:
                 raise
 
         async def _accept_login(authorization_user: Any) -> None:
-            await client._on_login(authorization_user)
+            await self._finalize_authorization(client, authorization_user)
             if not await _session_really_authorized():
                 raise IntegrationError(_AUTH_KEY_HINT)
 
@@ -566,7 +657,7 @@ class TelegramUserRuntime:
                 last_error="Требуется пароль 2FA",
             )
             password = await state.password_bridge.get_password(state.hint)
-            await client.sign_in(password=password)
+            await self._complete_qr_2fa(client, password)
             if not await _session_really_authorized():
                 raise IntegrationError(_AUTH_KEY_HINT)
         finally:
