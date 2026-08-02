@@ -357,30 +357,19 @@ onUnmounted(() => {
 
         <div v-if="showSettingsGroup" class="mt-0.5">
           <template v-if="!collapsed">
-            <div
-              class="flex w-full items-center gap-1 rounded-lg text-sm font-medium text-muted"
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
               :class="onSettingsSection ? 'text-ink' : ''"
+              @click="toggleSettingsGroup"
             >
-              <RouterLink
-                to="/settings"
-                class="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2.5 transition hover:bg-surface hover:text-ink"
-                active-class="!bg-brand-soft !text-brand"
-              >
-                <Settings class="size-4 shrink-0" />
-                <span class="truncate whitespace-nowrap">Настройки</span>
-              </RouterLink>
-              <button
-                type="button"
-                class="mr-1 rounded-lg p-2 transition hover:bg-surface hover:text-ink"
-                :title="settingsGroupExpanded ? 'Свернуть' : 'Развернуть'"
-                @click="toggleSettingsGroup"
-              >
-                <ChevronDown
-                  class="size-4 shrink-0 transition-transform duration-200"
-                  :class="settingsGroupExpanded ? 'rotate-0' : '-rotate-90'"
-                />
-              </button>
-            </div>
+              <Settings class="size-4 shrink-0" />
+              <span class="min-w-0 flex-1 truncate text-left whitespace-nowrap">Настройки</span>
+              <ChevronDown
+                class="size-4 shrink-0 transition-transform duration-200"
+                :class="settingsGroupExpanded ? 'rotate-0' : '-rotate-90'"
+              />
+            </button>
             <div
               class="grid transition-[grid-template-rows] duration-200 ease-out"
               :class="settingsGroupExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
