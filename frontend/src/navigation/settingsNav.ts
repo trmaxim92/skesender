@@ -4,6 +4,7 @@ import {
   FormInput,
   IdCard,
   Radio,
+  CircleDot,
   Webhook,
 } from 'lucide-vue-next'
 import type { PermissionCode } from '@/types'
@@ -70,6 +71,13 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         label: 'Закрытие обращения',
         description: 'Системный шаблон при закрытии',
         icon: FileText,
+        permission: 'section.settings',
+      },
+      {
+        to: '/settings/presence-statuses',
+        label: 'Статусы сотрудников',
+        description: 'Присутствие, автораспределение и право писать',
+        icon: CircleDot,
         permission: 'section.settings',
       },
     ],

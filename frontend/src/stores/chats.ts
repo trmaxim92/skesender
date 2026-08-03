@@ -324,7 +324,7 @@ export const useChatsStore = defineStore('chats', () => {
       return
     }
 
-    if (event.type === 'dialog.updated') {
+    if (event.type === 'dialog.updated' || event.type === 'dialog.assigned') {
       const mappedDialog = mapDialog(event.dialog)
       if (activeDialogId.value === mappedDialog.id) {
         const prevAppealId = dialogs.value.find((d) => d.id === mappedDialog.id)?.appealId
@@ -884,6 +884,9 @@ export const useChatsStore = defineStore('chats', () => {
         if (filter.value === 'new') {
           await setFilter('mine', { keepActive: true })
         }
+      } else if (auth.user && dialog.assigneeId === auth.user.id && filter.value === 'new') {
+        // Server already claimed us (e.g. WS arrived first) — leave «Новые».
+        await setFilter('mine', { keepActive: true })
       }
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось отправить'

@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from sqlalchemy import (
@@ -89,6 +89,14 @@ class TemplateKind(StrEnum):
     APPEAL_CLOSED = "appeal_closed"
 
 
+class PresenceStatusSlug(StrEnum):
+    """Reserved system slugs — custom statuses use free-form slugs."""
+
+    ONLINE = "online"
+    OFFLINE = "offline"
+    TRAINING = "training"
+
+
 class MailingCampaignStatus(StrEnum):
     DRAFT = "draft"
     RUNNING = "running"
@@ -119,6 +127,28 @@ class WebhookOutboxStatus(StrEnum):
     DEAD = "dead"
 
 
+class PresenceStatus(Base):
+    """Operator presence mode — runtime overlay that can only tighten role rights."""
+
+    __tablename__ = "presence_statuses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    color: Mapped[str] = mapped_column(String(16), default="#9ca3af")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Rules (status may only restrict relative to role permissions).
+    participates_in_routing: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_write_chats: Mapped[bool] = mapped_column(Boolean, default=True)
+    on_duty: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    users: Mapped[list["User"]] = relationship(back_populates="presence_status")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -130,12 +160,16 @@ class User(Base):
     access_role_id: Mapped[int | None] = mapped_column(
         ForeignKey("access_roles.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    presence_status_id: Mapped[int | None] = mapped_column(
+        ForeignKey("presence_statuses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Bumped on password change / deactivation to invalidate existing JWTs.
     token_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     access_role: Mapped["AccessRole | None"] = relationship(back_populates="users")
+    presence_status: Mapped["PresenceStatus | None"] = relationship(back_populates="users")
     channel_access: Mapped[list["UserChannel"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )

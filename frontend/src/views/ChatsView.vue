@@ -44,7 +44,7 @@ const composerTemplates = computed(() => [
   ...myTemplates.forTransport(chats.activeDialog?.transport),
 ])
 
-const canWrite = computed(() => auth.can('action.write'))
+const canWrite = computed(() => auth.can('action.write') && auth.user?.canWriteChats !== false)
 const canCreateOutbound = computed(() => canWrite.value && auth.can('section.appeals'))
 
 const createOpen = ref(false)
@@ -672,7 +672,7 @@ onUnmounted(() => {
           </div>
         </div>
         <div
-          v-if="auth.can('action.write')"
+          v-if="canWrite"
           class="flex shrink-0 items-center gap-1"
         >
           <span

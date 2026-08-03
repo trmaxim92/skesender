@@ -148,6 +148,7 @@ async def load_user_rbac(db: AsyncSession, user: User) -> User:
             selectinload(User.access_role).selectinload(AccessRole.channel_access),
             selectinload(User.channel_access),
             selectinload(User.department_memberships),
+            selectinload(User.presence_status),
         )
         .where(User.id == user.id)
     )

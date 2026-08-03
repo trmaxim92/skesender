@@ -8,6 +8,7 @@ from app.api import (
     departments,
     mailing,
     me_templates,
+    presence,
     roles,
     settings_fields,
     templates,
@@ -20,6 +21,7 @@ from app.integrations.webchat import api as widget_api
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
 api_router.include_router(me_templates.router)
+api_router.include_router(presence.router)
 api_router.include_router(channels.router)
 api_router.include_router(chats.router)
 api_router.include_router(appeals.router)

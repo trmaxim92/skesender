@@ -49,7 +49,8 @@ const router = createRouter({
         },
         {
           path: 'employees',
-          redirect: '/users',
+          name: 'employees',
+          component: () => import('@/views/EmployeesPresenceView.vue'),
         },
         {
           path: 'users',
@@ -99,6 +100,12 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
+          path: 'settings/presence-statuses',
+          name: 'presence-statuses',
+          component: () => import('@/views/settings/PresenceStatusesView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/WebhooksView.vue'),
@@ -145,9 +152,15 @@ router.beforeEach(async (to) => {
         return auth.firstAllowedPath()
       }
     }
-    const perm = to.meta.permission as PermissionCode | undefined
-    if (perm && !auth.can(perm)) {
-      return auth.firstAllowedPath()
+    if (to.name === 'employees') {
+      if (!auth.can('section.chats') && !auth.can('section.employees')) {
+        return auth.firstAllowedPath()
+      }
+    } else {
+      const perm = to.meta.permission as PermissionCode | undefined
+      if (perm && !auth.can(perm)) {
+        return auth.firstAllowedPath()
+      }
     }
   }
   return true

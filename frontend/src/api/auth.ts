@@ -13,7 +13,23 @@ interface ApiUser {
   all_channels?: boolean
   channel_ids?: number[]
   department_ids?: number[]
+  presence_status_id?: number | null
+  presence_status?: {
+    id: number
+    name: string
+    slug: string
+    color: string
+    sort_order: number
+    is_system: boolean
+    is_active: boolean
+    participates_in_routing: boolean
+    can_write_chats: boolean
+    on_duty: boolean
+  } | null
+  can_write_chats?: boolean
 }
+
+export type { ApiUser }
 
 interface ApiChannel {
   id: number
@@ -54,6 +70,22 @@ export function mapUser(u: ApiUser): User {
     channelIds: u.channel_ids ?? [],
     departmentIds: u.department_ids ?? [],
     isActive: u.is_active,
+    presenceStatusId: u.presence_status_id ?? null,
+    presenceStatus: u.presence_status
+      ? {
+          id: u.presence_status.id,
+          name: u.presence_status.name,
+          slug: u.presence_status.slug,
+          color: u.presence_status.color,
+          sortOrder: u.presence_status.sort_order,
+          isSystem: u.presence_status.is_system,
+          isActive: u.presence_status.is_active,
+          participatesInRouting: u.presence_status.participates_in_routing,
+          canWriteChats: u.presence_status.can_write_chats,
+          onDuty: u.presence_status.on_duty,
+        }
+      : null,
+    canWriteChats: u.can_write_chats !== false,
   }
 }
 

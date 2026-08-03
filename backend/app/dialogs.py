@@ -97,6 +97,25 @@ async def clear_unread(session: AsyncSession, dialog: Dialog) -> bool:
     return cleared
 
 
+async def claim_if_unassigned(
+    session: AsyncSession, dialog: Dialog, user_id: int
+) -> bool:
+    """First manager to reply on an unassigned appeal becomes responsible.
+
+    Atomic: only one concurrent claim wins. Returns True if this user claimed.
+    """
+    result = await session.execute(
+        update(Dialog)
+        .where(Dialog.id == dialog.id, Dialog.assignee_id.is_(None))
+        .values(assignee_id=user_id)
+        .returning(Dialog.id)
+    )
+    claimed = result.scalar_one_or_none() is not None
+    if claimed:
+        dialog.assignee_id = user_id
+    return claimed
+
+
 async def try_insert_message(session: AsyncSession, msg: ChatMessage) -> ChatMessage | None:
     """Insert inbound/outbound row; return None on unique (channel_id, external_id) race.
 

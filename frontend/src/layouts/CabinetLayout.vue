@@ -15,11 +15,14 @@ import {
   TextQuote,
   UserRound,
   X,
+  CircleUserRound,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT } from '@/api/client'
+import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
 import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
 import { useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
+import type { PresenceStatus } from '@/types'
 import {
   isPushEnabled,
   notificationPermission,
@@ -42,6 +45,7 @@ type NavLeaf = { to: string; label: string; icon: typeof MessageSquare }
 const navFlat: NavLeaf[] = [
   { to: '/chats', label: 'Чаты', icon: MessageSquare },
   { to: '/appeals', label: 'Обращения', icon: Inbox },
+  { to: '/employees', label: 'На смене', icon: CircleUserRound },
   { to: '/mailing', label: 'Рассылки', icon: Megaphone },
 ]
 
@@ -65,6 +69,10 @@ const settingsGroupExpanded = ref(
 )
 const profileOpen = ref(false)
 const profileRoot = ref<HTMLElement | null>(null)
+const presenceStatuses = ref<PresenceStatus[]>([])
+const presenceBusy = ref(false)
+
+const currentPresence = computed(() => auth.user?.presenceStatus ?? null)
 
 /** Expanded labels: always on mobile drawer; rail collapse only from md up. */
 const expandedNav = computed(() => !isMdUp.value || !collapsed.value)
@@ -97,6 +105,7 @@ const title = computed(() => {
   if (route.name === 'profile') return 'Профиль'
   if (route.path.startsWith('/profile/templates')) return 'Мои шаблоны'
   if (route.name === 'appeal-detail') return 'Обращение'
+  if (route.path.startsWith('/employees')) return 'На смене'
   if (route.path.startsWith('/users')) return 'Пользователи'
   if (route.path.startsWith('/roles')) return 'Роли'
   if (route.path.startsWith('/departments')) return 'Отделы'
@@ -240,8 +249,34 @@ function toggleSettingsGroup() {
 function logout() {
   profileOpen.value = false
   chats.disconnectRealtime()
-  auth.logout()
-  router.push({ name: 'login' })
+  void (async () => {
+    await auth.logoutWithOffline()
+    router.push({ name: 'login' })
+  })()
+}
+
+async function loadPresenceStatuses() {
+  try {
+    presenceStatuses.value = (await listPresenceStatusesRequest()).map(mapPresenceStatus)
+  } catch {
+    presenceStatuses.value = []
+  }
+}
+
+async function choosePresence(statusId: number) {
+  if (presenceBusy.value || auth.user?.presenceStatusId === statusId) {
+    profileOpen.value = false
+    return
+  }
+  presenceBusy.value = true
+  try {
+    await auth.setPresence(statusId)
+    profileOpen.value = false
+  } catch {
+    // keep menu open; user can retry
+  } finally {
+    presenceBusy.value = false
+  }
 }
 
 function onAuthExpired() {
@@ -278,6 +313,7 @@ onMounted(() => {
     chats.connectRealtime()
     void chats.fetchUnreadSummary()
   }
+  void loadPresenceStatuses()
 })
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
@@ -476,7 +512,18 @@ onUnmounted(() => {
           </button>
           <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
-        <div ref="profileRoot" class="relative shrink-0">
+        <div ref="profileRoot" class="relative flex shrink-0 items-center gap-2">
+          <span
+            v-if="currentPresence"
+            class="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink sm:inline-flex"
+            :title="currentPresence.name"
+          >
+            <span
+              class="size-2 shrink-0 rounded-full"
+              :style="{ background: currentPresence.color }"
+            />
+            {{ currentPresence.name }}
+          </span>
           <button
             type="button"
             class="flex max-w-[min(100%,14rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
@@ -484,9 +531,14 @@ onUnmounted(() => {
             aria-haspopup="menu"
             @click.stop="profileOpen = !profileOpen"
           >
-            <span
-              class="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white"
-            >{{ initials }}</span>
+            <span class="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white">
+              {{ initials }}
+              <span
+                v-if="currentPresence"
+                class="absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-surface sm:hidden"
+                :style="{ background: currentPresence.color }"
+              />
+            </span>
             <span class="hidden min-w-0 text-left sm:block">
               <span class="block truncate text-sm font-medium text-ink">{{ auth.user?.name }}</span>
               <span class="block truncate text-[11px] text-mute">{{ roleDisplay }}</span>
@@ -499,12 +551,34 @@ onUnmounted(() => {
 
           <div
             v-if="profileOpen"
-            class="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-lg"
+            class="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-lg"
             role="menu"
           >
             <div class="border-b border-line px-3 py-2.5 sm:hidden">
               <p class="truncate text-sm font-medium text-ink">{{ auth.user?.name }}</p>
               <p class="truncate text-xs text-mute">{{ roleDisplay }}</p>
+            </div>
+            <div v-if="presenceStatuses.length" class="border-b border-line py-1">
+              <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-mute">
+                Статус
+              </p>
+              <button
+                v-for="s in presenceStatuses"
+                :key="s.id"
+                type="button"
+                class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-surface"
+                :class="auth.user?.presenceStatusId === s.id ? 'bg-brand-soft/50 text-ink' : 'text-ink'"
+                role="menuitem"
+                :disabled="presenceBusy"
+                @click="choosePresence(s.id)"
+              >
+                <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
+                <span class="flex-1 truncate">{{ s.name }}</span>
+                <span
+                  v-if="auth.user?.presenceStatusId === s.id"
+                  class="text-[11px] text-brand"
+                >✓</span>
+              </button>
             </div>
             <RouterLink
               :to="{ name: 'profile' }"

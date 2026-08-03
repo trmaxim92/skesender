@@ -89,7 +89,7 @@ from app.schemas import (
 from app.security import decode_access_token, token_version_matches
 from app.serializers import message_preview_text, message_to_out
 from app.storage.attachments import absolute_path, guess_kind, save_bytes
-from app.dialogs import clear_unread, get_or_create_dialog
+from app.dialogs import claim_if_unassigned, clear_unread, get_or_create_dialog
 from app.outbound_start import PeerResolveError, resolve_outbound_peer, transport_allows_start
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,13 @@ class OutboundDeliveryFailed(IntegrationError):
 def _require_write(user: User) -> None:
     if not user_can(user, ACTION_WRITE):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    from app.presence import presence_allows_write
+
+    if not presence_allows_write(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Текущий статус не позволяет писать в чаты",
+        )
 
 
 async def _require_dialog_access(user: User, dialog: Dialog, db: AsyncSession) -> None:
@@ -888,13 +895,7 @@ async def send_dialog_message(
     dialog.last_status = last.status
     dialog.last_at = last.created_at
     # Первый ответивший на незанятое обращение становится ответственным.
-    claimed = await db.execute(
-        update(Dialog)
-        .where(Dialog.id == dialog.id, Dialog.assignee_id.is_(None))
-        .values(assignee_id=user.id)
-    )
-    if claimed.rowcount:
-        dialog.assignee_id = user.id
+    claimed = await claim_if_unassigned(db, dialog, user.id)
 
     result = await db.execute(
         select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)
@@ -906,6 +907,9 @@ async def send_dialog_message(
         loaded = await _load_message(db, msg.id)
         events.append(message_created_event(dialog_loaded, loaded))
         outs.append(message_to_out(loaded))
+    if claimed:
+        events.append(dialog_assigned_event(dialog_loaded))
+        events.append(dialog_updated_event(dialog_loaded))
     await db.commit()
     for event in events:
         await emit_event(event)

@@ -39,6 +39,32 @@ export interface User {
   channelIds: number[]
   departmentIds: number[]
   isActive?: boolean
+  presenceStatusId?: number | null
+  presenceStatus?: PresenceStatus | null
+  canWriteChats?: boolean
+}
+
+export interface PresenceStatus {
+  id: number
+  name: string
+  slug: string
+  color: string
+  sortOrder: number
+  isSystem: boolean
+  isActive: boolean
+  participatesInRouting: boolean
+  canWriteChats: boolean
+  onDuty: boolean
+}
+
+export interface PresenceEmployee {
+  id: number
+  name: string
+  email: string
+  roleName: string | null
+  departmentIds: number[]
+  isActive: boolean
+  presenceStatus: PresenceStatus | null
 }
 
 export interface Department {
@@ -259,12 +285,13 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/users': 'section.employees',
   '/roles': 'section.employees',
   '/departments': 'section.employees',
-  '/employees': 'section.employees',
+  '/employees': 'section.chats',
   '/webhooks': 'section.webhooks',
   '/settings': 'section.settings',
   '/settings/appeal-fields': 'section.settings',
   '/settings/client-fields': 'section.settings',
   '/settings/close-template': 'section.settings',
+  '/settings/presence-statuses': 'section.settings',
 }
 
 export const FIRST_SECTION_PATHS = [

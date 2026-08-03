@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import User
+from app.models import PresenceStatus, PresenceStatusSlug, User
+from app.presence import get_status_by_slug, set_user_presence
 from app.ratelimit import client_ip, limiter
 from app.rbac import load_user_rbac
 from app.realtime.hub import hub
@@ -43,6 +44,10 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    online = await get_status_by_slug(db, PresenceStatusSlug.ONLINE.value)
+    if online is not None:
+        await set_user_presence(db, user, online)
+        await db.commit()
     token = create_access_token(
         subject=user.email,
         role=user.role,
@@ -67,10 +72,16 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
 ) -> UserOut:
     loaded = await load_user_rbac(db, user)
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Укажите имя")
-    loaded.name = name
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Укажите имя")
+        loaded.name = name
+    if body.presence_status_id is not None:
+        status_row = await db.get(PresenceStatus, body.presence_status_id)
+        if status_row is None or not status_row.is_active:
+            raise HTTPException(status_code=400, detail="Статус недоступен")
+        await set_user_presence(db, loaded, status_row)
     await db.commit()
     loaded = await load_user_rbac(db, loaded)
     return user_to_out(loaded)

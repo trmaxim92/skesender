@@ -7,6 +7,7 @@ export type ChatSocketEvent =
   | { type: 'message.updated'; message: ApiMessage; dialog: ApiDialog }
   | { type: 'message.deleted'; message: ApiMessage; dialog: ApiDialog }
   | { type: 'dialog.updated'; dialog: ApiDialog }
+  | { type: 'dialog.assigned'; dialog: ApiDialog }
   | { type: 'dialog.typing'; dialog_id: number; channel_id?: number; department_id?: number | null; user_id?: number | null }
 
 type Handlers = {

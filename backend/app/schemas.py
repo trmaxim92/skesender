@@ -25,12 +25,58 @@ class LoginRequest(BaseModel):
 
 
 class MeUpdateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    presence_status_id: int | None = None
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=255)
     new_password: str = Field(min_length=6, max_length=255)
+
+
+class PresenceStatusOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    color: str
+    sort_order: int
+    is_system: bool
+    is_active: bool
+    participates_in_routing: bool
+    can_write_chats: bool
+    on_duty: bool
+
+    model_config = {"from_attributes": True}
+
+
+class PresenceStatusCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    color: str = Field(default="#9ca3af", min_length=4, max_length=16)
+    sort_order: int = 0
+    participates_in_routing: bool = False
+    can_write_chats: bool = True
+    on_duty: bool = True
+    is_active: bool = True
+
+
+class PresenceStatusUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    color: str | None = Field(default=None, min_length=4, max_length=16)
+    sort_order: int | None = None
+    participates_in_routing: bool | None = None
+    can_write_chats: bool | None = None
+    on_duty: bool | None = None
+    is_active: bool | None = None
+
+
+class PresenceEmployeeOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    role_name: str | None = None
+    department_ids: list[int] = []
+    is_active: bool = True
+    presence_status: PresenceStatusOut | None = None
 
 
 class UserOut(BaseModel):
@@ -45,6 +91,9 @@ class UserOut(BaseModel):
     all_channels: bool = False
     channel_ids: list[int] = []
     department_ids: list[int] = []
+    presence_status_id: int | None = None
+    presence_status: PresenceStatusOut | None = None
+    can_write_chats: bool = True
 
     model_config = {"from_attributes": True}
 

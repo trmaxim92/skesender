@@ -292,6 +292,44 @@ async def ensure_schema() -> None:
                 "ON webhook_outbox (status, next_attempt_at)"
             )
         )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS presence_statuses (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(128) NOT NULL,
+                    slug VARCHAR(64) NOT NULL UNIQUE,
+                    color VARCHAR(16) NOT NULL DEFAULT '#9ca3af',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    participates_in_routing BOOLEAN NOT NULL DEFAULT FALSE,
+                    can_write_chats BOOLEAN NOT NULL DEFAULT TRUE,
+                    on_duty BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_presence_statuses_slug "
+                "ON presence_statuses (slug)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS presence_status_id "
+                "INTEGER REFERENCES presence_statuses(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_users_presence_status_id "
+                "ON users (presence_status_id)"
+            )
+        )
 
 
 @asynccontextmanager
