@@ -133,7 +133,7 @@ async function renameField(f: FieldDefinition, newLabel: string) {
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-6">
+  <div class="h-full overflow-auto p-4 md:p-6">
     <p class="mb-4 text-sm text-muted">
       Набор полей обращения зависит от отдела. У
       <span class="font-medium text-ink">{{ selectedDept?.name || '…' }}</span>
@@ -177,8 +177,8 @@ async function renameField(f: FieldDefinition, newLabel: string) {
     </form>
 
     <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
-    <div v-else class="overflow-hidden rounded-2xl border border-line bg-panel">
-      <table class="w-full text-left text-sm">
+    <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel">
+      <table class="w-full min-w-[560px] text-left text-sm">
         <thead class="border-b border-line bg-surface text-xs uppercase text-muted">
           <tr>
             <th class="px-4 py-3">Поле</th>

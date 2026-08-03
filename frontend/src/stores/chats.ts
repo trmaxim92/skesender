@@ -439,9 +439,6 @@ export const useChatsStore = defineStore('chats', () => {
       }
       hasMoreDialogs.value = page.has_more
       dialogsOffset.value = offset + page.items.length
-      if (!activeDialogId.value && dialogs.value[0]) {
-        activeDialogId.value = dialogs.value[0].id
-      }
       if (reloadMessages && activeDialogId.value) {
         await fetchMessages(activeDialogId.value)
       }
@@ -586,6 +583,17 @@ export const useChatsStore = defineStore('chats', () => {
     viewingAppealId.value = dialog?.appealId ?? null
     await fetchDialogAppeals(id)
     await fetchMessages(id, viewingAppealId.value)
+  }
+
+  function clearActiveDialog() {
+    saveDraftFor(activeDialogId.value)
+    activeDialogId.value = null
+    viewingAppealId.value = null
+    dialogAppeals.value = []
+    replyingTo.value = null
+    noteMode.value = false
+    sidePanelOpen.value = false
+    sidebar.value = null
   }
 
   function setReplyTo(message: Message | null) {
@@ -1053,6 +1061,7 @@ export const useChatsStore = defineStore('chats', () => {
     fetchUnreadSummary,
     loadOlderMessages,
     selectDialog,
+    clearActiveDialog,
     openDialogById,
     selectAppeal,
     setReplyTo,

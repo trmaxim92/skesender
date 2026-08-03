@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowRightLeft, CircleCheckBig, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2 } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -97,6 +97,13 @@ const headerAppealStatus = computed(
 const claimBusy = ref(false)
 const searchInput = ref('')
 let searchTimer: number | undefined
+const isMdUp = ref(typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : true)
+let mdMq: MediaQueryList | null = null
+
+function onMdMqChange() {
+  if (!mdMq) return
+  isMdUp.value = mdMq.matches
+}
 
 const emptyHint = computed(() => {
   if (chats.searchQuery.trim()) return 'Ничего не найдено по запросу.'
@@ -334,6 +341,15 @@ async function selectDialog(id: string) {
   await scrollThreadToBottom()
 }
 
+async function backToDialogList() {
+  chats.clearActiveDialog()
+  syncingUrl = true
+  const query = { ...route.query }
+  delete query.dialog
+  await router.replace({ name: 'chats', query })
+  syncingUrl = false
+}
+
 watch(
   () => chats.activeMessages.map((m) => m.id).join(','),
   async (ids, prev) => {
@@ -354,6 +370,9 @@ watch(
 )
 
 onMounted(async () => {
+  mdMq = window.matchMedia('(min-width: 768px)')
+  onMdMqChange()
+  mdMq.addEventListener('change', onMdMqChange)
   await Promise.all([
     chats.fetchOperators(),
     templates.fetchCloseTemplate(),
@@ -366,13 +385,8 @@ onMounted(async () => {
     await chats.openDialogById(dialogId)
   } else {
     await chats.fetchDialogs()
-    if (chats.activeDialogId) {
-      syncingUrl = true
-      await router.replace({
-        name: 'chats',
-        query: { ...route.query, dialog: chats.activeDialogId },
-      })
-      syncingUrl = false
+    if (isMdUp.value && chats.dialogs[0]) {
+      await chats.selectDialog(chats.dialogs[0].id)
     }
   }
   stickToBottom.value = true
@@ -396,6 +410,10 @@ watch(
       stickToBottom.value = true
       pendingBelow.value = 0
       await scrollThreadToBottom()
+      return
+    }
+    if (!dialogId && chats.activeDialogId) {
+      chats.clearActiveDialog()
     }
   },
 )
@@ -403,7 +421,17 @@ watch(
 watch(
   () => chats.activeDialogId,
   async (id) => {
-    if (!id || syncingUrl) return
+    if (syncingUrl) return
+    if (!id) {
+      if (route.query.dialog) {
+        syncingUrl = true
+        const query = { ...route.query }
+        delete query.dialog
+        await router.replace({ name: 'chats', query })
+        syncingUrl = false
+      }
+      return
+    }
     if (route.query.dialog === id) return
     syncingUrl = true
     await router.replace({ name: 'chats', query: { ...route.query, dialog: id } })
@@ -415,12 +443,16 @@ onUnmounted(() => {
   if (pollTimer) window.clearInterval(pollTimer)
   if (noticeTimer) window.clearTimeout(noticeTimer)
   if (searchTimer) window.clearTimeout(searchTimer)
+  mdMq?.removeEventListener('change', onMdMqChange)
 })
 </script>
 
 <template>
   <div class="flex h-full min-h-0">
-    <aside class="flex w-80 shrink-0 flex-col border-r border-line bg-panel">
+    <aside
+      class="flex shrink-0 flex-col border-r border-line bg-panel"
+      :class="chats.activeDialog ? 'hidden w-full md:flex md:w-80' : 'w-full md:w-80'"
+    >
       <div class="flex items-center gap-1 border-b border-line p-3">
         <button
           v-for="f in [
@@ -562,7 +594,15 @@ onUnmounted(() => {
     </aside>
 
     <section v-if="chats.activeDialog" class="flex min-w-0 flex-1 flex-col bg-surface">
-      <header class="flex items-center gap-3 border-b border-line bg-panel px-5 py-3">
+      <header class="flex items-center gap-2 border-b border-line bg-panel px-3 py-3 md:gap-3 md:px-5">
+        <button
+          type="button"
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand md:hidden"
+          title="К списку диалогов"
+          @click="backToDialogList"
+        >
+          <ArrowLeft class="size-4" />
+        </button>
         <ContactAvatar
           :name="chats.activeDialog.contactName"
           :url="chats.activeDialog.contactAvatarUrl"
@@ -573,14 +613,14 @@ onUnmounted(() => {
             <div class="truncate text-sm font-semibold">{{ chats.activeDialog.contactName }}</div>
             <span
               v-if="chats.activeDialog.transport"
-              class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+              class="hidden shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:inline"
               :class="transportBadgeClass[chats.activeDialog.transport]"
             >
               {{ transportBadge[chats.activeDialog.transport] }}
             </span>
             <span
               v-if="headerAppealNumber"
-              class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
+              class="hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold sm:inline"
               :class="
                 headerAppealStatus === 'closed'
                   ? 'bg-muted/15 text-muted'
@@ -611,7 +651,7 @@ onUnmounted(() => {
           class="flex shrink-0 items-center gap-1"
         >
           <span
-            class="mr-1 hidden max-w-[7rem] truncate text-[10px] text-muted sm:inline"
+            class="mr-1 hidden max-w-[7rem] truncate text-[10px] text-muted lg:inline"
             :title="assigneeLabel"
           >
             {{ assigneeLabel }}
@@ -625,7 +665,7 @@ onUnmounted(() => {
             @click="claimDialog"
           >
             <Hand class="size-3.5" />
-            {{ claimBusy ? '…' : 'Забрать' }}
+            <span class="hidden sm:inline">{{ claimBusy ? '…' : 'Забрать' }}</span>
           </button>
           <button
             v-if="canTransfer"
@@ -635,7 +675,7 @@ onUnmounted(() => {
             @click="transferOpen = true"
           >
             <ArrowRightLeft class="size-3.5" />
-            Передать
+            <span class="hidden sm:inline">Передать</span>
           </button>
           <button
             v-if="chats.canCompose"
@@ -646,7 +686,7 @@ onUnmounted(() => {
             @click="closeOpen = true"
           >
             <CircleCheckBig class="size-3.5" />
-            {{ chats.closing ? '…' : 'Закрыть' }}
+            <span class="hidden sm:inline">{{ chats.closing ? '…' : 'Закрыть' }}</span>
           </button>
         </div>
         <button
@@ -970,7 +1010,10 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted">
+    <div
+      v-else
+      class="hidden flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted md:flex"
+    >
       <p>Выберите диалог слева</p>
       <button
         v-if="canCreateOutbound"

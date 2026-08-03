@@ -74,7 +74,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="border-b border-line bg-panel px-6 py-4">
+    <div class="border-b border-line bg-panel px-4 py-4 md:px-6">
       <div class="mb-4 flex items-center justify-between gap-3">
         <div>
           <h1 class="text-lg font-bold tracking-tight text-ink">Обращения</h1>
@@ -91,8 +91,8 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
         </button>
       </div>
 
-      <form class="flex flex-wrap items-end gap-3" @submit.prevent="onSubmit">
-        <label class="min-w-[220px] flex-1">
+      <form class="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end" @submit.prevent="onSubmit">
+        <label class="min-w-0 w-full md:min-w-[220px] md:flex-1">
           <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Поиск
           </span>
@@ -113,7 +113,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
           </span>
           <select
             v-model="appeals.status"
-            class="rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm md:w-auto"
             @change="appeals.search()"
           >
             <option value="all">Все</option>
@@ -128,7 +128,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
           </span>
           <select
             v-model="appeals.assignee"
-            class="rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm md:w-auto"
             @change="appeals.search()"
           >
             <option value="all">Все</option>
@@ -144,7 +144,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
           <input
             v-model="appeals.dateFrom"
             type="date"
-            class="rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm md:w-auto"
             @change="appeals.search()"
           />
         </label>
@@ -156,14 +156,14 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
           <input
             v-model="appeals.dateTo"
             type="date"
-            class="rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm md:w-auto"
             @change="appeals.search()"
           />
         </label>
 
         <button
           type="submit"
-          class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          class="w-full rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 md:w-auto"
           :disabled="appeals.loading"
         >
           Найти
@@ -171,7 +171,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
       </form>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-auto p-6">
+    <div class="min-h-0 flex-1 overflow-auto p-4 md:p-6">
       <p v-if="appeals.error" class="mb-4 text-sm text-danger">{{ appeals.error }}</p>
       <p v-if="appeals.loading && !appeals.items.length" class="text-sm text-muted">Загрузка…</p>
       <p
@@ -181,8 +181,8 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
         Обращений не найдено
       </p>
 
-      <div v-else class="overflow-hidden rounded-2xl border border-line bg-panel">
-        <table class="w-full text-left text-sm">
+      <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel">
+        <table class="w-full min-w-[640px] text-left text-sm">
           <thead class="border-b border-line bg-surface text-[11px] uppercase tracking-wide text-muted">
             <tr>
               <th class="px-4 py-3 font-semibold">#</th>

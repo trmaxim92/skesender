@@ -262,7 +262,7 @@ onUnmounted(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <header class="flex items-center gap-3 border-b border-line bg-panel px-5 py-3">
+    <header class="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-3 py-3 md:gap-3 md:px-5">
       <button
         type="button"
         class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
@@ -274,7 +274,7 @@ onUnmounted(() => {
 
       <template v-if="appeal">
         <ContactAvatar :name="appeal.contact_name" :url="appeal.contact_avatar_url" size="md" />
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1 basis-[min(100%,12rem)] sm:basis-auto">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
             <div class="truncate text-sm font-semibold">{{ appeal.contact_name }}</div>
             <span
@@ -302,7 +302,7 @@ onUnmounted(() => {
         <button
           v-if="appeal.can_open_in_chats"
           type="button"
-          class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-brand px-3 text-xs font-semibold text-white transition hover:opacity-90"
+          class="inline-flex h-9 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 text-xs font-semibold text-white transition hover:opacity-90 sm:ml-auto sm:w-auto"
           @click="openInChats"
         >
           <MessageSquare class="size-3.5" />
@@ -312,13 +312,13 @@ onUnmounted(() => {
       <div v-else class="min-w-0 flex-1 text-sm font-semibold">Обращение</div>
     </header>
 
-    <p v-if="error" class="border-b border-line bg-panel px-5 py-2 text-xs text-danger">
+    <p v-if="error" class="border-b border-line bg-panel px-3 py-2 text-xs text-danger md:px-5">
       {{ error }}
     </p>
 
     <div
       v-if="appeal"
-      class="flex flex-wrap gap-x-4 gap-y-1 border-b border-line bg-surface px-5 py-2 text-[11px] text-muted"
+      class="flex flex-wrap gap-x-4 gap-y-1 border-b border-line bg-surface px-3 py-2 text-[11px] text-muted md:px-5"
     >
       <span>Открыто: {{ formatDate(appeal.opened_at) }}</span>
       <span v-if="appeal.closed_at">Закрыто: {{ formatDate(appeal.closed_at) }}</span>

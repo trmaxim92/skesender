@@ -175,7 +175,7 @@ watch(
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-6">
+  <div class="h-full overflow-auto p-4 md:p-6">
     <div class="mb-5 flex items-center justify-between gap-3">
       <div>
         <p class="text-sm text-muted">

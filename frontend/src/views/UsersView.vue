@@ -75,7 +75,7 @@ function roleChannelLabel(user: { accessRoleId?: number | null }) {
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-6">
+  <div class="h-full overflow-auto p-4 md:p-6">
     <p v-if="employees.error" class="mb-3 text-sm text-danger">{{ employees.error }}</p>
 
     <div class="mb-6 max-w-5xl rounded-2xl border border-line bg-panel p-4">
@@ -138,9 +138,9 @@ function roleChannelLabel(user: { accessRoleId?: number | null }) {
       </div>
     </div>
 
-    <div class="overflow-hidden rounded-2xl border border-line bg-panel">
+    <div class="overflow-x-auto rounded-2xl border border-line bg-panel">
       <p v-if="employees.loading" class="p-4 text-sm text-muted">Загрузка…</p>
-      <table v-else class="w-full text-left text-sm">
+      <table v-else class="w-full min-w-[640px] text-left text-sm">
         <thead class="border-b border-line bg-surface text-xs uppercase tracking-wide text-muted">
           <tr>
             <th class="px-4 py-3 font-semibold">Имя</th>

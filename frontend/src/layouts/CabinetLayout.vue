@@ -14,6 +14,7 @@ import {
   Building2,
   TextQuote,
   UserRound,
+  X,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT } from '@/api/client'
 import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
@@ -51,6 +52,8 @@ const usersChildren: NavLeaf[] = [
 ]
 
 const collapsed = ref(localStorage.getItem(SIDEBAR_KEY) === '1')
+const mobileNavOpen = ref(false)
+const isMdUp = ref(typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : true)
 const usersGroupExpanded = ref(
   localStorage.getItem(USERS_GROUP_KEY) === '1' ||
     route.path.startsWith('/users') ||
@@ -62,6 +65,9 @@ const settingsGroupExpanded = ref(
 )
 const profileOpen = ref(false)
 const profileRoot = ref<HTMLElement | null>(null)
+
+/** Expanded labels: always on mobile drawer; rail collapse only from md up. */
+const expandedNav = computed(() => !isMdUp.value || !collapsed.value)
 
 const settingsGroupsVisible = computed(() =>
   SETTINGS_NAV_GROUPS.map((group) => ({
@@ -132,6 +138,7 @@ watch(
   () => route.path,
   () => {
     profileOpen.value = false
+    mobileNavOpen.value = false
     if (onUsersSection.value) usersGroupExpanded.value = true
     if (onSettingsSection.value) settingsGroupExpanded.value = true
   },
@@ -197,7 +204,29 @@ function onOpenDialogFromNotify(ev: Event) {
 }
 
 function toggleSidebar() {
+  if (!isMdUp.value) {
+    mobileNavOpen.value = !mobileNavOpen.value
+    return
+  }
   collapsed.value = !collapsed.value
+}
+
+function closeMobileNav() {
+  mobileNavOpen.value = false
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    mobileNavOpen.value = false
+    profileOpen.value = false
+  }
+}
+
+let mdMq: MediaQueryList | null = null
+function onMdMqChange() {
+  if (!mdMq) return
+  isMdUp.value = mdMq.matches
+  if (mdMq.matches) mobileNavOpen.value = false
 }
 
 function toggleUsersGroup() {
@@ -232,9 +261,13 @@ function onDocClick(e: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
   window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
   window.addEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.addEventListener('oe:in-app-toast', onInAppToast)
+  mdMq = window.matchMedia('(min-width: 768px)')
+  onMdMqChange()
+  mdMq.addEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onSwMessage)
   }
@@ -248,9 +281,11 @@ onMounted(() => {
 })
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
   window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
   window.removeEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.removeEventListener('oe:in-app-toast', onInAppToast)
+  mdMq?.removeEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
   }
@@ -262,159 +297,166 @@ onUnmounted(() => {
 
 <template>
   <div class="flex h-full min-h-0 bg-surface text-ink">
+    <!-- Mobile drawer backdrop -->
+    <div
+      v-show="mobileNavOpen"
+      class="fixed inset-0 z-40 bg-ink/40 md:hidden"
+      aria-hidden="true"
+      @click="closeMobileNav"
+    />
+
     <aside
-      class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width] duration-300 ease-out"
-      :class="collapsed ? 'w-[4.25rem]' : 'w-60'"
+      class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width,transform] duration-300 ease-out max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:shadow-xl"
+      :class="[
+        isMdUp ? (collapsed ? 'w-[4.25rem]' : 'w-60') : 'w-72',
+        !isMdUp && !mobileNavOpen ? '-translate-x-full' : 'translate-x-0',
+      ]"
     >
       <div
         class="flex h-14 shrink-0 items-center gap-2 border-b border-line"
-        :class="collapsed ? 'justify-center px-2' : 'px-3'"
+        :class="expandedNav ? 'px-3' : 'justify-center px-2'"
       >
         <button
           type="button"
           class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-white transition hover:brightness-105"
-          :title="collapsed ? 'Развернуть меню' : 'Свернуть меню'"
+          :title="!isMdUp ? 'Закрыть меню' : collapsed ? 'Развернуть меню' : 'Свернуть меню'"
           @click="toggleSidebar"
         >
-          <Menu class="size-4" />
+          <X v-if="!isMdUp" class="size-4" />
+          <Menu v-else class="size-4" />
         </button>
         <div
           class="min-w-0 overflow-hidden transition-opacity duration-200"
-          :class="collapsed ? 'pointer-events-none w-0 opacity-0' : 'flex-1 opacity-100'"
+          :class="expandedNav ? 'flex-1 opacity-100' : 'pointer-events-none w-0 opacity-0'"
         >
-          <div class="truncate text-sm font-bold tracking-tight">SkySender</div>
-          <div class="truncate text-[11px] text-muted">омниканальный кабинет</div>
+          <p class="truncate text-sm font-semibold tracking-tight text-ink">SkySender</p>
+          <p class="truncate text-[11px] text-mute">Кабинет оператора</p>
         </div>
       </div>
 
-      <nav class="flex flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto p-2">
+      <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         <RouterLink
           v-for="item in navBefore"
           :key="item.to"
           :to="item.to"
-          class="relative flex items-center gap-2.5 rounded-lg py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-          :class="collapsed ? 'justify-center px-2' : 'px-3'"
-          :title="collapsed ? item.label : undefined"
-          active-class="!bg-brand-soft !text-brand"
+          class="group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-mute transition hover:bg-surface hover:text-ink"
+          :class="route.path.startsWith(item.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+          :title="item.label"
+          @click="closeMobileNav"
         >
-          <component :is="item.icon" class="size-4 shrink-0" />
-          <span v-if="!collapsed" class="truncate whitespace-nowrap">{{ item.label }}</span>
+          <component :is="item.icon" class="size-[18px] shrink-0 opacity-90" />
+          <span
+            class="min-w-0 flex-1 truncate transition-opacity duration-200"
+            :class="expandedNav ? 'opacity-100' : 'w-0 overflow-hidden opacity-0'"
+          >{{ item.label }}</span>
           <span
             v-if="item.to === '/chats' && chatsUnread > 0"
-            class="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-ok px-1 text-[9px] font-bold leading-none text-white"
-            :class="collapsed ? 'absolute right-1 top-1' : 'ml-auto'"
+            class="absolute flex items-center justify-center rounded-full bg-brand font-semibold text-white"
+            :class="
+              expandedNav
+                ? 'right-2 top-1/2 h-5 min-w-5 -translate-y-1/2 px-1.5 text-[10px]'
+                : 'right-1 top-1 size-4 text-[9px]'
+            "
           >
             {{ chatsUnread > 99 ? '99+' : chatsUnread }}
           </span>
         </RouterLink>
 
         <div v-if="showUsersGroup" class="mt-0.5">
-          <template v-if="!collapsed">
-            <button
-              type="button"
-              class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-              :class="onUsersSection ? 'text-ink' : ''"
-              @click="toggleUsersGroup"
-            >
-              <Users class="size-4 shrink-0" />
-              <span class="min-w-0 flex-1 truncate text-left whitespace-nowrap">Персонал</span>
-              <ChevronDown
-                class="size-4 shrink-0 transition-transform duration-200"
-                :class="usersGroupExpanded ? 'rotate-0' : '-rotate-90'"
-              />
-            </button>
-            <div
-              class="grid transition-[grid-template-rows] duration-200 ease-out"
-              :class="usersGroupExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-            >
-              <div class="overflow-hidden">
-                <RouterLink
-                  v-for="item in usersChildren"
-                  :key="item.to"
-                  :to="item.to"
-                  class="ml-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-                  active-class="!bg-brand-soft !text-brand"
-                >
-                  <component :is="item.icon" class="size-4 shrink-0" />
-                  <span class="truncate whitespace-nowrap">{{ item.label }}</span>
-                </RouterLink>
-              </div>
-            </div>
-          </template>
-          <template v-else>
+          <button
+            v-if="expandedNav"
+            type="button"
+            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
+            :class="onUsersSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            @click="toggleUsersGroup"
+          >
+            <Users class="size-[18px] shrink-0 opacity-90" />
+            <span class="min-w-0 flex-1 truncate text-left">Пользователи</span>
+            <ChevronDown
+              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              :class="usersGroupExpanded ? 'rotate-180' : ''"
+            />
+          </button>
+          <div
+            v-if="expandedNav && usersGroupExpanded"
+            class="mt-0.5 space-y-0.5 border-l border-line ml-4 pl-2"
+          >
             <RouterLink
-              v-for="item in usersChildren"
-              :key="item.to"
-              :to="item.to"
-              class="flex items-center justify-center rounded-lg px-2 py-2.5 text-muted transition hover:bg-surface hover:text-ink"
-              :title="item.label"
-              active-class="!bg-brand-soft !text-brand"
+              v-for="child in usersChildren"
+              :key="child.to"
+              :to="child.to"
+              class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
+              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+              :title="child.label"
+              @click="closeMobileNav"
             >
-              <component :is="item.icon" class="size-4 shrink-0" />
+              <component :is="child.icon" class="size-4 shrink-0 opacity-90" />
+              <span class="truncate">{{ child.label }}</span>
+            </RouterLink>
+          </div>
+          <template v-if="!expandedNav">
+            <RouterLink
+              v-for="child in usersChildren"
+              :key="'rail-' + child.to"
+              :to="child.to"
+              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
+              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              :title="child.label"
+            >
+              <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
             </RouterLink>
           </template>
         </div>
 
         <div v-if="showSettingsGroup" class="mt-0.5">
-          <template v-if="!collapsed">
-            <button
-              type="button"
-              class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-              :class="onSettingsSection ? 'text-ink' : ''"
-              @click="toggleSettingsGroup"
-            >
-              <Settings class="size-4 shrink-0" />
-              <span class="min-w-0 flex-1 truncate text-left whitespace-nowrap">Настройки</span>
-              <ChevronDown
-                class="size-4 shrink-0 transition-transform duration-200"
-                :class="settingsGroupExpanded ? 'rotate-0' : '-rotate-90'"
-              />
-            </button>
-            <div
-              class="grid transition-[grid-template-rows] duration-200 ease-out"
-              :class="settingsGroupExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-            >
-              <div class="overflow-hidden">
-                <div
-                  v-for="group in settingsGroupsVisible"
-                  :key="group.id"
-                  class="mt-1 first:mt-0"
+          <button
+            v-if="expandedNav"
+            type="button"
+            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
+            :class="onSettingsSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            @click="toggleSettingsGroup"
+          >
+            <Settings class="size-[18px] shrink-0 opacity-90" />
+            <span class="min-w-0 flex-1 truncate text-left">Настройки</span>
+            <ChevronDown
+              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              :class="settingsGroupExpanded ? 'rotate-180' : ''"
+            />
+          </button>
+          <div
+            v-if="expandedNav && settingsGroupExpanded"
+            class="mt-0.5 space-y-2 border-l border-line ml-4 pl-2"
+          >
+            <div v-for="group in settingsGroupsVisible" :key="group.id">
+              <p class="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-mute/80">
+                {{ group.title }}
+              </p>
+              <div class="space-y-0.5">
+                <RouterLink
+                  v-for="child in group.items"
+                  :key="child.to"
+                  :to="child.to"
+                  class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
+                  :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+                  :title="child.label"
+                  @click="closeMobileNav"
                 >
-                  <div class="ml-2 px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted/80">
-                    {{ group.title }}
-                  </div>
-                  <RouterLink
-                    v-for="item in group.items"
-                    :key="item.to"
-                    :to="item.to"
-                    class="ml-2 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface hover:text-ink"
-                    active-class="!bg-brand-soft !text-brand"
-                  >
-                    <component :is="item.icon" class="size-4 shrink-0" />
-                    <span class="truncate whitespace-nowrap">{{ item.label }}</span>
-                  </RouterLink>
-                </div>
+                  <component :is="child.icon" class="size-4 shrink-0 opacity-90" />
+                  <span class="truncate">{{ child.label }}</span>
+                </RouterLink>
               </div>
             </div>
-          </template>
-          <template v-else>
+          </div>
+          <template v-if="!expandedNav">
             <RouterLink
-              to="/settings"
-              class="flex items-center justify-center rounded-lg px-2 py-2.5 text-muted transition hover:bg-surface hover:text-ink"
-              title="Настройки"
-              active-class="!bg-brand-soft !text-brand"
+              v-for="child in settingsFlatLeaves"
+              :key="'rail-settings-' + child.to"
+              :to="child.to"
+              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
+              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              :title="child.label"
             >
-              <Settings class="size-4 shrink-0" />
-            </RouterLink>
-            <RouterLink
-              v-for="item in settingsFlatLeaves"
-              :key="item.to"
-              :to="item.to"
-              class="flex items-center justify-center rounded-lg px-2 py-2.5 text-muted transition hover:bg-surface hover:text-ink"
-              :title="item.label"
-              active-class="!bg-brand-soft !text-brand"
-            >
-              <component :is="item.icon" class="size-4 shrink-0" />
+              <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
             </RouterLink>
           </template>
         </div>
@@ -422,66 +464,75 @@ onUnmounted(() => {
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-panel px-6">
-        <h1 class="min-w-0 truncate text-base font-semibold tracking-tight">{{ title }}</h1>
-
-        <div ref="profileRoot" class="relative ml-auto">
+      <header class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6">
+        <div class="flex min-w-0 items-center gap-2">
           <button
             type="button"
-            class="flex items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40"
+            class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink transition hover:bg-panel md:hidden"
+            title="Меню"
+            @click="mobileNavOpen = true"
+          >
+            <Menu class="size-4" />
+          </button>
+          <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
+        </div>
+        <div ref="profileRoot" class="relative shrink-0">
+          <button
+            type="button"
+            class="flex max-w-[min(100%,14rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
             :aria-expanded="profileOpen"
+            aria-haspopup="menu"
             @click.stop="profileOpen = !profileOpen"
           >
             <span
-              class="flex size-8 items-center justify-center rounded-full bg-brand text-[11px] font-bold tracking-wide text-white"
-              :title="auth.user?.name"
-            >
-              {{ initials }}
-            </span>
-            <span class="hidden max-w-[140px] truncate text-left text-sm font-medium sm:block">
-              {{ auth.user?.name }}
+              class="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white"
+            >{{ initials }}</span>
+            <span class="hidden min-w-0 text-left sm:block">
+              <span class="block truncate text-sm font-medium text-ink">{{ auth.user?.name }}</span>
+              <span class="block truncate text-[11px] text-mute">{{ roleDisplay }}</span>
             </span>
             <ChevronDown
-              class="size-3.5 shrink-0 text-muted transition-transform"
+              class="hidden size-4 shrink-0 text-mute transition-transform sm:block"
               :class="profileOpen ? 'rotate-180' : ''"
             />
           </button>
 
           <div
             v-if="profileOpen"
-            class="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-line bg-panel shadow-lg"
+            class="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-lg"
+            role="menu"
           >
-            <div class="border-b border-line px-4 py-3">
-              <div class="truncate text-sm font-semibold">{{ auth.user?.name }}</div>
-              <div class="truncate text-[11px] text-muted">{{ roleDisplay }}</div>
-              <div class="mt-0.5 truncate text-[11px] text-muted">{{ auth.user?.email }}</div>
+            <div class="border-b border-line px-3 py-2.5 sm:hidden">
+              <p class="truncate text-sm font-medium text-ink">{{ auth.user?.name }}</p>
+              <p class="truncate text-xs text-mute">{{ roleDisplay }}</p>
             </div>
-            <div class="p-1.5">
-              <RouterLink
-                to="/profile"
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
-                @click="profileOpen = false"
-              >
-                <UserRound class="size-4 text-muted" />
-                Профиль и настройки
-              </RouterLink>
-              <RouterLink
-                to="/profile/templates"
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-ink transition hover:bg-surface"
-                @click="profileOpen = false"
-              >
-                <TextQuote class="size-4 text-muted" />
-                Мои шаблоны
-              </RouterLink>
-              <button
-                type="button"
-                class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/5"
-                @click="logout"
-              >
-                <LogOut class="size-4" />
-                Выйти
-              </button>
-            </div>
+            <RouterLink
+              :to="{ name: 'profile' }"
+              class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
+              role="menuitem"
+              @click="profileOpen = false"
+            >
+              <UserRound class="size-4 text-mute" />
+              Профиль
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'profile-templates' }"
+              class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
+              role="menuitem"
+              @click="profileOpen = false"
+            >
+              <TextQuote class="size-4 text-mute" />
+              Мои шаблоны
+            </RouterLink>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-danger transition hover:bg-danger-soft"
+              role="menuitem"
+              @click="logout"
+            >
+              <LogOut class="size-4" />
+              Выйти
+            </button>
           </div>
         </div>
       </header>
@@ -490,60 +541,43 @@ onUnmounted(() => {
       </main>
     </div>
 
-    <Transition
-      enter-active-class="transition duration-300 ease-out"
-      enter-from-class="translate-y-3 opacity-0"
-      enter-to-class="translate-y-0 opacity-100"
-      leave-active-class="transition duration-200 ease-in"
-      leave-from-class="translate-y-0 opacity-100"
-      leave-to-class="translate-y-2 opacity-0"
+    <div
+      v-if="inAppToast"
+      class="pointer-events-none fixed inset-x-0 top-3 z-[100] flex justify-center px-3"
     >
       <div
-        v-if="inAppToast"
-        class="fixed bottom-5 right-5 z-[200] w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_18px_50px_-24px_rgba(21,32,51,0.55)]"
-        role="status"
+        class="pointer-events-auto flex max-w-md items-start gap-3 rounded-xl border px-3.5 py-3 shadow-lg"
+        :class="{
+          'border-line bg-panel text-ink': inAppToast.kind === 'ok' || inAppToast.kind === 'message',
+          'border-amber-200 bg-amber-50 text-amber-950': inAppToast.kind === 'warn',
+          'border-danger/30 bg-danger-soft text-danger': inAppToast.kind === 'err',
+        }"
       >
-        <div class="h-1 w-full bg-brand" />
-        <button
-          type="button"
-          class="flex w-full items-start gap-3 px-3.5 py-3 text-left transition hover:bg-brand-soft/40"
-          @click="openToastDialog"
-        >
-          <div
-            class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl text-[12px] font-bold tracking-wide text-white"
-            :class="
-              inAppToast.kind === 'err'
-                ? 'bg-danger'
-                : inAppToast.kind === 'warn'
-                  ? 'bg-warn'
-                  : 'bg-brand'
-            "
+        <span
+          v-if="inAppToast.kind === 'message'"
+          class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white"
+        >{{ inAppToast.initials || '?' }}</span>
+        <div class="min-w-0 flex-1">
+          <p v-if="inAppToast.title" class="text-sm font-semibold leading-snug">{{ inAppToast.title }}</p>
+          <p class="text-sm leading-snug" :class="inAppToast.title ? 'mt-0.5 text-mute' : ''">{{ inAppToast.text }}</p>
+          <button
+            v-if="inAppToast.dialogId && inAppToast.dialogId !== 'test'"
+            type="button"
+            class="mt-2 text-xs font-semibold text-brand hover:underline"
+            @click="openToastDialog"
           >
-            {{ inAppToast.initials || (inAppToast.kind === 'err' ? '!' : 'OE') }}
-          </div>
-          <div class="min-w-0 flex-1 pt-0.5">
-            <div class="flex items-start justify-between gap-2">
-              <div class="truncate text-[13px] font-semibold text-ink">
-                {{ inAppToast.title || (inAppToast.kind === 'err' ? 'Ошибка' : 'SkySender') }}
-              </div>
-              <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted"
-                >сейчас</span
-              >
-            </div>
-            <div class="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">
-              {{ inAppToast.text }}
-            </div>
-          </div>
-        </button>
+            Открыть диалог
+          </button>
+        </div>
         <button
           type="button"
-          class="absolute right-1.5 top-2.5 rounded-lg px-2 py-1 text-[11px] text-muted transition hover:bg-surface hover:text-ink"
+          class="shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-mute hover:bg-black/5"
           aria-label="Закрыть"
-          @click.stop="dismissInAppToast"
+          @click="dismissInAppToast"
         >
-          ✕
+          ×
         </button>
       </div>
-    </Transition>
+    </div>
   </div>
 </template>

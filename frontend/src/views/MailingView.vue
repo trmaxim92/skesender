@@ -348,7 +348,7 @@ async function openDetail(id: number) {
   <div class="flex h-full min-h-0 flex-col bg-surface">
     <!-- LIST -->
     <div v-if="mode === 'list'" class="flex min-h-0 flex-1 flex-col">
-      <div class="relative overflow-hidden border-b border-line bg-panel px-6 py-6">
+      <div class="relative overflow-hidden border-b border-line bg-panel px-4 py-5 md:px-6 md:py-6">
         <div
           class="pointer-events-none absolute -right-16 -top-20 size-56 rounded-full bg-brand/10 blur-2xl"
         />
@@ -375,7 +375,7 @@ async function openDetail(id: number) {
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-auto p-6">
+      <div class="min-h-0 flex-1 overflow-auto p-4 md:p-6">
         <p v-if="mailing.error" class="mb-4 text-sm text-danger">{{ mailing.error }}</p>
 
         <div v-if="!mailing.campaigns.length" class="flex flex-col items-center justify-center py-20 text-center">
@@ -494,7 +494,7 @@ async function openDetail(id: number) {
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-auto px-6 py-6">
+      <div class="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6 md:py-6">
         <p v-if="mailing.error" class="mx-auto mb-4 max-w-3xl text-sm text-danger">{{ mailing.error }}</p>
 
         <Transition name="wizard-fade" mode="out-in">
@@ -977,9 +977,9 @@ async function openDetail(id: number) {
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-auto p-6">
-        <div class="mx-auto max-w-4xl overflow-hidden rounded-2xl border border-line bg-panel">
-          <table class="w-full text-left text-sm">
+      <div class="min-h-0 flex-1 overflow-auto p-4 md:p-6">
+        <div class="mx-auto max-w-4xl overflow-x-auto rounded-2xl border border-line bg-panel">
+          <table class="w-full min-w-[480px] text-left text-sm">
             <thead class="border-b border-line bg-surface text-[11px] uppercase tracking-wide text-muted">
               <tr>
                 <th class="px-4 py-3">Получатель</th>
