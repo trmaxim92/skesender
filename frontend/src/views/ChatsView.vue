@@ -880,6 +880,12 @@ onUnmounted(() => {
                     </button>
                   </div>
                 </div>
+                <div
+                  v-else-if="row.message.text === '[медиа]' && !row.message.attachments?.length"
+                  class="text-xs opacity-70"
+                >
+                  Медиа недоступно (не сохранилось или удалено в MAX)
+                </div>
                 <MessageBody
                   v-else-if="row.message.text && !(row.message.attachments?.length && isEmojiOnlyPreview(row.message.text))"
                   :text="row.message.text"
