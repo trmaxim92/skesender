@@ -616,8 +616,9 @@ export const useChatsStore = defineStore('chats', () => {
 
   function addFiles(fileList: FileList | File[] | null) {
     if (!fileList) return
-    const next = [...pendingFiles.value, ...Array.from(fileList)]
-    pendingFiles.value = next.slice(0, 5)
+    const incoming = Array.from(fileList)
+    if (!incoming.length) return
+    pendingFiles.value = [...pendingFiles.value, ...incoming]
   }
 
   function removePendingFile(index: number) {

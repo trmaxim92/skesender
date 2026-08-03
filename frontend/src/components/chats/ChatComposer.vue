@@ -141,6 +141,53 @@ function onDrop(event: DragEvent) {
   if (list?.length) emit('addFiles', list)
 }
 
+function normalizePastedFile(file: File): File {
+  if (file.name?.trim()) return file
+  const mime = file.type || ''
+  const ext =
+    mime === 'image/png'
+      ? 'png'
+      : mime === 'image/jpeg'
+        ? 'jpg'
+        : mime === 'image/webp'
+          ? 'webp'
+          : mime === 'image/gif'
+            ? 'gif'
+            : mime.startsWith('video/')
+              ? 'mp4'
+              : mime.startsWith('audio/')
+                ? 'mp3'
+                : 'bin'
+  return new File([file], `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`, {
+    type: mime || 'application/octet-stream',
+    lastModified: file.lastModified,
+  })
+}
+
+function filesFromClipboard(dt: DataTransfer): File[] {
+  if (dt.files?.length) {
+    return Array.from(dt.files).map(normalizePastedFile)
+  }
+  const out: File[] = []
+  for (const item of Array.from(dt.items || [])) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (file) out.push(normalizePastedFile(file))
+  }
+  return out
+}
+
+function onPaste(event: ClipboardEvent) {
+  if (props.noteMode) return
+  const dt = event.clipboardData
+  if (!dt) return
+  const files = filesFromClipboard(dt)
+  if (!files.length) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('addFiles', files)
+}
+
 function fileKindLabel(file: File) {
   if (file.type.startsWith('image/')) return 'Фото'
   if (file.type.startsWith('video/')) return 'Видео'
@@ -189,6 +236,7 @@ watch(
     @dragleave="onDragLeave"
     @dragover="onDragOver"
     @drop="onDrop"
+    @paste="onPaste"
   >
     <div
       v-if="dragOver"
@@ -196,7 +244,7 @@ watch(
     >
       <div class="text-center">
         <p class="text-sm font-semibold text-brand">Отпустите файлы здесь</p>
-        <p class="mt-0.5 text-xs text-muted">фото, видео, документы — до 5 за раз</p>
+        <p class="mt-0.5 text-xs text-muted">фото, видео, документы — без ограничения по числу</p>
       </div>
     </div>
 
@@ -334,10 +382,11 @@ watch(
           ref="textareaEl"
           :value="modelValue"
           rows="1"
-          :placeholder="noteMode ? 'Заметка для команды…' : 'Написать сообщение… или перетащите файл'"
+          :placeholder="noteMode ? 'Заметка для команды…' : 'Написать сообщение… или вставьте / перетащите файлы'"
           class="max-h-32 min-h-[28px] w-full resize-none bg-transparent py-1 text-sm leading-6 outline-none"
           :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/80'"
           @input="onInput"
+          @paste="onPaste"
           @keydown.enter.exact.prevent="canSend && emit('send')"
         />
       </div>
