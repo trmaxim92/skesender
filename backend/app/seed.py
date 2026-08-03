@@ -115,13 +115,13 @@ async def seed_database(session: AsyncSession) -> None:
     await migrate_users_to_access_roles(session, by_slug)
     await migrate_user_channels_to_roles(session)
 
-    offline = presence_by_slug.get("offline")
-    if offline is not None:
+    online = presence_by_slug.get("online")
+    if online is not None:
         orphans = (
             await session.execute(select(User).where(User.presence_status_id.is_(None)))
         ).scalars().all()
         for u in orphans:
-            u.presence_status_id = offline.id
+            u.presence_status_id = online.id
 
     for email, _name, _role in demo_users:
         u = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()

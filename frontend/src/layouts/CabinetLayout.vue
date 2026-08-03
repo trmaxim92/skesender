@@ -17,7 +17,7 @@ import {
   X,
   CircleUserRound,
 } from 'lucide-vue-next'
-import { AUTH_EXPIRED_EVENT } from '@/api/client'
+import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
 import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
 import { useAuthStore } from '@/stores/auth'
@@ -263,6 +263,11 @@ async function loadPresenceStatuses() {
   }
 }
 
+function toggleProfileMenu() {
+  profileOpen.value = !profileOpen.value
+  if (profileOpen.value) void loadPresenceStatuses()
+}
+
 async function choosePresence(statusId: number) {
   if (presenceBusy.value || auth.user?.presenceStatusId === statusId) {
     profileOpen.value = false
@@ -272,8 +277,16 @@ async function choosePresence(statusId: number) {
   try {
     await auth.setPresence(statusId)
     profileOpen.value = false
-  } catch {
-    // keep menu open; user can retry
+  } catch (e) {
+    window.dispatchEvent(
+      new CustomEvent('oe:in-app-toast', {
+        detail: {
+          kind: 'err',
+          title: 'Статус',
+          text: e instanceof ApiError ? e.detail : 'Не удалось сменить статус',
+        },
+      }),
+    )
   } finally {
     presenceBusy.value = false
   }
@@ -529,7 +542,7 @@ onUnmounted(() => {
             class="flex max-w-[min(100%,14rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
             :aria-expanded="profileOpen"
             aria-haspopup="menu"
-            @click.stop="profileOpen = !profileOpen"
+            @click.stop="toggleProfileMenu"
           >
             <span class="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white">
               {{ initials }}
