@@ -38,6 +38,7 @@ from app.models import (
     AppealStatus,
     Channel,
     ChannelStatus,
+    ChannelTransport,
     ChatMessage,
     Dialog,
     FieldScope,
@@ -1201,6 +1202,55 @@ async def delete_dialog_message(
 
     event = message_deleted_event(dialog_loaded, msg)
     out = message_to_out(msg)
+    await db.commit()
+    await emit_event(event)
+    return out
+
+
+@router.post("/messages/{message_id}/repair-media", response_model=MessageOut)
+async def repair_message_media_endpoint(
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CHATS)),
+) -> MessageOut:
+    """Re-fetch MAX attachments for messages that landed as empty «[медиа]»."""
+    _require_write(user)
+    msg = await _load_message(db, message_id)
+    dialog = await db.get(Dialog, msg.dialog_id)
+    if dialog is None:
+        raise HTTPException(status_code=404, detail="Dialog not found")
+    await _require_dialog_access(user, dialog, db)
+    channel = await db.get(Channel, msg.channel_id)
+    if channel is None or channel.transport != ChannelTransport.MAX.value:
+        raise HTTPException(status_code=400, detail="Repair supported only for MAX personal")
+    if msg.attachments:
+        return message_to_out(msg)
+
+    from app.integrations.max_personal.inbox import repair_message_media
+    from app.integrations.max_personal.runtime import runtime as max_runtime
+
+    try:
+        client = await max_runtime.ensure_client(channel.id)
+        stored = await repair_message_media(
+            db, msg=msg, channel=channel, client=client
+        )
+    except IntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("repair-media failed message=%s", message_id)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not stored:
+        raise HTTPException(status_code=404, detail="MAX did not return attachments for this message")
+
+    result = await db.execute(
+        select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)
+    )
+    dialog_loaded = result.scalar_one()
+    await _refresh_dialog_preview(db, dialog_loaded)
+    msg = await _load_message(db, msg.id)
+    out = message_to_out(msg)
+    event = message_updated_event(dialog_loaded, msg, channel.transport)
     await db.commit()
     await emit_event(event)
     return out

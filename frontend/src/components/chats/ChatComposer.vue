@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   FileText,
   Film,
@@ -44,6 +44,7 @@ const attachOpen = ref(false)
 const templatesOpen = ref(false)
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const accept = ref('image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')
 const dragDepth = ref(0)
 
@@ -153,12 +154,32 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
 }
 
+function resizeTextarea() {
+  const el = textareaEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  if (!props.modelValue) {
+    el.style.height = ''
+    return
+  }
+  el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+}
+
 function onInput(event: Event) {
   const el = event.target as HTMLTextAreaElement
   emit('update:modelValue', el.value)
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 128)}px`
 }
+
+watch(
+  () => props.modelValue,
+  async (value) => {
+    if (value) return
+    await nextTick()
+    resizeTextarea()
+  },
+)
 </script>
 
 <template>
@@ -310,6 +331,7 @@ function onInput(event: Event) {
         "
       >
         <textarea
+          ref="textareaEl"
           :value="modelValue"
           rows="1"
           :placeholder="noteMode ? 'Заметка для команды…' : 'Написать сообщение… или перетащите файл'"
