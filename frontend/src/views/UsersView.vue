@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Pencil } from 'lucide-vue-next'
+import { Pencil, Trash2 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useEmployeesStore } from '@/stores/employees'
 import { listDepartmentsRequest, mapDepartment } from '@/api/settings'
 import type { Department, User } from '@/types'
 
+const auth = useAuthStore()
 const employees = useEmployeesStore()
 const departments = ref<Department[]>([])
 
@@ -25,6 +27,7 @@ const editPassword = ref('')
 const editRoleId = ref<number | null>(null)
 const editDepartmentIds = ref<number[]>([])
 const editActive = ref(true)
+const deletingId = ref<number | null>(null)
 
 onMounted(async () => {
   await Promise.all([employees.fetchEmployees(), employees.fetchRoles()])
@@ -116,6 +119,17 @@ async function saveEdit() {
   editSaving.value = false
   if (!ok) return
   closeEdit()
+}
+
+async function remove(user: User) {
+  if (user.id === auth.user?.id) return
+  if (!window.confirm(`Удалить пользователя «${user.name}» (${user.email})?\nЭто действие нельзя отменить.`)) {
+    return
+  }
+  deletingId.value = user.id
+  employees.error = ''
+  await employees.removeEmployee(user.id)
+  deletingId.value = null
 }
 
 function roleChannelLabel(user: { accessRoleId?: number | null }) {
@@ -214,7 +228,7 @@ function departmentLabel(user: User) {
             <th class="px-4 py-3 font-semibold">Отделы</th>
             <th class="px-4 py-3 font-semibold">Каналы (из роли)</th>
             <th class="px-4 py-3 font-semibold">Статус</th>
-            <th class="w-14 px-2 py-3" />
+            <th class="w-24 px-2 py-3" />
           </tr>
         </thead>
         <tbody>
@@ -244,14 +258,26 @@ function departmentLabel(user: User) {
               </span>
             </td>
             <td class="px-2 py-3">
-              <button
-                type="button"
-                class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
-                title="Редактировать"
-                @click="openEdit(e)"
-              >
-                <Pencil class="size-3.5" />
-              </button>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+                  title="Редактировать"
+                  @click="openEdit(e)"
+                >
+                  <Pencil class="size-3.5" />
+                </button>
+                <button
+                  v-if="e.id !== auth.user?.id"
+                  type="button"
+                  class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+                  title="Удалить"
+                  :disabled="deletingId === e.id"
+                  @click="remove(e)"
+                >
+                  <Trash2 class="size-3.5" />
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>

@@ -1,13 +1,28 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import AccessRole, Role, User, UserChannel, UserDepartment
+from app.models import (
+    AccessRole,
+    Appeal,
+    Channel,
+    ChatMessage,
+    Dialog,
+    MailingCampaign,
+    MailingTemplate,
+    MessageTemplate,
+    OutboundWebhook,
+    Role,
+    TemplateCategory,
+    User,
+    UserChannel,
+    UserDepartment,
+)
 from app.rbac import (
     ACTION_MANAGE_USERS,
     SECTION_CHATS,
@@ -178,3 +193,79 @@ async def update_user(
     loaded = await _load_user(db, user_id)
     assert loaded is not None
     return user_to_out(loaded)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(require_permission(ACTION_MANAGE_USERS)),
+) -> None:
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.id == current.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя удалить самого себя")
+
+    is_admin = user.role == Role.ADMIN.value
+    if not is_admin and user.access_role_id is not None:
+        role_row = await db.get(AccessRole, user.access_role_id)
+        is_admin = bool(role_row and role_row.slug == Role.ADMIN.value)
+    if is_admin:
+        admin_role_ids = list(
+            (
+                await db.execute(select(AccessRole.id).where(AccessRole.slug == Role.ADMIN.value))
+            ).scalars().all()
+        )
+        admin_filter = [User.role == Role.ADMIN.value]
+        if admin_role_ids:
+            admin_filter.append(User.access_role_id.in_(admin_role_ids))
+        other_admins = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.id != user.id, User.is_active.is_(True), or_(*admin_filter))
+        )
+        if not other_admins:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя удалить последнего администратора",
+            )
+
+    # Personal templates / categories belong to the user — remove with them.
+    cat_ids = (
+        await db.execute(select(TemplateCategory.id).where(TemplateCategory.created_by_id == user_id))
+    ).scalars().all()
+    if cat_ids:
+        await db.execute(
+            update(MessageTemplate)
+            .where(MessageTemplate.category_id.in_(cat_ids))
+            .values(category_id=None)
+        )
+    await db.execute(delete(MessageTemplate).where(MessageTemplate.created_by_id == user_id))
+    await db.execute(delete(TemplateCategory).where(TemplateCategory.created_by_id == user_id))
+
+    # Detach nullable FKs so history stays, but the user row can be removed.
+    await db.execute(update(Channel).where(Channel.created_by_id == user_id).values(created_by_id=None))
+    await db.execute(update(Dialog).where(Dialog.assignee_id == user_id).values(assignee_id=None))
+    await db.execute(update(Appeal).where(Appeal.closed_by_id == user_id).values(closed_by_id=None))
+    await db.execute(
+        update(ChatMessage).where(ChatMessage.operator_id == user_id).values(operator_id=None)
+    )
+    await db.execute(
+        update(OutboundWebhook)
+        .where(OutboundWebhook.created_by_id == user_id)
+        .values(created_by_id=None)
+    )
+    await db.execute(
+        update(MailingTemplate)
+        .where(MailingTemplate.created_by_id == user_id)
+        .values(created_by_id=None)
+    )
+    await db.execute(
+        update(MailingCampaign)
+        .where(MailingCampaign.created_by_id == user_id)
+        .values(created_by_id=None)
+    )
+
+    await db.delete(user)
+    await db.commit()

@@ -5,6 +5,7 @@ import {
   createRoleRequest,
   createUserRequest,
   deleteRoleRequest,
+  deleteUserRequest,
   listPermissionCatalogRequest,
   listRolesRequest,
   listUsersRequest,
@@ -112,6 +113,17 @@ export const useEmployeesStore = defineStore('employees', () => {
     }
   }
 
+  async function removeEmployee(id: number) {
+    try {
+      await deleteUserRequest(id)
+      employees.value = employees.value.filter((x) => x.id !== id)
+      return true
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось удалить'
+      return false
+    }
+  }
+
   async function saveRole(payload: {
     id?: number
     name: string
@@ -169,6 +181,7 @@ export const useEmployeesStore = defineStore('employees', () => {
     fetchRoles,
     addEmployee,
     updateEmployee,
+    removeEmployee,
     saveRole,
     removeRole,
   }

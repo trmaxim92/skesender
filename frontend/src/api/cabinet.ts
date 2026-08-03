@@ -96,6 +96,10 @@ export async function updateUserRequest(
   return api<ApiUser>(`/api/users/${id}`, { method: 'PATCH', json: payload })
 }
 
+export async function deleteUserRequest(id: number) {
+  return api<void>(`/api/users/${id}`, { method: 'DELETE' })
+}
+
 export async function listRolesRequest() {
   return api<ApiAccessRole[]>('/api/roles')
 }
