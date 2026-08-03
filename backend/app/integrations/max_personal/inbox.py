@@ -610,8 +610,7 @@ async def repair_message_media(
         return []
     chat_id = int(dialog.external_chat_id)
     message_id = int(msg.external_id)
-    full = await client.get_message(chat_id, message_id)
-    attaches = list(getattr(full, "attaches", None) or []) if full else []
+    attaches = await _fetch_message_attaches(client, chat_id, message_id)
     if not attaches:
         return []
     stored = await _persist_pymax_attachments(
@@ -626,6 +625,47 @@ async def repair_message_media(
         msg.text = message_preview_text("", stored) or msg.text or "[медиа]"
     await session.refresh(msg, attribute_names=["attachments"])
     return stored
+
+
+async def _fetch_message_attaches(client: Any, chat_id: int, message_id: int) -> list[Any]:
+    """Best-effort: get_message → get_messages → recent history scan."""
+    try:
+        full = await client.get_message(chat_id, message_id)
+        attaches = list(getattr(full, "attaches", None) or []) if full else []
+        if attaches:
+            return attaches
+    except Exception:
+        logger.exception("get_message failed chat=%s id=%s", chat_id, message_id)
+
+    try:
+        many = await client.get_messages(chat_id, [message_id])
+        for item in many or []:
+            if int(getattr(item, "id", 0) or 0) != message_id:
+                continue
+            attaches = list(getattr(item, "attaches", None) or [])
+            if attaches:
+                return attaches
+    except Exception:
+        logger.exception("get_messages failed chat=%s id=%s", chat_id, message_id)
+
+    try:
+        hist = await client.fetch_history(chat_id, backward=50)
+        for item in hist or []:
+            if int(getattr(item, "id", 0) or 0) != message_id:
+                continue
+            attaches = list(getattr(item, "attaches", None) or [])
+            logger.info(
+                "History hit for max message chat=%s id=%s attaches=%s text=%r",
+                chat_id,
+                message_id,
+                len(attaches),
+                getattr(item, "text", None),
+            )
+            return attaches
+    except Exception:
+        logger.exception("fetch_history failed chat=%s id=%s", chat_id, message_id)
+
+    return []
 
 
 async def _download(url: str) -> bytes:
