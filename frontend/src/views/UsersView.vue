@@ -27,7 +27,11 @@ const editPassword = ref('')
 const editRoleId = ref<number | null>(null)
 const editDepartmentIds = ref<number[]>([])
 const editActive = ref(true)
-const deletingId = ref<number | null>(null)
+
+const deleteOpen = ref(false)
+const deleteUser = ref<User | null>(null)
+const deleteBusy = ref(false)
+const deleteError = ref('')
 
 onMounted(async () => {
   await Promise.all([employees.fetchEmployees(), employees.fetchRoles()])
@@ -121,15 +125,33 @@ async function saveEdit() {
   closeEdit()
 }
 
-async function remove(user: User) {
+function openDelete(user: User) {
   if (user.id === auth.user?.id) return
-  if (!window.confirm(`Удалить пользователя «${user.name}» (${user.email})?\nЭто действие нельзя отменить.`)) {
+  deleteUser.value = user
+  deleteError.value = ''
+  deleteOpen.value = true
+}
+
+function closeDelete() {
+  if (deleteBusy.value) return
+  deleteOpen.value = false
+  deleteUser.value = null
+  deleteError.value = ''
+}
+
+async function confirmDelete() {
+  if (!deleteUser.value) return
+  deleteBusy.value = true
+  deleteError.value = ''
+  employees.error = ''
+  const ok = await employees.removeEmployee(deleteUser.value.id)
+  deleteBusy.value = false
+  if (!ok) {
+    deleteError.value = employees.error || 'Не удалось удалить'
     return
   }
-  deletingId.value = user.id
-  employees.error = ''
-  await employees.removeEmployee(user.id)
-  deletingId.value = null
+  deleteOpen.value = false
+  deleteUser.value = null
 }
 
 function roleChannelLabel(user: { accessRoleId?: number | null }) {
@@ -270,10 +292,9 @@ function departmentLabel(user: User) {
                 <button
                   v-if="e.id !== auth.user?.id"
                   type="button"
-                  class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+                  class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger"
                   title="Удалить"
-                  :disabled="deletingId === e.id"
-                  @click="remove(e)"
+                  @click="openDelete(e)"
                 >
                   <Trash2 class="size-3.5" />
                 </button>
@@ -364,6 +385,36 @@ function departmentLabel(user: User) {
           </button>
         </div>
       </form>
+    </Modal>
+
+    <Modal v-if="deleteOpen && deleteUser" title="Удалить пользователя?" @close="closeDelete">
+      <div class="space-y-4">
+        <p class="text-sm text-muted">
+          Пользователь
+          <span class="font-semibold text-ink">{{ deleteUser.name }}</span>
+          <span class="font-mono text-xs"> ({{ deleteUser.email }})</span>
+          будет удалён безвозвратно. История чатов сохранится.
+        </p>
+        <p v-if="deleteError" class="text-sm text-danger">{{ deleteError }}</p>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-xl border border-line px-4 py-2 text-sm font-semibold text-muted transition hover:bg-surface"
+            :disabled="deleteBusy"
+            @click="closeDelete"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            class="rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            :disabled="deleteBusy"
+            @click="confirmDelete"
+          >
+            {{ deleteBusy ? '…' : 'Удалить' }}
+          </button>
+        </div>
+      </div>
     </Modal>
   </div>
 </template>
