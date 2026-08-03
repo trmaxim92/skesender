@@ -69,10 +69,26 @@ const settingsGroupExpanded = ref(
 )
 const profileOpen = ref(false)
 const profileRoot = ref<HTMLElement | null>(null)
+const profileMenu = ref<HTMLElement | null>(null)
 const presenceStatuses = ref<PresenceStatus[]>([])
 const presenceBusy = ref(false)
+const presenceLoadError = ref('')
+const profileMenuStyle = ref<Record<string, string>>({})
 
 const currentPresence = computed(() => auth.user?.presenceStatus ?? null)
+
+function placeProfileMenu() {
+  if (!profileOpen.value) return
+  const el = profileRoot.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const width = 256
+  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8)
+  profileMenuStyle.value = {
+    top: `${Math.round(rect.bottom + 8)}px`,
+    left: `${Math.round(left)}px`,
+  }
+}
 
 /** Expanded labels: always on mobile drawer; rail collapse only from md up. */
 const expandedNav = computed(() => !isMdUp.value || !collapsed.value)
@@ -257,15 +273,28 @@ function logout() {
 
 async function loadPresenceStatuses() {
   try {
-    presenceStatuses.value = (await listPresenceStatusesRequest()).map(mapPresenceStatus)
-  } catch {
-    presenceStatuses.value = []
+    const rows = await listPresenceStatusesRequest()
+    presenceStatuses.value = rows.map(mapPresenceStatus)
+    presenceLoadError.value = ''
+  } catch (e) {
+    // Keep previous list so a transient error does not hide statuses.
+    presenceLoadError.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить статусы'
+    if (!presenceStatuses.value.length) {
+      window.dispatchEvent(
+        new CustomEvent('oe:in-app-toast', {
+          detail: { kind: 'err', title: 'Статусы', text: presenceLoadError.value },
+        }),
+      )
+    }
   }
 }
 
 function toggleProfileMenu() {
   profileOpen.value = !profileOpen.value
-  if (profileOpen.value) void loadPresenceStatuses()
+  if (profileOpen.value) {
+    placeProfileMenu()
+    void loadPresenceStatuses()
+  }
 }
 
 async function choosePresence(statusId: number) {
@@ -303,8 +332,9 @@ function onAuthExpired() {
 function onDocClick(e: MouseEvent) {
   unlockNotifyAudio()
   if (!profileOpen.value) return
-  const el = profileRoot.value
-  if (el && !el.contains(e.target as Node)) profileOpen.value = false
+  const t = e.target as Node
+  if (profileRoot.value?.contains(t) || profileMenu.value?.contains(t)) return
+  profileOpen.value = false
 }
 
 onMounted(() => {
@@ -313,6 +343,8 @@ onMounted(() => {
   window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
   window.addEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.addEventListener('oe:in-app-toast', onInAppToast)
+  window.addEventListener('resize', placeProfileMenu)
+  window.addEventListener('scroll', placeProfileMenu, true)
   mdMq = window.matchMedia('(min-width: 768px)')
   onMdMqChange()
   mdMq.addEventListener('change', onMdMqChange)
@@ -334,6 +366,8 @@ onUnmounted(() => {
   window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
   window.removeEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.removeEventListener('oe:in-app-toast', onInAppToast)
+  window.removeEventListener('resize', placeProfileMenu)
+  window.removeEventListener('scroll', placeProfileMenu, true)
   mdMq?.removeEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
@@ -525,21 +559,10 @@ onUnmounted(() => {
           </button>
           <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
-        <div ref="profileRoot" class="relative flex shrink-0 items-center gap-2">
-          <span
-            v-if="currentPresence"
-            class="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink sm:inline-flex"
-            :title="currentPresence.name"
-          >
-            <span
-              class="size-2 shrink-0 rounded-full"
-              :style="{ background: currentPresence.color }"
-            />
-            {{ currentPresence.name }}
-          </span>
+        <div ref="profileRoot" class="relative shrink-0">
           <button
             type="button"
-            class="flex max-w-[min(100%,14rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
+            class="flex max-w-[min(100%,18rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
             :aria-expanded="profileOpen"
             aria-haspopup="menu"
             @click.stop="toggleProfileMenu"
@@ -548,13 +571,20 @@ onUnmounted(() => {
               {{ initials }}
               <span
                 v-if="currentPresence"
-                class="absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-surface sm:hidden"
+                class="absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-surface"
                 :style="{ background: currentPresence.color }"
               />
             </span>
             <span class="hidden min-w-0 text-left sm:block">
               <span class="block truncate text-sm font-medium text-ink">{{ auth.user?.name }}</span>
-              <span class="block truncate text-[11px] text-mute">{{ roleDisplay }}</span>
+              <span class="flex items-center gap-1.5 truncate text-[11px] text-mute">
+                <span
+                  v-if="currentPresence"
+                  class="size-1.5 shrink-0 rounded-full"
+                  :style="{ background: currentPresence.color }"
+                />
+                {{ currentPresence?.name || roleDisplay }}
+              </span>
             </span>
             <ChevronDown
               class="hidden size-4 shrink-0 text-mute transition-transform sm:block"
@@ -562,65 +592,76 @@ onUnmounted(() => {
             />
           </button>
 
-          <div
-            v-if="profileOpen"
-            class="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-lg"
-            role="menu"
-          >
-            <div class="border-b border-line px-3 py-2.5 sm:hidden">
-              <p class="truncate text-sm font-medium text-ink">{{ auth.user?.name }}</p>
-              <p class="truncate text-xs text-mute">{{ roleDisplay }}</p>
-            </div>
-            <div v-if="presenceStatuses.length" class="border-b border-line py-1">
-              <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-mute">
-                Статус
-              </p>
-              <button
-                v-for="s in presenceStatuses"
-                :key="s.id"
-                type="button"
-                class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-surface"
-                :class="auth.user?.presenceStatusId === s.id ? 'bg-brand-soft/50 text-ink' : 'text-ink'"
+          <Teleport to="body">
+            <div
+              v-if="profileOpen"
+              ref="profileMenu"
+              class="fixed z-[200] w-64 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-lg"
+              role="menu"
+              :style="profileMenuStyle"
+              @click.stop
+            >
+              <div class="border-b border-line px-3 py-2.5 sm:hidden">
+                <p class="truncate text-sm font-medium text-ink">{{ auth.user?.name }}</p>
+                <p class="truncate text-xs text-mute">{{ roleDisplay }}</p>
+              </div>
+              <div class="border-b border-line py-1">
+                <p class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-mute">
+                  Статус
+                </p>
+                <p v-if="!presenceStatuses.length" class="px-3 py-2 text-xs text-mute">
+                  {{ presenceLoadError || 'Загрузка…' }}
+                </p>
+                <div class="max-h-56 overflow-y-auto">
+                  <button
+                    v-for="s in presenceStatuses"
+                    :key="s.id"
+                    type="button"
+                    class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-surface"
+                    :class="auth.user?.presenceStatusId === s.id ? 'bg-brand-soft/50 text-ink' : 'text-ink'"
+                    role="menuitem"
+                    :disabled="presenceBusy"
+                    @click="choosePresence(s.id)"
+                  >
+                    <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
+                    <span class="flex-1 truncate">{{ s.name }}</span>
+                    <span
+                      v-if="auth.user?.presenceStatusId === s.id"
+                      class="text-[11px] text-brand"
+                    >✓</span>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-danger transition hover:bg-danger-soft"
+                  role="menuitem"
+                  @click="logout"
+                >
+                  <span class="size-2.5 shrink-0 rounded-full bg-[#9ca3af]" />
+                  <span class="flex-1">Выход</span>
+                  <LogOut class="size-3.5 opacity-70" />
+                </button>
+              </div>
+              <RouterLink
+                :to="{ name: 'profile' }"
+                class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
                 role="menuitem"
-                :disabled="presenceBusy"
-                @click="choosePresence(s.id)"
+                @click="profileOpen = false"
               >
-                <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
-                <span class="flex-1 truncate">{{ s.name }}</span>
-                <span
-                  v-if="auth.user?.presenceStatusId === s.id"
-                  class="text-[11px] text-brand"
-                >✓</span>
-              </button>
+                <UserRound class="size-4 text-mute" />
+                Профиль
+              </RouterLink>
+              <RouterLink
+                :to="{ name: 'profile-templates' }"
+                class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
+                role="menuitem"
+                @click="profileOpen = false"
+              >
+                <TextQuote class="size-4 text-mute" />
+                Мои шаблоны
+              </RouterLink>
             </div>
-            <RouterLink
-              :to="{ name: 'profile' }"
-              class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
-              role="menuitem"
-              @click="profileOpen = false"
-            >
-              <UserRound class="size-4 text-mute" />
-              Профиль
-            </RouterLink>
-            <RouterLink
-              :to="{ name: 'profile-templates' }"
-              class="flex items-center gap-2.5 px-3 py-2.5 text-sm text-ink transition hover:bg-surface"
-              role="menuitem"
-              @click="profileOpen = false"
-            >
-              <TextQuote class="size-4 text-mute" />
-              Мои шаблоны
-            </RouterLink>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-danger transition hover:bg-danger-soft"
-              role="menuitem"
-              @click="logout"
-            >
-              <LogOut class="size-4" />
-              Выйти
-            </button>
-          </div>
+          </Teleport>
         </div>
       </header>
       <main class="min-h-0 flex-1 overflow-hidden">
