@@ -86,11 +86,15 @@ export const useEmployeesStore = defineStore('employees', () => {
       departmentIds?: number[]
       isActive?: boolean
       name?: string
+      email?: string
+      password?: string
     },
   ) {
     try {
       const updated = await updateUserRequest(id, {
         name: payload.name,
+        email: payload.email,
+        password: payload.password,
         access_role_id: payload.accessRoleId,
         channel_ids: payload.channelIds,
         department_ids: payload.departmentIds,
@@ -99,9 +103,12 @@ export const useEmployeesStore = defineStore('employees', () => {
       const mapped = mapApiUser(updated)
       const idx = employees.value.findIndex((x) => x.id === id)
       if (idx >= 0) employees.value[idx] = mapped
+      else employees.value.push(mapped)
+      return true
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось обновить'
       await fetchEmployees()
+      return false
     }
   }
 

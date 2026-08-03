@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { Pencil } from 'lucide-vue-next'
+import Modal from '@/components/ui/Modal.vue'
 import { useEmployeesStore } from '@/stores/employees'
 import { listDepartmentsRequest, mapDepartment } from '@/api/settings'
-import type { Department } from '@/types'
+import type { Department, User } from '@/types'
 
 const employees = useEmployeesStore()
 const departments = ref<Department[]>([])
@@ -13,6 +15,16 @@ const password = ref('demo')
 const accessRoleId = ref<number | null>(null)
 const departmentIds = ref<number[]>([])
 const saving = ref(false)
+
+const editOpen = ref(false)
+const editSaving = ref(false)
+const editing = ref<User | null>(null)
+const editName = ref('')
+const editEmail = ref('')
+const editPassword = ref('')
+const editRoleId = ref<number | null>(null)
+const editDepartmentIds = ref<number[]>([])
+const editActive = ref(true)
 
 onMounted(async () => {
   await Promise.all([employees.fetchEmployees(), employees.fetchRoles()])
@@ -35,6 +47,14 @@ function toggleDepartment(id: number) {
   }
 }
 
+function toggleEditDepartment(id: number) {
+  if (editDepartmentIds.value.includes(id)) {
+    editDepartmentIds.value = editDepartmentIds.value.filter((x) => x !== id)
+  } else {
+    editDepartmentIds.value = [...editDepartmentIds.value, id]
+  }
+}
+
 async function add() {
   if (!name.value.trim() || !email.value.trim() || !password.value || !accessRoleId.value) return
   saving.value = true
@@ -54,12 +74,48 @@ async function add() {
   departmentIds.value = []
 }
 
-async function onEmployeeRoleChange(userId: number, roleId: number) {
-  await employees.updateEmployee(userId, { accessRoleId: roleId })
+function openEdit(user: User) {
+  editing.value = user
+  editName.value = user.name
+  editEmail.value = user.email
+  editPassword.value = ''
+  editRoleId.value = user.accessRoleId ?? null
+  editDepartmentIds.value = [...(user.departmentIds ?? [])]
+  editActive.value = user.isActive !== false
+  editOpen.value = true
+  employees.error = ''
 }
 
-async function onEmployeeDepartmentsChange(userId: number, ids: number[]) {
-  await employees.updateEmployee(userId, { departmentIds: ids })
+function closeEdit() {
+  editOpen.value = false
+  editing.value = null
+  editPassword.value = ''
+}
+
+async function saveEdit() {
+  if (!editing.value || !editName.value.trim() || !editEmail.value.trim() || !editRoleId.value) return
+  editSaving.value = true
+  const payload: {
+    name: string
+    email: string
+    accessRoleId: number
+    departmentIds: number[]
+    isActive: boolean
+    password?: string
+  } = {
+    name: editName.value.trim(),
+    email: editEmail.value.trim(),
+    accessRoleId: editRoleId.value,
+    departmentIds: editDepartmentIds.value,
+    isActive: editActive.value,
+  }
+  if (editPassword.value.trim()) {
+    payload.password = editPassword.value.trim()
+  }
+  const ok = await employees.updateEmployee(editing.value.id, payload)
+  editSaving.value = false
+  if (!ok) return
+  closeEdit()
 }
 
 function roleChannelLabel(user: { accessRoleId?: number | null }) {
@@ -69,6 +125,15 @@ function roleChannelLabel(user: { accessRoleId?: number | null }) {
   if (!role.channelIds?.length) return 'Каналы роли не заданы'
   return role.channelIds
     .map((id) => employees.allChannels.find((c) => c.id === id)?.name)
+    .filter(Boolean)
+    .join(', ')
+}
+
+function departmentLabel(user: User) {
+  const ids = user.departmentIds ?? []
+  if (!ids.length) return '—'
+  return ids
+    .map((id) => departments.value.find((d) => d.id === id)?.name)
     .filter(Boolean)
     .join(', ')
 }
@@ -148,6 +213,8 @@ function roleChannelLabel(user: { accessRoleId?: number | null }) {
             <th class="px-4 py-3 font-semibold">Роль</th>
             <th class="px-4 py-3 font-semibold">Отделы</th>
             <th class="px-4 py-3 font-semibold">Каналы (из роли)</th>
+            <th class="px-4 py-3 font-semibold">Статус</th>
+            <th class="w-14 px-2 py-3" />
           </tr>
         </thead>
         <tbody>
@@ -155,47 +222,122 @@ function roleChannelLabel(user: { accessRoleId?: number | null }) {
             v-for="e in employees.employees"
             :key="e.id"
             class="border-b border-line align-top last:border-0"
+            :class="e.isActive === false ? 'opacity-60' : ''"
           >
             <td class="px-4 py-3 font-medium">{{ e.name }}</td>
             <td class="px-4 py-3 font-mono text-xs text-muted">{{ e.email }}</td>
             <td class="px-4 py-3">
-              <select
-                class="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
-                :value="e.accessRoleId ?? ''"
-                @change="
-                  onEmployeeRoleChange(e.id, Number(($event.target as HTMLSelectElement).value))
+              {{ employees.roles.find((r) => r.id === e.accessRoleId)?.name || e.roleName || e.role }}
+            </td>
+            <td class="px-4 py-3 text-xs text-muted">{{ departmentLabel(e) }}</td>
+            <td class="px-4 py-3 text-xs text-muted">{{ roleChannelLabel(e) }}</td>
+            <td class="px-4 py-3">
+              <span
+                class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                :class="
+                  e.isActive === false
+                    ? 'bg-muted/15 text-muted'
+                    : 'bg-ok/15 text-ok'
                 "
               >
-                <option v-for="r in employees.roles" :key="r.id" :value="r.id">{{ r.name }}</option>
-              </select>
+                {{ e.isActive === false ? 'Выкл.' : 'Активен' }}
+              </span>
             </td>
-            <td class="px-4 py-3">
-              <div class="flex max-w-xs flex-wrap gap-1.5">
-                <label
-                  v-for="d in departments"
-                  :key="d.id"
-                  class="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px]"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="(e.departmentIds ?? []).includes(d.id)"
-                    @change="
-                      onEmployeeDepartmentsChange(
-                        e.id,
-                        (e.departmentIds ?? []).includes(d.id)
-                          ? (e.departmentIds ?? []).filter((id) => id !== d.id)
-                          : [...(e.departmentIds ?? []), d.id],
-                      )
-                    "
-                  />
-                  {{ d.name }}
-                </label>
-              </div>
+            <td class="px-2 py-3">
+              <button
+                type="button"
+                class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+                title="Редактировать"
+                @click="openEdit(e)"
+              >
+                <Pencil class="size-3.5" />
+              </button>
             </td>
-            <td class="px-4 py-3 text-xs text-muted">{{ roleChannelLabel(e) }}</td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <Modal v-if="editOpen && editing" title="Редактировать пользователя" @close="closeEdit">
+      <form class="space-y-4" @submit.prevent="saveEdit">
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Имя</span>
+          <input
+            v-model="editName"
+            required
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+          />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Email</span>
+          <input
+            v-model="editEmail"
+            required
+            type="email"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+          />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Новый пароль
+          </span>
+          <input
+            v-model="editPassword"
+            type="password"
+            placeholder="Оставьте пустым, чтобы не менять"
+            minlength="4"
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+          />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Роль</span>
+          <select
+            v-model.number="editRoleId"
+            required
+            class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none"
+          >
+            <option v-for="r in employees.roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+        </label>
+        <div>
+          <div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Отделы</div>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="d in departments"
+              :key="d.id"
+              class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs"
+            >
+              <input
+                type="checkbox"
+                :checked="editDepartmentIds.includes(d.id)"
+                @change="toggleEditDepartment(d.id)"
+              />
+              {{ d.name }}
+            </label>
+            <span v-if="!departments.length" class="text-xs text-muted">Нет отделов</span>
+          </div>
+        </div>
+        <label class="inline-flex cursor-pointer items-center gap-2 text-sm">
+          <input v-model="editActive" type="checkbox" class="size-4 rounded border-line" />
+          Активен
+        </label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            class="rounded-xl border border-line px-4 py-2 text-sm font-semibold text-muted transition hover:bg-surface"
+            @click="closeEdit"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            :disabled="editSaving"
+          >
+            {{ editSaving ? '…' : 'Сохранить' }}
+          </button>
+        </div>
+      </form>
+    </Modal>
   </div>
 </template>

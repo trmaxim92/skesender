@@ -84,6 +84,7 @@ export async function updateUserRequest(
   id: number,
   payload: {
     name?: string
+    email?: string
     role?: Role
     access_role_id?: number | null
     channel_ids?: number[]

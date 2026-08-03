@@ -61,6 +61,7 @@ class UserCreateRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
     role: Role | None = None
     access_role_id: int | None = None
     channel_ids: list[int] | None = None
