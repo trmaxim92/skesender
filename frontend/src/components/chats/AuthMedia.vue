@@ -6,6 +6,8 @@ const props = defineProps<{
   path: string
   alt?: string
   kind?: 'image' | 'video'
+  /** Extra classes for img/video element (thumbnails, lightbox strip). */
+  imgClass?: string
 }>()
 
 const src = ref('')
@@ -44,13 +46,13 @@ onBeforeUnmount(() => {
     v-else-if="kind !== 'video' && src"
     :src="src"
     :alt="alt || ''"
-    class="max-h-64 w-full object-cover"
+    :class="imgClass || 'max-h-64 w-full object-cover'"
   />
   <video
     v-else-if="kind === 'video' && src"
     :src="src"
     controls
-    class="max-h-64 w-full rounded-xl"
+    :class="imgClass || 'max-h-64 w-full rounded-xl'"
   />
-  <div v-else class="h-24 animate-pulse rounded-xl bg-black/5" />
+  <div v-else :class="imgClass ? 'size-full animate-pulse bg-black/5' : 'h-24 animate-pulse rounded-xl bg-black/5'" />
 </template>

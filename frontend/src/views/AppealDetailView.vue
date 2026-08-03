@@ -12,6 +12,7 @@ import { ApiError } from '@/api/client'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
 import ContactAvatar from '@/components/chats/ContactAvatar.vue'
+import ImageGalleryLightbox, { type GalleryImage } from '@/components/chats/ImageGalleryLightbox.vue'
 import MessageBody from '@/components/chats/MessageBody.vue'
 import MessageTicks from '@/components/chats/MessageTicks.vue'
 import VoiceMessage from '@/components/chats/VoiceMessage.vue'
@@ -103,6 +104,31 @@ function mediaSrc(att: MessageAttachment) {
 
 function openAttachment(att: MessageAttachment) {
   void downloadAuthFile(att.url, att.fileName)
+}
+
+const galleryOpen = ref(false)
+const galleryIndex = ref(0)
+
+const galleryImages = computed((): GalleryImage[] => {
+  const items: GalleryImage[] = []
+  const sorted = [...messages.value].sort((a, b) => +new Date(a.at) - +new Date(b.at))
+  for (const m of sorted) {
+    for (const att of m.attachments || []) {
+      if (att.kind !== 'image') continue
+      items.push({
+        id: att.id,
+        path: mediaSrc(att),
+        fileName: att.fileName,
+      })
+    }
+  }
+  return items
+})
+
+function openImageGallery(att: MessageAttachment) {
+  const idx = galleryImages.value.findIndex((img) => img.id === att.id)
+  galleryIndex.value = idx >= 0 ? idx : 0
+  galleryOpen.value = true
 }
 
 function dayKey(iso: string) {
@@ -401,7 +427,7 @@ onUnmounted(() => {
                         v-if="att.kind === 'image'"
                         type="button"
                         class="block w-full overflow-hidden rounded-xl text-left"
-                        @click="openAttachment(att)"
+                        @click="openImageGallery(att)"
                       >
                         <AuthMedia :path="mediaSrc(att)" :alt="att.fileName" kind="image" />
                       </button>
@@ -491,5 +517,13 @@ onUnmounted(() => {
     >
       Режим просмотра — заметки недоступны
     </div>
+
+    <ImageGalleryLightbox
+      v-if="galleryOpen && galleryImages.length"
+      :images="galleryImages"
+      :index="galleryIndex"
+      @update:index="galleryIndex = $event"
+      @close="galleryOpen = false"
+    />
   </div>
 </template>
