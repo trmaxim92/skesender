@@ -101,7 +101,15 @@ function fieldInputType(f: FieldDefinition) {
   if (f.fieldType === 'number') return 'number'
   if (f.fieldType === 'phone') return 'tel'
   if (f.fieldType === 'date') return 'date'
+  if (f.fieldType === 'link') return 'url'
   return 'text'
+}
+
+function linkHref(value: string | undefined) {
+  const raw = (value || '').trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `https://${raw}`
 }
 </script>
 
@@ -191,6 +199,24 @@ function fieldInputType(f: FieldDefinition) {
                   <option value="">—</option>
                   <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
                 </select>
+                <div v-else-if="f.fieldType === 'link'" class="space-y-1.5">
+                  <input
+                    v-model="clientDraft[f.key]"
+                    type="url"
+                    placeholder="https://"
+                    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                    :readonly="!canWrite"
+                  />
+                  <a
+                    v-if="clientDraft[f.key]?.trim()"
+                    :href="linkHref(clientDraft[f.key])"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-block text-xs font-semibold text-brand hover:underline"
+                  >
+                    Открыть ссылку
+                  </a>
+                </div>
                 <label
                   v-else-if="f.fieldType === 'bool'"
                   class="flex items-center gap-2 text-sm"
@@ -289,6 +315,24 @@ function fieldInputType(f: FieldDefinition) {
                   <option value="">—</option>
                   <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
                 </select>
+                <div v-else-if="f.fieldType === 'link'" class="space-y-1.5">
+                  <input
+                    v-model="appealDraft[f.key]"
+                    type="url"
+                    placeholder="https://"
+                    class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                    :readonly="!canWrite"
+                  />
+                  <a
+                    v-if="appealDraft[f.key]?.trim()"
+                    :href="linkHref(appealDraft[f.key])"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-block text-xs font-semibold text-brand hover:underline"
+                  >
+                    Открыть ссылку
+                  </a>
+                </div>
                 <label
                   v-else-if="f.fieldType === 'bool'"
                   class="flex items-center gap-2 text-sm"

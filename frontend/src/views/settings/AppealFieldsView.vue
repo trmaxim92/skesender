@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import FieldOptionsEditor from '@/components/settings/FieldOptionsEditor.vue'
 import {
   createFieldRequest,
   deleteFieldRequest,
@@ -20,7 +21,7 @@ const error = ref('')
 
 const label = ref('')
 const fieldType = ref<FieldType>('text')
-const optionsText = ref('')
+const optionRows = ref<string[]>([''])
 const saving = ref(false)
 
 const fieldTypes: { value: FieldType; label: string }[] = [
@@ -28,12 +29,23 @@ const fieldTypes: { value: FieldType; label: string }[] = [
   { value: 'textarea', label: 'Многострочный' },
   { value: 'number', label: 'Число' },
   { value: 'phone', label: 'Телефон' },
+  { value: 'link', label: 'Ссылка' },
   { value: 'select', label: 'Список' },
   { value: 'date', label: 'Дата' },
   { value: 'bool', label: 'Да/Нет' },
 ]
 
+function typeLabel(type: FieldType | string) {
+  return fieldTypes.find((t) => t.value === type)?.label || type
+}
+
 const selectedDept = computed(() => departments.value.find((d) => d.id === departmentId.value))
+
+watch(fieldType, (type) => {
+  if (type === 'select' && !optionRows.value.length) {
+    optionRows.value = ['']
+  }
+})
 
 async function loadDepartments() {
   departments.value = (await listDepartmentsRequest()).map(mapDepartment)
@@ -83,11 +95,13 @@ async function addField() {
   try {
     const options =
       fieldType.value === 'select'
-        ? optionsText.value
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
+        ? optionRows.value.map((s) => s.trim()).filter(Boolean)
         : []
+    if (fieldType.value === 'select' && !options.length) {
+      error.value = 'Добавьте хотя бы один вариант списка'
+      saving.value = false
+      return
+    }
     const created = await createFieldRequest({
       scope: 'appeal',
       department_id: departmentId.value,
@@ -98,8 +112,9 @@ async function addField() {
     })
     fields.value.push(mapFieldDefinition(created))
     label.value = ''
-    optionsText.value = ''
+    optionRows.value = ['']
     fieldType.value = 'text'
+    error.value = ''
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail : 'Не удалось добавить'
   } finally {
@@ -168,12 +183,9 @@ async function renameField(f: FieldDefinition, newLabel: string) {
       >
         Добавить
       </button>
-      <input
-        v-if="fieldType === 'select'"
-        v-model="optionsText"
-        placeholder="Варианты через запятую"
-        class="rounded-xl border border-line bg-panel px-3 py-2 text-sm sm:col-span-4"
-      />
+      <div v-if="fieldType === 'select'" class="sm:col-span-4">
+        <FieldOptionsEditor v-model="optionRows" />
+      </div>
     </form>
 
     <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
@@ -196,7 +208,7 @@ async function renameField(f: FieldDefinition, newLabel: string) {
                 @change="renameField(f, ($event.target as HTMLInputElement).value)"
               />
             </td>
-            <td class="px-4 py-3 text-muted">{{ f.fieldType }}</td>
+            <td class="px-4 py-3 text-muted">{{ typeLabel(f.fieldType) }}</td>
             <td class="px-4 py-3 font-mono text-xs text-muted">{{ f.key }}</td>
             <td class="px-4 py-3 text-right">
               <button

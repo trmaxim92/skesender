@@ -298,7 +298,10 @@ class FieldDefinitionCreateRequest(BaseModel):
     department_id: int | None = None
     key: str | None = Field(default=None, max_length=64)
     label: str = Field(min_length=1, max_length=255)
-    field_type: str = Field(default="text", pattern="^(text|textarea|number|phone|select|date|bool)$")
+    field_type: str = Field(
+        default="text",
+        pattern="^(text|textarea|number|phone|select|date|bool|link)$",
+    )
     options: list[str] = []
     required: bool = False
     sort_order: int = 0
@@ -306,7 +309,10 @@ class FieldDefinitionCreateRequest(BaseModel):
 
 class FieldDefinitionUpdateRequest(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=255)
-    field_type: str | None = Field(default=None, pattern="^(text|textarea|number|phone|select|date|bool)$")
+    field_type: str | None = Field(
+        default=None,
+        pattern="^(text|textarea|number|phone|select|date|bool|link)$",
+    )
     options: list[str] | None = None
     required: bool | None = None
     sort_order: int | None = None

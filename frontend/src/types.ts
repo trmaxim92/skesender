@@ -14,7 +14,7 @@ export type PermissionCode =
   | 'action.manage_users'
   | 'action.delete_appeals'
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'phone' | 'select' | 'date' | 'bool'
+export type FieldType = 'text' | 'textarea' | 'number' | 'phone' | 'select' | 'date' | 'bool' | 'link'
 export type FieldScope = 'client' | 'appeal'
 
 export type ChannelTransport = 'maxbot' | 'max' | 'telegram' | 'tgapi' | 'vk' | 'webchat'

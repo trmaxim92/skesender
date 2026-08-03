@@ -81,6 +81,7 @@ class FieldType(StrEnum):
     SELECT = "select"
     DATE = "date"
     BOOL = "bool"
+    LINK = "link"
 
 
 class TemplateKind(StrEnum):
