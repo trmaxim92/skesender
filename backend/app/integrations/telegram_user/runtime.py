@@ -256,9 +256,9 @@ class TelegramUserRuntime:
             meta = await self._load_session_meta(channel_id)
             if meta and meta.get("proxy"):
                 state.proxy_url = str(meta["proxy"]).strip() or None
-        proxy = None
+        proxy_cfg = None
         try:
-            proxy = telethon_proxy(state.proxy_url)
+            proxy_cfg = telethon_proxy(state.proxy_url)
         except IntegrationError as exc:
             state.status = "error"
             state.error = str(exc)
@@ -283,12 +283,14 @@ class TelegramUserRuntime:
             "lang_code": "ru",
             "system_lang_code": "ru",
         }
-        if proxy is not None:
-            client_kwargs["proxy"] = proxy
+        if proxy_cfg is not None:
+            client_kwargs["proxy"] = proxy_cfg.proxy
+            if proxy_cfg.connection is not None:
+                client_kwargs["connection"] = proxy_cfg.connection
             logger.info(
                 "Telegram user channel=%s using proxy type=%s source=%s",
                 channel_id,
-                proxy.get("proxy_type") if isinstance(proxy, dict) else proxy[0],
+                proxy_cfg.kind,
                 redact_proxy_url(state.proxy_url) if state.proxy_url else "env",
             )
 

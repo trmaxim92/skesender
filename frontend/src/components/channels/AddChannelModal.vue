@@ -148,12 +148,12 @@ watch(
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="socks5://user:pass@host:port или host:port:user:pass"
+          placeholder="socks5://… или tg://proxy?server=…&port=…&secret=…"
           class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 font-mono text-sm outline-none ring-brand focus:ring-2"
         />
         <span class="mt-1.5 block text-xs text-muted">
-          EU SOCKS5 для личного аккаунта (если с сервера MTProto режется). Пусто — общий
-          TELEGRAM_PROXY из сервера.
+          SOCKS5 (`host:port:login:pass`) или ссылка MTProto из Telegram/PROXYMANIA
+          (`tg://proxy?…`). Пусто — общий TELEGRAM_PROXY с сервера.
         </span>
       </label>
       <p v-if="channels.connectError" class="text-sm text-danger">{{ channels.connectError }}</p>
