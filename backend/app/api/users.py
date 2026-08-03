@@ -31,6 +31,7 @@ from app.rbac import (
     require_permission,
     user_can,
 )
+from app.realtime.hub import hub
 from app.schemas import UserCreateRequest, UserOut, UserUpdateRequest
 from app.security import hash_password
 from app.serializers_user import user_to_out
@@ -151,6 +152,7 @@ async def update_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    revoke_sessions = False
     if body.name is not None:
         user.name = body.name.strip()
     if body.email is not None:
@@ -181,15 +183,22 @@ async def update_user(
     if body.is_active is not None:
         if user.id == current.id and not body.is_active:
             raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+        if user.is_active and not body.is_active:
+            user.token_version = int(user.token_version or 0) + 1
+            revoke_sessions = True
         user.is_active = body.is_active
     if body.password:
         user.password_hash = hash_password(body.password)
+        user.token_version = int(user.token_version or 0) + 1
+        revoke_sessions = True
     if body.channel_ids is not None:
         await _set_channels(db, user.id, body.channel_ids)
     if body.department_ids is not None:
         await _set_departments(db, user.id, body.department_ids)
 
     await db.commit()
+    if revoke_sessions:
+        await hub.disconnect_user(user_id)
     loaded = await _load_user(db, user_id)
     assert loaded is not None
     return user_to_out(loaded)
@@ -269,3 +278,4 @@ async def delete_user(
 
     await db.delete(user)
     await db.commit()
+    await hub.disconnect_user(user_id)

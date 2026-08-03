@@ -60,6 +60,7 @@ export interface ApiWebhook {
   url: string
   events: string[]
   active: boolean
+  has_secret?: boolean
   created_at: string
 }
 

@@ -11,6 +11,7 @@ import {
   listMessagesRequest,
   listUsersRequest,
   mapApiUser,
+  markDialogReadRequest,
   sendMessageRequest,
   createNoteRequest,
   unreadSummaryRequest,
@@ -270,12 +271,16 @@ export const useChatsStore = defineStore('chats', () => {
 
     if (event.type === 'message.created') {
       const mappedDialog = mapDialog(event.dialog)
-      if (activeDialogId.value === mappedDialog.id && !isViewingPastAppeal.value) {
+      const mappedMsg = mapMessage(event.message)
+      const viewingHere =
+        activeDialogId.value === mappedDialog.id && !isViewingPastAppeal.value
+
+      if (viewingHere) {
+        // Optimistic UI; server mark-read keeps badges in sync with bump_unread.
         mappedDialog.unread = 0
       }
       upsertDialog(mappedDialog)
 
-      const mappedMsg = mapMessage(event.message)
       if (messageBelongsToView(mappedMsg, mappedDialog)) {
         if (!messages.value.some((m) => m.id === mappedMsg.id)) {
           messages.value.push(mappedMsg)
@@ -293,9 +298,12 @@ export const useChatsStore = defineStore('chats', () => {
           dialogId: mappedDialog.id,
           contactName: mappedDialog.contactName,
           text: mappedMsg.text || (mappedMsg.attachments?.[0]?.fileName ?? 'Вложение'),
-          isActiveDialog:
-            mappedMsg.dialogId === activeDialogId.value && !isViewingPastAppeal.value,
+          isActiveDialog: viewingHere,
         })
+        if (viewingHere) {
+          void markActiveDialogRead(mappedDialog.id)
+          return
+        }
       }
       void fetchUnreadSummary()
       return
@@ -319,12 +327,14 @@ export const useChatsStore = defineStore('chats', () => {
     if (event.type === 'dialog.updated') {
       const mappedDialog = mapDialog(event.dialog)
       if (activeDialogId.value === mappedDialog.id) {
-        if (!isViewingPastAppeal.value) {
-          mappedDialog.unread = 0
-        }
         const prevAppealId = dialogs.value.find((d) => d.id === mappedDialog.id)?.appealId
         if (mappedDialog.appealId != null && mappedDialog.appealId !== prevAppealId) {
           void fetchDialogAppeals(mappedDialog.id)
+        }
+        // Keep server unread when viewing; do not fake-zero (badges drifted before).
+        if (!isViewingPastAppeal.value && mappedDialog.unread > 0) {
+          void markActiveDialogRead(mappedDialog.id)
+          mappedDialog.unread = 0
         }
       }
       const idx = dialogs.value.findIndex((d) => d.id === mappedDialog.id)
@@ -345,6 +355,35 @@ export const useChatsStore = defineStore('chats', () => {
       typingTimer = window.setTimeout(() => {
         if (typingDialogId.value === id) typingDialogId.value = null
       }, 4000)
+    }
+  }
+
+  let markReadInflight: string | null = null
+  let markReadQueued: string | null = null
+
+  async function markActiveDialogRead(dialogId: string) {
+    if (activeDialogId.value !== dialogId || isViewingPastAppeal.value) return
+    if (markReadInflight === dialogId) {
+      markReadQueued = dialogId
+      return
+    }
+    markReadInflight = dialogId
+    try {
+      const updated = await markDialogReadRequest(Number(dialogId))
+      if (activeDialogId.value !== dialogId) return
+      const mapped = mapDialog(updated)
+      mapped.unread = 0
+      upsertDialog(mapped)
+      void fetchUnreadSummary()
+    } catch {
+      // Non-fatal: list refresh / next open will clear.
+      void fetchUnreadSummary()
+    } finally {
+      if (markReadInflight === dialogId) markReadInflight = null
+      if (markReadQueued === dialogId) {
+        markReadQueued = null
+        void markActiveDialogRead(dialogId)
+      }
     }
   }
 
@@ -854,6 +893,13 @@ export const useChatsStore = defineStore('chats', () => {
       pendingFiles.value = savedFiles
       if (savedReply) replyingTo.value = savedReply
       dialog.lastStatus = 'failed'
+      // Failed row is durable in CRM (+ WS); refresh so the ! tick is visible even if WS raced.
+      void fetchMessages(dialog.id, viewingAppealId.value)
+      showInAppToast({
+        text: error.value || 'Сообщение не доставлено',
+        kind: 'warn',
+        title: 'Ошибка отправки',
+      })
     } finally {
       sending.value = false
     }
@@ -910,7 +956,7 @@ export const useChatsStore = defineStore('chats', () => {
     closing.value = true
     error.value = ''
     try {
-      await closeDialogRequest(Number(closedId), withReply)
+      const { warning } = await closeDialogRequest(Number(closedId), withReply)
       // Сразу убираем из вкладок Новые/Мои/Чужие — закрытые там не живут.
       dialogs.value = dialogs.value.filter((d) => d.id !== closedId)
       if (activeDialogId.value === closedId) {
@@ -921,6 +967,14 @@ export const useChatsStore = defineStore('chats', () => {
       sidePanelOpen.value = false
       sidebar.value = null
       void fetchUnreadSummary()
+      if (warning) {
+        error.value = warning
+        showInAppToast({
+          text: warning,
+          kind: 'warn',
+          title: 'Обращение закрыто',
+        })
+      }
       return true
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось закрыть'

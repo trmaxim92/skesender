@@ -502,6 +502,7 @@ class WebhookOut(BaseModel):
     url: str
     events: list[str]
     active: bool
+    has_secret: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

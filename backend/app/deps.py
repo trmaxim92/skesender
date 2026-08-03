@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.models import AccessRole, User
-from app.security import decode_access_token
+from app.security import decode_access_token, token_version_matches
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -31,4 +31,6 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not token_version_matches(payload, user.token_version):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
     return user

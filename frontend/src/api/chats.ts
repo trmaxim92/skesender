@@ -225,9 +225,43 @@ export async function assignDialogRequest(dialogId: number, assigneeId: number |
   })
 }
 
-export async function closeDialogRequest(dialogId: number, withReply = true) {
+export async function markDialogReadRequest(dialogId: number) {
+  return api<ApiDialog>(`/api/chats/dialogs/${dialogId}/read`, { method: 'POST' })
+}
+
+export async function closeDialogRequest(
+  dialogId: number,
+  withReply = true,
+): Promise<{ dialog: ApiDialog; warning?: string }> {
   const params = new URLSearchParams({ with_reply: withReply ? 'true' : 'false' })
-  return api<ApiDialog>(`/api/chats/dialogs/${dialogId}/close?${params}`, { method: 'POST' })
+  const token = localStorage.getItem('oe_access_token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(`/api/chats/dialogs/${dialogId}/close?${params}`, {
+    method: 'POST',
+    headers,
+  })
+  const raw = await response.text()
+  let data: unknown = null
+  if (raw) {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      data = raw
+    }
+  }
+  if (!response.ok) {
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    }
+    const detail =
+      typeof data === 'object' && data && 'detail' in data
+        ? String((data as { detail: unknown }).detail)
+        : `HTTP ${response.status}`
+    throw new ApiError(response.status, detail)
+  }
+  const warning = response.headers.get('X-SkySender-Warning') || undefined
+  return { dialog: data as ApiDialog, warning }
 }
 
 export async function fetchSidebarRequest(dialogId: number) {

@@ -64,8 +64,9 @@ def save_bytes(
 
 
 def absolute_path(relative: str) -> Path:
-    path = (attachments_root() / relative).resolve()
     root = attachments_root().resolve()
-    if not str(path).startswith(str(root)):
+    path = (root / relative).resolve()
+    # is_relative_to avoids startswith false-positives (root vs root_evil).
+    if not path.is_relative_to(root):
         raise ValueError("Invalid attachment path")
     return path

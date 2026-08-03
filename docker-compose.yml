@@ -16,5 +16,19 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: order-elite-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - oe_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   oe_pgdata:
+  oe_redis:

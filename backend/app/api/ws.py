@@ -12,13 +12,18 @@ from app.departments import accessible_department_ids
 from app.models import User
 from app.rbac import accessible_channel_ids, load_user_rbac
 from app.realtime.hub import hub
-from app.security import decode_access_token
+from app.security import decode_access_token, token_version_matches
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ws"])
 
+# Re-load RBAC every N idle pings (~50s each) so role/channel changes apply without reconnect.
+_ACL_REFRESH_EVERY_PINGS = 2
 
-async def _auth_context(token: str | None) -> tuple[int, str, list[int] | None, list[int] | None] | None:
+
+async def _auth_context(
+    token: str | None,
+) -> tuple[int, str, list[int] | None, list[int] | None] | None:
     if not token:
         return None
     payload = decode_access_token(token)
@@ -28,6 +33,8 @@ async def _auth_context(token: str | None) -> tuple[int, str, list[int] | None, 
         result = await session.execute(select(User).where(User.email == payload["sub"]))
         user = result.scalar_one_or_none()
         if user is None or not user.is_active:
+            return None
+        if not token_version_matches(payload, user.token_version):
             return None
         loaded = await load_user_rbac(session, user)
         channel_ids = await accessible_channel_ids(loaded, session)
@@ -81,12 +88,26 @@ async def ws_chats(websocket: WebSocket) -> None:
         accepted=True,
     )
     logger.info("WS chats connected user=%s", email)
+    ping_count = 0
     try:
         while True:
             try:
                 await asyncio.wait_for(websocket.receive_text(), timeout=50)
             except asyncio.TimeoutError:
                 await websocket.send_text('{"type":"ping"}')
+                ping_count += 1
+                if token and ping_count % _ACL_REFRESH_EVERY_PINGS == 0:
+                    refreshed = await _auth_context(token)
+                    if refreshed is None:
+                        logger.info("WS ACL refresh failed user=%s — closing", email)
+                        await websocket.close(code=1008)
+                        return
+                    _uid, _email, channel_ids, department_ids = refreshed
+                    await hub.update_acl(
+                        websocket,
+                        channel_ids=channel_ids,
+                        department_ids=department_ids,
+                    )
     except WebSocketDisconnect:
         pass
     except Exception:

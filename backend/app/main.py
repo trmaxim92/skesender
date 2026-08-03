@@ -249,14 +249,61 @@ async def ensure_schema() -> None:
                 """
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS webhook_outbox (
+                    id SERIAL PRIMARY KEY,
+                    webhook_id INTEGER NOT NULL
+                        REFERENCES outbound_webhooks(id) ON DELETE CASCADE,
+                    event_type VARCHAR(64) NOT NULL,
+                    body_json TEXT NOT NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_error TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_outbox_webhook_id "
+                "ON webhook_outbox (webhook_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_outbox_status "
+                "ON webhook_outbox (status)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_outbox_pending "
+                "ON webhook_outbox (status, next_attempt_at)"
+            )
+        )
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    # In-memory hub/pollers/mailing require a single uvicorn worker (or replicas
-    # with external pub/sub + leader election). Do not run --workers > 1.
+async def lifespan(app: FastAPI):
+    # Without REDIS_URL: single-process mode (in-memory hub + local background workers).
+    # With REDIS_URL: WS/widget fan-out via pub/sub; only the Redis leader runs pollers/mailing/outbox.
     settings = get_settings()
-    logger.info("Starting %s (single-worker realtime/mailing)", settings.app_name)
+    from app.config import validate_runtime_settings
+
+    validate_runtime_settings(settings)
+    mode = "redis multi-worker" if settings.redis_enabled else "single-worker"
+    logger.info("Starting %s (%s)", settings.app_name, mode)
     try:
         from app.integrations.telegram_proxy import log_telegram_proxy_status
 
@@ -267,25 +314,51 @@ async def lifespan(_: FastAPI):
     async with SessionLocal() as session:
         await seed_database(session)
 
-    adapters = [get_adapter(t) for t in list_transports()]
-    for adapter in adapters:
+    if settings.redis_enabled:
         try:
-            await adapter.start_worker()
+            from app.redisutil import get_redis
+
+            await get_redis()
         except Exception:
-            logger.exception("Failed to start worker for %s", adapter.transport)
+            logger.exception("REDIS_URL set but Redis is unreachable — aborting start")
+            raise
 
+    from app.integrations.webchat.visitor_hub import visitor_hub
+    from app.leader import BackgroundLeader
     from app.mailing.worker import worker as mailing_worker
+    from app.realtime.hub import hub
+    from app.realtime.webhooks import worker as webhook_outbox_worker
+    from app.redisutil import close_redis
 
-    mailing_worker.start()
-    try:
-        yield
-    finally:
+    adapters = [get_adapter(t) for t in list_transports()]
+    workers_running = {"value": False}
+
+    async def start_background() -> None:
+        if workers_running["value"]:
+            return
+        for adapter in adapters:
+            try:
+                await adapter.start_worker()
+            except Exception:
+                logger.exception("Failed to start worker for %s", adapter.transport)
+        mailing_worker.start()
+        webhook_outbox_worker.start()
+        workers_running["value"] = True
+        logger.info("Background workers started (leader)")
+
+    async def stop_background() -> None:
+        if not workers_running["value"]:
+            return
         try:
             from app.realtime.webhooks import close_webhook_client
 
             await close_webhook_client()
         except Exception:
             logger.exception("Failed to close webhook HTTP client")
+        try:
+            await webhook_outbox_worker.stop()
+        except Exception:
+            logger.exception("Failed to stop webhook outbox worker")
         try:
             await mailing_worker.stop()
         except Exception:
@@ -295,6 +368,40 @@ async def lifespan(_: FastAPI):
                 await adapter.stop_worker()
             except Exception:
                 logger.exception("Failed to stop worker for %s", adapter.transport)
+        workers_running["value"] = False
+        logger.info("Background workers stopped")
+
+    await hub.start_pubsub()
+    await visitor_hub.start_pubsub()
+
+    leader = BackgroundLeader(on_start=start_background, on_stop=stop_background)
+    leader.start()
+    app.state.bg_leader = leader
+    app.state.redis_enabled = settings.redis_enabled
+    try:
+        yield
+    finally:
+        try:
+            await leader.stop()
+        except Exception:
+            logger.exception("Failed to stop leader elector")
+        try:
+            await visitor_hub.stop_pubsub()
+        except Exception:
+            logger.exception("Failed to stop widget pubsub")
+        try:
+            await hub.stop_pubsub()
+        except Exception:
+            logger.exception("Failed to stop chats pubsub")
+        if workers_running["value"]:
+            try:
+                await stop_background()
+            except Exception:
+                logger.exception("Failed to stop background workers on shutdown")
+        try:
+            await close_redis()
+        except Exception:
+            logger.exception("Failed to close Redis")
         await engine.dispose()
 
 
@@ -337,16 +444,52 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> JSONResponse:
+        payload: dict = {
+            "status": "ok",
+            "db": "ok",
+            "redis": "disabled",
+            "bg_leader": None,
+            "mode": "single-worker",
+        }
         try:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
-            return JSONResponse({"status": "ok", "db": "ok"})
         except Exception as exc:
             logger.exception("Health check DB failed")
             return JSONResponse(
-                {"status": "degraded", "db": "error", "detail": str(exc)[:200]},
+                {
+                    "status": "degraded",
+                    "db": "error",
+                    "redis": payload["redis"],
+                    "detail": str(exc)[:200],
+                },
                 status_code=503,
             )
+
+        if getattr(app.state, "redis_enabled", False):
+            payload["mode"] = "redis multi-worker"
+            try:
+                from app.redisutil import get_redis
+
+                r = await get_redis()
+                if r is None:
+                    payload["redis"] = "error"
+                    payload["status"] = "degraded"
+                else:
+                    await r.ping()
+                    payload["redis"] = "ok"
+            except Exception as exc:
+                logger.exception("Health check Redis failed")
+                payload["redis"] = "error"
+                payload["status"] = "degraded"
+                payload["redis_detail"] = str(exc)[:200]
+
+        leader = getattr(app.state, "bg_leader", None)
+        if leader is not None:
+            payload["bg_leader"] = bool(leader.is_leader)
+
+        status_code = 200 if payload["status"] == "ok" else 503
+        return JSONResponse(payload, status_code=status_code)
 
     return app
 

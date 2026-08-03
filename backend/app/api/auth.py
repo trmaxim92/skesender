@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
+from app.ratelimit import client_ip, limiter
 from app.rbac import load_user_rbac
+from app.realtime.hub import hub
 from app.schemas import (
     ChangePasswordRequest,
     LoginRequest,
@@ -20,12 +22,32 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
-    result = await db.execute(select(User).where(User.email == body.email.lower()))
+async def login(
+    body: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    ip = client_ip(request)
+    email = body.email.lower().strip()
+    await limiter.check(f"login:ip:{ip}", limit=20, window_sec=300, detail="Слишком много попыток входа")
+    await limiter.check(
+        f"login:email:{email}",
+        limit=10,
+        window_sec=300,
+        detail="Слишком много попыток входа для этого email",
+    )
+
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    token = create_access_token(subject=user.email, role=user.role)
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    token = create_access_token(
+        subject=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
     return TokenResponse(access_token=token)
 
 
@@ -69,4 +91,6 @@ async def change_my_password(
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="Пароль слишком короткий (мин. 6)")
     loaded.password_hash = hash_password(new_password)
+    loaded.token_version = int(loaded.token_version or 0) + 1
     await db.commit()
+    await hub.disconnect_user(loaded.id)

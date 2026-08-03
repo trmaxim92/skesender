@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ from app.models import (
     MessageStatus,
     utcnow,
 )
+from app.ratelimit import client_ip, limiter
 from app.realtime.publish import emit_event, message_created_event
 from app.schemas import WidgetMessageCreate, WidgetMessageOut, WidgetSessionOut, WidgetSessionRequest
 from app.security import ALGORITHM
@@ -131,13 +132,32 @@ def _message_out(msg: ChatMessage) -> WidgetMessageOut:
 @router.post("/session", response_model=WidgetSessionOut)
 async def create_widget_session(
     body: WidgetSessionRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     origin: str | None = Header(default=None, alias="Origin"),
 ) -> WidgetSessionOut:
+    ip = client_ip(request)
+    public_key = (body.public_key or "").strip()
+    await limiter.check(
+        f"widget:session:ip:{ip}",
+        limit=40,
+        window_sec=60,
+        detail="Слишком много запросов к виджету",
+    )
+    if public_key:
+        await limiter.check(
+            f"widget:session:key:{public_key}",
+            limit=60,
+            window_sec=60,
+            detail="Слишком много запросов к этому виджету",
+        )
+
     channel = await _load_webchat_channel(db, body.public_key)
     if channel is None:
         raise HTTPException(status_code=404, detail="Виджет не найден")
-    if origin and not _origin_allowed(channel, origin.rstrip("/")):
+    # Empty allow-list = any origin (incl. missing). Non-empty = Origin required + match.
+    normalized_origin = origin.rstrip("/") if origin else None
+    if not _origin_allowed(channel, normalized_origin):
         raise HTTPException(status_code=403, detail="Origin не разрешён для этого виджета")
 
     visitor_id = (body.visitor_id or "").strip()
@@ -199,10 +219,24 @@ async def list_widget_messages(
 @router.post("/messages", response_model=WidgetMessageOut)
 async def post_widget_message(
     body: WidgetMessageCreate,
+    request: Request,
     ctx: tuple[Channel, Dialog, str] = Depends(_visitor_context),
     db: AsyncSession = Depends(get_db),
 ) -> WidgetMessageOut:
     channel, dialog, visitor_id = ctx
+    ip = client_ip(request)
+    await limiter.check(
+        f"widget:msg:ip:{ip}",
+        limit=90,
+        window_sec=60,
+        detail="Слишком много сообщений",
+    )
+    await limiter.check(
+        f"widget:msg:dialog:{dialog.id}",
+        limit=45,
+        window_sec=60,
+        detail="Слишком много сообщений в этом чате",
+    )
     if channel.status != ChannelStatus.ONLINE.value:
         raise HTTPException(status_code=403, detail="Виджет временно недоступен")
 

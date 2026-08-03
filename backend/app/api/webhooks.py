@@ -43,6 +43,7 @@ def _to_out(row: OutboundWebhook) -> WebhookOut:
         url=row.url,
         events=[str(e) for e in events],
         active=row.active,
+        has_secret=bool(row.secret),
         created_at=row.created_at,
     )
 

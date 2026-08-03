@@ -111,6 +111,14 @@ class MailingRecipientStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class WebhookOutboxStatus(StrEnum):
+    PENDING = "pending"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+    DEAD = "dead"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -123,6 +131,8 @@ class User(Base):
         ForeignKey("access_roles.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Bumped on password change / deactivation to invalidate existing JWTs.
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     access_role: Mapped["AccessRole | None"] = relationship(back_populates="users")
@@ -469,6 +479,40 @@ class OutboundWebhook(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    outbox: Mapped[list["WebhookOutbox"]] = relationship(
+        back_populates="webhook", cascade="all, delete-orphan"
+    )
+
+
+class WebhookOutbox(Base):
+    """Durable outbound webhook deliveries (survive restarts / transient HTTP failures)."""
+
+    __tablename__ = "webhook_outbox"
+    __table_args__ = (
+        Index("ix_webhook_outbox_pending", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    webhook_id: Mapped[int] = mapped_column(
+        ForeignKey("outbound_webhooks.id", ondelete="CASCADE"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    body_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(16), default=WebhookOutboxStatus.PENDING.value, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    webhook: Mapped[OutboundWebhook] = relationship(back_populates="outbox")
 
 
 class MailingTemplate(Base):

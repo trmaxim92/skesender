@@ -84,6 +84,19 @@ async def bump_unread(session: AsyncSession, dialog: Dialog) -> int:
     return value
 
 
+async def clear_unread(session: AsyncSession, dialog: Dialog) -> bool:
+    """Atomically set unread=0. Returns True if a non-zero counter was cleared."""
+    result = await session.execute(
+        update(Dialog)
+        .where(Dialog.id == dialog.id, Dialog.unread > 0)
+        .values(unread=0)
+        .returning(Dialog.id)
+    )
+    cleared = result.scalar_one_or_none() is not None
+    dialog.unread = 0
+    return cleared
+
+
 async def try_insert_message(session: AsyncSession, msg: ChatMessage) -> ChatMessage | None:
     """Insert inbound/outbound row; return None on unique (channel_id, external_id) race.
 
