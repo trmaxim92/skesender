@@ -18,6 +18,8 @@ export interface ApiMailingCampaignChannel {
   channel_name: string | null
   transport: ChannelTransport | null
   identity: string | null
+  paused_until?: string | null
+  pause_reason?: string | null
 }
 
 export interface ApiMailingRecipient {
@@ -38,6 +40,12 @@ export interface ApiMailingCampaign {
   template_name: string | null
   status: string
   delay_sec: number
+  max_per_hour: number
+  max_per_day: number
+  fail_pause_pct: number
+  quiet_start_hour: number | null
+  quiet_end_hour: number | null
+  write_to_crm: boolean
   total: number
   sent: number
   failed: number
@@ -74,6 +82,12 @@ export function mapMailingCampaign(c: ApiMailingCampaign) {
     templateName: c.template_name,
     status: c.status as 'draft' | 'running' | 'paused' | 'completed' | 'failed',
     delaySec: c.delay_sec,
+    maxPerHour: c.max_per_hour ?? 30,
+    maxPerDay: c.max_per_day ?? 150,
+    failPausePct: c.fail_pause_pct ?? 40,
+    quietStartHour: c.quiet_start_hour ?? null,
+    quietEndHour: c.quiet_end_hour ?? null,
+    writeToCrm: c.write_to_crm ?? true,
     total: c.total,
     sent: c.sent,
     failed: c.failed,
@@ -82,6 +96,8 @@ export function mapMailingCampaign(c: ApiMailingCampaign) {
       channelName: ch.channel_name,
       transport: ch.transport,
       identity: ch.identity,
+      pausedUntil: ch.paused_until ?? null,
+      pauseReason: ch.pause_reason ?? null,
     })),
     startedAt: c.started_at,
     finishedAt: c.finished_at,
@@ -110,6 +126,12 @@ export async function createMailingCampaignRequest(payload: {
   template_id: number
   channel_ids: number[]
   delay_sec: number
+  max_per_hour: number
+  max_per_day: number
+  fail_pause_pct: number
+  quiet_start_hour: number | null
+  quiet_end_hour: number | null
+  write_to_crm: boolean
   recipients_text: string
 }) {
   return api<ApiMailingCampaign>('/api/mailing/campaigns', { method: 'POST', json: payload })

@@ -41,7 +41,13 @@ const selectedPlatform = ref<PlatformKey | null>(null)
 const campName = ref('')
 const campTemplateId = ref<number | null>(null)
 const campChannelIds = ref<number[]>([])
-const campDelay = ref(5)
+const campDelay = ref(15)
+const campMaxPerHour = ref(30)
+const campMaxPerDay = ref(150)
+const campFailPausePct = ref(40)
+const campQuietStart = ref<number | null>(null)
+const campQuietEnd = ref<number | null>(null)
+const campWriteToCrm = ref(true)
 const campRecipients = ref('')
 const campSaving = ref(false)
 const fileImporting = ref(false)
@@ -118,6 +124,10 @@ const selectedChannels = computed(() =>
   channels.channels.filter((c) => campChannelIds.value.includes(c.id)),
 )
 
+const hasColdPersonalAccounts = computed(() =>
+  selectedChannels.value.some((c) => c.transport === 'tgapi' || c.transport === 'max'),
+)
+
 const recipientCount = computed(() => {
   const lines = campRecipients.value
     .split(/\r?\n/)
@@ -145,7 +155,7 @@ const statusLabel: Record<string, string> = {
   running: 'Идёт',
   paused: 'Пауза',
   completed: 'Готово',
-  failed: 'Ошибка',
+  failed: 'Остановлена',
   pending: 'Ожидает',
   sending: 'Отправка',
   sent: 'Отправлено',
@@ -209,7 +219,13 @@ function startWizard() {
   campName.value = `Рассылка ${new Date().toLocaleDateString('ru-RU')}`
   campTemplateId.value = mailing.templates[0]?.id ?? null
   campChannelIds.value = []
-  campDelay.value = 5
+  campDelay.value = 15
+  campMaxPerHour.value = 30
+  campMaxPerDay.value = 150
+  campFailPausePct.value = 40
+  campQuietStart.value = null
+  campQuietEnd.value = null
+  campWriteToCrm.value = true
   campRecipients.value = ''
   fileImportError.value = ''
   importedFileName.value = ''
@@ -329,6 +345,12 @@ async function launchCampaign() {
     templateId: campTemplateId.value,
     channelIds: campChannelIds.value,
     delaySec: campDelay.value,
+    maxPerHour: campMaxPerHour.value,
+    maxPerDay: campMaxPerDay.value,
+    failPausePct: campFailPausePct.value,
+    quietStartHour: normalizeHour(campQuietStart.value),
+    quietEndHour: normalizeHour(campQuietEnd.value),
+    writeToCrm: campWriteToCrm.value,
     recipientsText: campRecipients.value,
   })
   campSaving.value = false
@@ -336,6 +358,13 @@ async function launchCampaign() {
   await mailing.openCampaign(created.id)
   await mailing.startCampaign(created.id)
   mode.value = 'detail'
+}
+
+function normalizeHour(value: number | null): number | null {
+  if (value === null || value === undefined) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  return Math.min(23, Math.max(0, Math.floor(n)))
 }
 
 async function openDetail(id: number) {
@@ -436,7 +465,7 @@ async function openDetail(id: number) {
             </div>
             <div v-if="canWrite" class="flex shrink-0 gap-2" @click.stop>
               <button
-                v-if="c.status === 'draft' || c.status === 'paused'"
+                v-if="c.status === 'draft' || c.status === 'paused' || c.status === 'failed'"
                 type="button"
                 class="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
                 @click="mailing.startCampaign(c.id)"
@@ -628,7 +657,11 @@ async function openDetail(id: number) {
 
           <!-- Step 3: Template -->
           <div v-else-if="step === 3" key="s3" class="mx-auto max-w-3xl">
-            <p class="mb-4 text-sm text-muted">Выберите готовый шаблон или создайте новый с текстом и медиа.</p>
+            <p class="mb-4 text-sm text-muted">
+              Выберите готовый шаблон или создайте новый с текстом и медиа.
+              Плейсхолдеры: name, phone, raw в двойных фигурных скобках.
+              Несколько вариантов текста — блоки через строку ---.
+            </p>
 
             <div class="mb-4 flex gap-2">
               <button
@@ -881,12 +914,77 @@ async function openDetail(id: number) {
                         class="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
                       />
                       сек
+                      <span class="text-[10px] text-muted">(±jitter 0.7–1.4×)</span>
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-muted">
+                      Лимит/час
+                      <input
+                        v-model.number="campMaxPerHour"
+                        type="number"
+                        min="0"
+                        max="500"
+                        class="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
+                      />
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-muted">
+                      Лимит/сутки
+                      <input
+                        v-model.number="campMaxPerDay"
+                        type="number"
+                        min="0"
+                        max="5000"
+                        class="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
+                      />
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-muted">
+                      Стоп при ошибках %
+                      <input
+                        v-model.number="campFailPausePct"
+                        type="number"
+                        min="0"
+                        max="100"
+                        class="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
+                      />
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-muted">
+                      Тихие часы (UTC)
+                      <input
+                        v-model.number="campQuietStart"
+                        type="number"
+                        min="0"
+                        max="23"
+                        placeholder="—"
+                        class="w-12 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
+                      />
+                      –
+                      <input
+                        v-model.number="campQuietEnd"
+                        type="number"
+                        min="0"
+                        max="23"
+                        placeholder="—"
+                        class="w-12 rounded-lg border border-line bg-surface px-2 py-1 text-sm text-ink"
+                      />
+                    </label>
+                    <label class="mt-2 flex items-center gap-2 text-xs text-muted">
+                      <input v-model="campWriteToCrm" type="checkbox" class="rounded border-line" />
+                      Писать в диалоги CRM
                     </label>
                   </dd>
                 </div>
               </dl>
               <p class="mt-4 rounded-xl bg-surface px-3 py-2.5 text-xs text-muted">
-                Каждый контакт получит одно сообщение с одного аккаунта — без дублей
+                Каждый контакт получит одно сообщение с одного аккаунта — без дублей.
+                FloodWait не блокирует другие кампании; PeerFlood ставит аккаунт на карантин.
+              </p>
+              <p
+                v-if="hasColdPersonalAccounts"
+                class="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200"
+              >
+                Личные аккаунты (Telegram/MAX) для холодной рассылки повышают риск PeerFlood.
+                Лучше отдельные сессии/прокси, не те же, что для операторских чатов.
+                В шаблоне: плейсхолдеры name/phone/raw в двойных фигурных скобках;
+                варианты текста разделяйте строкой ---.
               </p>
             </div>
           </div>
@@ -958,7 +1056,7 @@ async function openDetail(id: number) {
           </div>
           <div class="flex gap-2">
             <button
-              v-if="mailing.activeCampaign.status === 'draft' || mailing.activeCampaign.status === 'paused'"
+              v-if="mailing.activeCampaign.status === 'draft' || mailing.activeCampaign.status === 'paused' || mailing.activeCampaign.status === 'failed'"
               type="button"
               class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
               @click="mailing.startCampaign(mailing.activeCampaign.id)"

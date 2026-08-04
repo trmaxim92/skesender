@@ -65,6 +65,8 @@ def _campaign_out(c: MailingCampaign) -> MailingCampaignOut:
                 channel_name=ch.name if ch else None,
                 transport=ch.transport if ch else None,
                 identity=ch.identity if ch else None,
+                paused_until=getattr(link, "paused_until", None),
+                pause_reason=getattr(link, "pause_reason", None),
             )
         )
     return MailingCampaignOut(
@@ -74,6 +76,12 @@ def _campaign_out(c: MailingCampaign) -> MailingCampaignOut:
         template_name=c.template.name if c.template else None,
         status=c.status,
         delay_sec=c.delay_sec,
+        max_per_hour=int(getattr(c, "max_per_hour", 30) or 0),
+        max_per_day=int(getattr(c, "max_per_day", 150) or 0),
+        fail_pause_pct=int(getattr(c, "fail_pause_pct", 40) or 0),
+        quiet_start_hour=getattr(c, "quiet_start_hour", None),
+        quiet_end_hour=getattr(c, "quiet_end_hour", None),
+        write_to_crm=bool(getattr(c, "write_to_crm", True)),
         total=c.total,
         sent=c.sent,
         failed=c.failed,
@@ -240,6 +248,12 @@ async def create_campaign(
         template_id=template.id,
         status=MailingCampaignStatus.DRAFT.value,
         delay_sec=body.delay_sec,
+        max_per_hour=body.max_per_hour,
+        max_per_day=body.max_per_day,
+        fail_pause_pct=body.fail_pause_pct,
+        quiet_start_hour=body.quiet_start_hour,
+        quiet_end_hour=body.quiet_end_hour,
+        write_to_crm=body.write_to_crm,
         total=len(parsed),
         created_by_id=user.id,
     )
@@ -354,15 +368,23 @@ async def start_campaign(
     if campaign.status not in {
         MailingCampaignStatus.DRAFT.value,
         MailingCampaignStatus.PAUSED.value,
+        MailingCampaignStatus.FAILED.value,
     }:
         raise HTTPException(status_code=400, detail=f"Нельзя запустить из статуса {campaign.status}")
     if campaign.total <= 0:
         raise HTTPException(status_code=400, detail="Нет получателей")
 
     # Закрепляем каждого pending-получателя за одним аккаунтом (без дублей).
+    # Resume с паузы не перетирает уже назначенный channel_id.
     channel_ids = [link.channel_id for link in campaign.channels]
     if not channel_ids:
         raise HTTPException(status_code=400, detail="Нет каналов-отправителей")
+    # Clear expired channel quarantines on resume.
+    now = utcnow()
+    for link in campaign.channels:
+        if link.paused_until and link.paused_until <= now:
+            link.paused_until = None
+            link.pause_reason = None
     pending = list(
         (
             await db.execute(
@@ -377,8 +399,10 @@ async def start_campaign(
         .scalars()
         .all()
     )
-    for idx, recipient in enumerate(pending):
+    unassigned = [r for r in pending if r.channel_id is None or r.channel_id not in channel_ids]
+    for idx, recipient in enumerate(unassigned):
         recipient.channel_id = channel_ids[idx % len(channel_ids)]
+        recipient.next_attempt_at = None
 
     campaign.status = MailingCampaignStatus.RUNNING.value
     campaign.started_at = campaign.started_at or utcnow()

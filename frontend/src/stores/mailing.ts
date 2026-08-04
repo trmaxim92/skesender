@@ -88,6 +88,12 @@ export const useMailingStore = defineStore('mailing', () => {
     templateId: number
     channelIds: number[]
     delaySec: number
+    maxPerHour: number
+    maxPerDay: number
+    failPausePct: number
+    quietStartHour: number | null
+    quietEndHour: number | null
+    writeToCrm: boolean
     recipientsText: string
   }) {
     error.value = ''
@@ -97,6 +103,12 @@ export const useMailingStore = defineStore('mailing', () => {
         template_id: payload.templateId,
         channel_ids: payload.channelIds,
         delay_sec: payload.delaySec,
+        max_per_hour: payload.maxPerHour,
+        max_per_day: payload.maxPerDay,
+        fail_pause_pct: payload.failPausePct,
+        quiet_start_hour: payload.quietStartHour,
+        quiet_end_hour: payload.quietEndHour,
+        write_to_crm: payload.writeToCrm,
         recipients_text: payload.recipientsText,
       })
       const mapped = mapMailingCampaign(created)

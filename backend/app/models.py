@@ -573,7 +573,15 @@ class MailingCampaign(Base):
     name: Mapped[str] = mapped_column(String(255))
     template_id: Mapped[int] = mapped_column(ForeignKey("mailing_templates.id", ondelete="RESTRICT"), index=True)
     status: Mapped[str] = mapped_column(String(16), default=MailingCampaignStatus.DRAFT.value, index=True)
-    delay_sec: Mapped[int] = mapped_column(Integer, default=5)
+    delay_sec: Mapped[int] = mapped_column(Integer, default=15)
+    # 0 = no cap. Per-channel across all campaigns.
+    max_per_hour: Mapped[int] = mapped_column(Integer, default=30)
+    max_per_day: Mapped[int] = mapped_column(Integer, default=150)
+    # Pause campaign when failed/(sent+failed) >= pct after enough samples. 0 = off.
+    fail_pause_pct: Mapped[int] = mapped_column(Integer, default=40)
+    quiet_start_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quiet_end_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    write_to_crm: Mapped[bool] = mapped_column(Boolean, default=True)
     total: Mapped[int] = mapped_column(Integer, default=0)
     sent: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
@@ -603,6 +611,8 @@ class MailingCampaignChannel(Base):
         ForeignKey("mailing_campaigns.id", ondelete="CASCADE"), index=True
     )
     channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     campaign: Mapped[MailingCampaign] = relationship(back_populates="channels")
     channel: Mapped[Channel] = relationship()
@@ -610,6 +620,11 @@ class MailingCampaignChannel(Base):
 
 class MailingRecipient(Base):
     __tablename__ = "mailing_recipients"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id", "kind", "normalized", name="uq_mailing_recipient_campaign_kind_norm"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(
@@ -622,6 +637,12 @@ class MailingRecipient(Base):
         String(16), default=MailingRecipientStatus.PENDING.value, index=True
     )
     channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id"), nullable=True)
+    peer_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    peer_contact_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    peer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    peer_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

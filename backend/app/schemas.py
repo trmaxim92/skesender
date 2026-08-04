@@ -587,6 +587,8 @@ class MailingCampaignChannelOut(BaseModel):
     channel_name: str | None = None
     transport: str | None = None
     identity: str | None = None
+    paused_until: datetime | None = None
+    pause_reason: str | None = None
 
 
 class MailingRecipientOut(BaseModel):
@@ -607,6 +609,12 @@ class MailingCampaignOut(BaseModel):
     template_name: str | None = None
     status: str
     delay_sec: int
+    max_per_hour: int = 30
+    max_per_day: int = 150
+    fail_pause_pct: int = 40
+    quiet_start_hour: int | None = None
+    quiet_end_hour: int | None = None
+    write_to_crm: bool = True
     total: int
     sent: int
     failed: int
@@ -625,7 +633,13 @@ class MailingCampaignCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     template_id: int
     channel_ids: list[int] = Field(min_length=1)
-    delay_sec: int = Field(default=5, ge=1, le=300)
+    delay_sec: int = Field(default=15, ge=1, le=300)
+    max_per_hour: int = Field(default=30, ge=0, le=500)
+    max_per_day: int = Field(default=150, ge=0, le=5000)
+    fail_pause_pct: int = Field(default=40, ge=0, le=100)
+    quiet_start_hour: int | None = Field(default=None, ge=0, le=23)
+    quiet_end_hour: int | None = Field(default=None, ge=0, le=23)
+    write_to_crm: bool = True
     recipients_text: str = Field(min_length=1, max_length=2_000_000)
 
 

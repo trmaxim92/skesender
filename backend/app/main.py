@@ -330,6 +330,88 @@ async def ensure_schema() -> None:
                 "ON users (presence_status_id)"
             )
         )
+        # Mailing anti-ban / pacing columns
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS max_per_hour "
+                "INTEGER NOT NULL DEFAULT 30"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS max_per_day "
+                "INTEGER NOT NULL DEFAULT 150"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS fail_pause_pct "
+                "INTEGER NOT NULL DEFAULT 40"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS quiet_start_hour INTEGER"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS quiet_end_hour INTEGER"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaigns ADD COLUMN IF NOT EXISTS write_to_crm "
+                "BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaign_channels ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_campaign_channels ADD COLUMN IF NOT EXISTS pause_reason TEXT"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS peer_chat_id VARCHAR(64)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS peer_contact_id VARCHAR(64)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS peer_name VARCHAR(255)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS peer_username VARCHAR(255)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS attempts "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE mailing_recipients ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_mailing_recipients_next_attempt_at "
+                "ON mailing_recipients (next_attempt_at)"
+            )
+        )
 
 
 @asynccontextmanager

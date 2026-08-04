@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, PeerFloodError
 
 from app.integrations.telegram_user.runtime import runtime
 from app.mailing.types import MailingSendResult
@@ -11,6 +11,30 @@ from app.models import AttachmentKind, Channel, MailingTemplate
 from app.outbound_start import ResolvedPeer
 
 logger = logging.getLogger(__name__)
+
+
+def _map_telethon_error(exc: BaseException) -> str:
+    name = type(exc).__name__
+    if isinstance(exc, FloodWaitError) or name == "FloodWaitError":
+        return f"FloodWait:{int(getattr(exc, 'seconds', 30) or 30)}"
+    if name == "SlowModeWaitError":
+        return f"SlowModeWait:{int(getattr(exc, 'seconds', 30) or 30)}"
+    if isinstance(exc, PeerFloodError) or name == "PeerFloodError":
+        return f"PeerFlood:{exc}"
+    if name in {
+        "UserBannedInChannelError",
+        "ChatWriteForbiddenError",
+        "UserIsBlockedError",
+    }:
+        return f"UserBanned:{exc}"
+    if name in {
+        "AuthKeyUnregisteredError",
+        "UserDeactivatedBanError",
+        "UserDeactivatedError",
+        "SessionRevokedError",
+    }:
+        return f"AuthDead:{exc}"
+    return str(exc)
 
 
 class TelegramUserMailingSender:
@@ -27,7 +51,7 @@ class TelegramUserMailingSender:
         try:
             client = await runtime.ensure_client(channel.id)
         except Exception as exc:
-            return MailingSendResult(ok=False, error=str(exc))
+            return MailingSendResult(ok=False, error=_map_telethon_error(exc))
 
         target = (peer.external_chat_id or "").strip()
         if not target:
@@ -40,9 +64,11 @@ class TelegramUserMailingSender:
             else:
                 entity = await client.get_entity(target)
         except FloodWaitError as exc:
-            return MailingSendResult(ok=False, error=f"FloodWait:{exc.seconds}")
+            return MailingSendResult(ok=False, error=_map_telethon_error(exc))
         except Exception as exc:
-            return MailingSendResult(ok=False, error=f"Не удалось найти получателя: {exc}")
+            return MailingSendResult(
+                ok=False, error=f"Не удалось найти получателя: {_map_telethon_error(exc)}"
+            )
 
         body = (template.body or "").strip()
         try:
@@ -64,6 +90,8 @@ class TelegramUserMailingSender:
             mid = getattr(message, "id", None)
             return MailingSendResult(ok=True, external_id=str(mid) if mid is not None else None)
         except FloodWaitError as exc:
-            return MailingSendResult(ok=False, error=f"FloodWait:{exc.seconds}")
+            return MailingSendResult(ok=False, error=_map_telethon_error(exc))
+        except PeerFloodError as exc:
+            return MailingSendResult(ok=False, error=_map_telethon_error(exc))
         except Exception as exc:
-            return MailingSendResult(ok=False, error=str(exc))
+            return MailingSendResult(ok=False, error=_map_telethon_error(exc))
