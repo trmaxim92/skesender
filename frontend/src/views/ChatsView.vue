@@ -814,6 +814,12 @@ onUnmounted(() => {
                   </span>
                 </div>
                 <div
+                  v-else-if="row.message.direction === 'out' && row.message.operatorName"
+                  class="mb-1 text-[11px] font-semibold text-white/80"
+                >
+                  {{ row.message.operatorName }}
+                </div>
+                <div
                   v-if="row.message.replyTo"
                   class="mb-2 rounded-lg px-2.5 py-1.5 text-xs"
                   :class="row.message.direction === 'out' ? 'bg-white/15' : 'bg-surface'"

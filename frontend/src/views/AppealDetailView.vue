@@ -421,6 +421,12 @@ onUnmounted(() => {
                       · {{ row.message.operatorName }}
                     </span>
                   </div>
+                  <div
+                    v-else-if="row.message.direction === 'out' && row.message.operatorName"
+                    class="mb-1 text-[11px] font-semibold text-white/80"
+                  >
+                    {{ row.message.operatorName }}
+                  </div>
                   <div v-if="row.message.attachments?.length" class="mb-2 space-y-2">
                     <template v-for="att in row.message.attachments" :key="att.id">
                       <button
