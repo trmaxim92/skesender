@@ -178,7 +178,10 @@ async def set_my_presence(
         raise HTTPException(status_code=400, detail="Статус недоступен")
     await set_user_presence(db, loaded, row)
     await db.commit()
+    # Return from the already-attached status — avoid stale identity-map reload races.
     loaded = await load_user_rbac(db, loaded)
+    if loaded.presence_status is None and row is not None:
+        loaded.presence_status = row
     return user_to_out(loaded)
 
 

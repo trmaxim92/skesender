@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   MessageSquare,
@@ -36,6 +37,7 @@ const SETTINGS_GROUP_KEY = 'oe_nav_settings_open'
 const BASE_TITLE = 'SkySender'
 
 const auth = useAuthStore()
+const { user: authUser } = storeToRefs(auth)
 const chats = useChatsStore()
 const route = useRoute()
 const router = useRouter()
@@ -75,7 +77,8 @@ const presenceBusy = ref(false)
 const presenceLoadError = ref('')
 const profileMenuStyle = ref<Record<string, string>>({})
 
-const currentPresence = computed(() => auth.user?.presenceStatus ?? null)
+const currentPresence = computed(() => authUser.value?.presenceStatus ?? null)
+const currentPresenceId = computed(() => authUser.value?.presenceStatusId ?? null)
 
 function placeProfileMenu() {
   if (!profileOpen.value) return
@@ -298,13 +301,14 @@ function toggleProfileMenu() {
 }
 
 async function choosePresence(statusId: number) {
-  if (presenceBusy.value || auth.user?.presenceStatusId === statusId) {
+  if (presenceBusy.value || currentPresenceId.value === statusId) {
     profileOpen.value = false
     return
   }
+  const selected = presenceStatuses.value.find((s) => s.id === statusId) ?? null
   presenceBusy.value = true
   try {
-    await auth.setPresence(statusId)
+    await auth.setPresence(statusId, selected)
     profileOpen.value = false
   } catch (e) {
     window.dispatchEvent(
@@ -618,7 +622,7 @@ onUnmounted(() => {
                     :key="s.id"
                     type="button"
                     class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-surface"
-                    :class="auth.user?.presenceStatusId === s.id ? 'bg-brand-soft/50 text-ink' : 'text-ink'"
+                    :class="currentPresenceId === s.id ? 'bg-brand-soft/50 text-ink' : 'text-ink'"
                     role="menuitem"
                     :disabled="presenceBusy"
                     @click="choosePresence(s.id)"
@@ -626,7 +630,7 @@ onUnmounted(() => {
                     <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
                     <span class="flex-1 truncate">{{ s.name }}</span>
                     <span
-                      v-if="auth.user?.presenceStatusId === s.id"
+                      v-if="currentPresenceId === s.id"
                       class="text-[11px] text-brand"
                     >✓</span>
                   </button>

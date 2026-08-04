@@ -7,6 +7,7 @@ import {
   FIRST_SECTION_PATHS,
   SECTION_BY_PATH,
   type PermissionCode,
+  type PresenceStatus,
   type User,
 } from '@/types'
 
@@ -117,9 +118,30 @@ export const useAuthStore = defineStore('auth', () => {
     await changePasswordRequest(currentPassword, newPassword)
   }
 
-  async function setPresence(statusId: number) {
-    const me = await setMyPresenceRequest(statusId)
-    persistUser(mapUser(me))
+  async function setPresence(statusId: number, localStatus?: PresenceStatus | null) {
+    const prev = user.value
+    if (prev && localStatus) {
+      const canWriteByRole =
+        prev.role === 'admin' || (prev.permissions?.includes('action.write') ?? false)
+      persistUser({
+        ...prev,
+        presenceStatusId: statusId,
+        presenceStatus: { ...localStatus },
+        canWriteChats: canWriteByRole && localStatus.canWriteChats,
+      })
+    }
+    try {
+      const me = await setMyPresenceRequest(statusId)
+      const mapped = mapUser(me)
+      if (!mapped.presenceStatus && localStatus) {
+        mapped.presenceStatus = { ...localStatus }
+        mapped.presenceStatusId = statusId
+      }
+      persistUser(mapped)
+    } catch (e) {
+      if (prev) persistUser(prev)
+      throw e
+    }
   }
 
   async function goOffline() {

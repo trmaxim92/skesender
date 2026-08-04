@@ -103,5 +103,6 @@ async def set_user_presence(
     session: AsyncSession, user: User, status: PresenceStatus
 ) -> User:
     user.presence_status_id = status.id
+    user.presence_status = status
     await session.flush()
     return user
