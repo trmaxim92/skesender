@@ -41,7 +41,7 @@ function mapDialog(d: ApiDialog): Dialog {
     lastAt: d.last_at,
     lastDirection: d.last_direction ?? null,
     lastStatus: d.last_status ?? null,
-    unread: d.unread,
+    unread: d.last_direction === 'out' ? 0 : d.unread,
     assigneeId: d.assignee_id,
     transport: d.transport,
     appealId: d.appeal_id ?? null,
@@ -275,7 +275,10 @@ export const useChatsStore = defineStore('chats', () => {
       const viewingHere =
         activeDialogId.value === mappedDialog.id && !isViewingPastAppeal.value
 
-      if (viewingHere) {
+      // Own outbound reply means the thread was handled — never keep a stale unread badge.
+      if (mappedMsg.direction === 'out' && !mappedMsg.isInternal) {
+        mappedDialog.unread = 0
+      } else if (viewingHere) {
         // Optimistic UI; server mark-read keeps badges in sync with bump_unread.
         mappedDialog.unread = 0
       }
@@ -870,6 +873,8 @@ export const useChatsStore = defineStore('chats', () => {
       dialog.lastAt = msg.created_at
       dialog.lastDirection = 'out'
       dialog.lastStatus = mapped.status
+      dialog.unread = 0
+      void fetchUnreadSummary()
       if (warning) {
         error.value = warning
         showInAppToast({

@@ -89,7 +89,7 @@ from app.schemas import (
 from app.security import decode_access_token, token_version_matches
 from app.serializers import message_preview_text, message_to_out
 from app.storage.attachments import absolute_path, guess_kind, save_bytes
-from app.dialogs import claim_if_unassigned, clear_unread, get_or_create_dialog
+from app.dialogs import claim_if_unassigned, clear_unread, get_or_create_dialog, heal_stale_outbound_unread
 from app.outbound_start import PeerResolveError, resolve_outbound_peer, transport_allows_start
 
 logger = logging.getLogger(__name__)
@@ -457,6 +457,10 @@ async def unread_summary(
     user: User = Depends(require_permission(SECTION_CHATS)),
 ) -> UnreadSummaryOut:
     """Сумма непрочитанных по вкладкам Новые / Мои / Чужие (только открытые обращения)."""
+    healed = await heal_stale_outbound_unread(db)
+    if healed:
+        await db.commit()
+
     channel_ids = await accessible_channel_ids(user, db)
     dept_ids = await accessible_department_ids(user, db)
 
@@ -894,6 +898,8 @@ async def send_dialog_message(
     dialog.last_direction = MessageDirection.OUT.value
     dialog.last_status = last.status
     dialog.last_at = last.created_at
+    # Ответ оператора = чат просмотрен; иначе бейдж остаётся при last_direction=out.
+    await clear_unread(db, dialog)
     # Первый ответивший на незанятое обращение становится ответственным.
     claimed = await claim_if_unassigned(db, dialog, user.id)
 

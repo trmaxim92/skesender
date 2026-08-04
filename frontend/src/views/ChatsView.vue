@@ -590,7 +590,7 @@ onUnmounted(() => {
                 </div>
               </div>
               <span
-                v-if="d.unread"
+                v-if="d.unread && d.lastDirection !== 'out'"
                 class="unread-badge mt-0.5 flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-ok px-1.5 text-[10px] font-bold text-white shadow-sm"
               >
                 {{ d.unread > 99 ? '99+' : d.unread }}

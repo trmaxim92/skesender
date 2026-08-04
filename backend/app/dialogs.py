@@ -97,6 +97,17 @@ async def clear_unread(session: AsyncSession, dialog: Dialog) -> bool:
     return cleared
 
 
+async def heal_stale_outbound_unread(session: AsyncSession) -> int:
+    """Clear unread when the last message is outbound (operator already replied)."""
+    result = await session.execute(
+        update(Dialog)
+        .where(Dialog.unread > 0, Dialog.last_direction == "out")
+        .values(unread=0)
+        .returning(Dialog.id)
+    )
+    return len(result.all())
+
+
 async def claim_if_unassigned(
     session: AsyncSession, dialog: Dialog, user_id: int
 ) -> bool:
