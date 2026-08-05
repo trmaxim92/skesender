@@ -18,6 +18,7 @@ async def get_or_create_dialog(
     contact_name: str,
     contact_username: str | None,
     contact_avatar_url: str | None = None,
+    contact_phone: str | None = None,
 ) -> Dialog:
     result = await session.execute(
         select(Dialog).where(
@@ -39,6 +40,8 @@ async def get_or_create_dialog(
             dialog.contact_name = contact_name
         if contact_avatar_url and not dialog.contact_avatar_url:
             dialog.contact_avatar_url = contact_avatar_url
+        if contact_phone and not dialog.contact_phone:
+            dialog.contact_phone = contact_phone
         return dialog
 
     dialog = Dialog(
@@ -48,6 +51,7 @@ async def get_or_create_dialog(
         contact_name=contact_name or "Клиент",
         contact_username=contact_username,
         contact_avatar_url=contact_avatar_url,
+        contact_phone=contact_phone,
         department_id=channel.department_id,
         last_message="",
         last_at=utcnow(),

@@ -61,13 +61,27 @@ def _name_from_pymax_user(user: Any) -> tuple[str | None, str | None]:
         plain = (getattr(n, "name", None) or "").strip()
         if plain:
             return plain, None
-    phone = getattr(user, "phone", None)
+    phone = _phone_from_pymax_user(user)
     if phone:
-        return str(phone), None
+        return phone, None
     uid = getattr(user, "id", None)
     if uid is not None:
         return f"User {uid}", None
     return None, None
+
+
+def _phone_from_pymax_user(user: Any) -> str | None:
+    if user is None:
+        return None
+    raw = getattr(user, "phone", None)
+    if raw is None:
+        return None
+    phone = str(raw).strip()
+    if not phone:
+        return None
+    if phone.isdigit():
+        return f"+{phone}"
+    return phone
 
 
 def _avatar_from_obj(obj: Any) -> str | None:
@@ -82,16 +96,16 @@ def _avatar_from_obj(obj: Any) -> str | None:
 
 async def _resolve_contact_profile(
     client: Any | None, sender_id: int | None, chat_id: int
-) -> tuple[str, str | None, str | None]:
+) -> tuple[str, str | None, str | None, str | None]:
     if client is not None and _is_group_chat(chat_id):
         try:
             chat = await client.get_chat(int(chat_id))
             title = (getattr(chat, "title", None) or "").strip()
             avatar = _avatar_from_obj(chat)
             if title:
-                return title, None, avatar
+                return title, None, avatar, None
             if avatar:
-                return f"Chat {chat_id}", None, avatar
+                return f"Chat {chat_id}", None, avatar, None
         except Exception:
             logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
     if client is not None and sender_id is not None:
@@ -101,8 +115,9 @@ async def _resolve_contact_profile(
                 user = await client.get_user(int(sender_id))
             resolved_name, resolved_username = _name_from_pymax_user(user)
             avatar = _avatar_from_obj(user)
+            phone = _phone_from_pymax_user(user)
             if resolved_name:
-                return resolved_name, resolved_username, avatar
+                return resolved_name, resolved_username, avatar, phone
         except Exception:
             logger.debug(
                 "Failed to resolve pymax user profile sender_id=%s",
@@ -115,12 +130,12 @@ async def _resolve_contact_profile(
             title = (getattr(chat, "title", None) or "").strip()
             avatar = _avatar_from_obj(chat)
             if title:
-                return title, None, avatar
+                return title, None, avatar, None
         except Exception:
             logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
     if sender_id is not None:
-        return f"User {sender_id}", None, None
-    return f"Chat {chat_id}", None, None
+        return f"User {sender_id}", None, None, None
+    return f"Chat {chat_id}", None, None, None
 
 
 async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, client: Any) -> int:
@@ -150,11 +165,17 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
         resolved = name
         username = dialog.contact_username
         avatar = dialog.contact_avatar_url
+        phone = dialog.contact_phone
         changed = False
         for sender_id in candidates:
-            candidate, cand_username, cand_avatar = await _resolve_contact_profile(client, sender_id, chat_id or 0)
+            candidate, cand_username, cand_avatar, cand_phone = await _resolve_contact_profile(
+                client, sender_id, chat_id or 0
+            )
             if cand_avatar and not avatar:
                 avatar = cand_avatar
+                changed = True
+            if cand_phone and not phone:
+                phone = cand_phone
                 changed = True
             if candidate and not (
                 candidate.startswith("User ") or candidate.startswith("Chat ")
@@ -168,12 +189,17 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
                 if cand_avatar and cand_avatar != dialog.contact_avatar_url:
                     avatar = cand_avatar
                     changed = True
+                if cand_phone and not dialog.contact_phone:
+                    phone = cand_phone
+                    changed = True
                 break
 
         if changed:
             dialog.contact_name = resolved
             dialog.contact_username = username
             dialog.contact_avatar_url = avatar
+            if phone and not dialog.contact_phone:
+                dialog.contact_phone = phone
             updated += 1
     if updated:
         await session.flush()
@@ -294,7 +320,9 @@ async def ingest_pymax_message(
         else MessageDirection.IN.value
     )
     contact_id = str(sender_id) if sender_id is not None else str(chat_id)
-    contact_name, contact_username, contact_avatar_url = await _resolve_contact_profile(client, sender_id, chat_id)
+    contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
+        client, sender_id, chat_id
+    )
 
     dialog = await get_or_create_dialog(
         session,
@@ -304,6 +332,7 @@ async def ingest_pymax_message(
         contact_name=contact_name,
         contact_username=contact_username,
         contact_avatar_url=contact_avatar_url,
+        contact_phone=contact_phone,
     )
 
     if message_id is not None:
@@ -412,6 +441,8 @@ async def ingest_pymax_message(
                 dialog.contact_avatar_url = contact_avatar_url
             if sender_id is not None:
                 dialog.contact_external_id = str(sender_id)
+            if contact_phone and not dialog.contact_phone:
+                dialog.contact_phone = contact_phone
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

@@ -63,6 +63,21 @@ def _user_display(entity: Any) -> tuple[str, str | None]:
     return "Клиент", None
 
 
+def _user_phone(entity: Any) -> str | None:
+    """Phone from Telethon User when mutual contact / privacy allows it."""
+    if not isinstance(entity, User):
+        return None
+    raw = getattr(entity, "phone", None)
+    if raw is None:
+        return None
+    phone = str(raw).strip()
+    if not phone:
+        return None
+    if phone.isdigit():
+        return f"+{phone}"
+    return phone
+
+
 async def ingest_telethon_message(
     session: AsyncSession,
     *,
@@ -93,6 +108,7 @@ async def ingest_telethon_message(
 
     contact_name = "Клиент"
     contact_username = None
+    contact_phone = None
     contact_external_id = str(message.sender_id) if message.sender_id is not None else str(chat_id)
 
     try:
@@ -100,7 +116,9 @@ async def ingest_telethon_message(
         sender = await message.get_sender()
         chat_type_private = isinstance(chat_entity, User)
         if chat_type_private:
-            contact_name, contact_username = _user_display(sender or chat_entity)
+            peer = sender or chat_entity
+            contact_name, contact_username = _user_display(peer)
+            contact_phone = _user_phone(peer) or _user_phone(chat_entity)
             if sender and getattr(sender, "id", None) is not None:
                 contact_external_id = str(sender.id)
             else:
@@ -119,6 +137,7 @@ async def ingest_telethon_message(
         contact_external_id=contact_external_id,
         contact_name=contact_name,
         contact_username=contact_username,
+        contact_phone=contact_phone,
     )
 
     appeal = await ensure_open_appeal(session, dialog)
@@ -170,6 +189,8 @@ async def ingest_telethon_message(
         dialog.contact_name = contact_name or dialog.contact_name
         dialog.contact_username = contact_username
         dialog.contact_external_id = contact_external_id
+        if contact_phone and not dialog.contact_phone:
+            dialog.contact_phone = contact_phone
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg
