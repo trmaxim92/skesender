@@ -514,6 +514,13 @@ class TemplateCategoryUpdateRequest(BaseModel):
     sort_order: int | None = None
 
 
+class TemplateAttachmentOut(BaseModel):
+    id: int
+    file_name: str
+    mime_type: str | None = None
+    sort_order: int = 0
+
+
 class TemplateOut(BaseModel):
     id: int
     name: str
@@ -526,6 +533,8 @@ class TemplateOut(BaseModel):
     media_name: str | None = None
     mime_type: str | None = None
     has_media: bool = False
+    media_count: int = 0
+    attachments: list[TemplateAttachmentOut] = []
     created_by_id: int | None = None
     is_mine: bool = False
     created_at: datetime

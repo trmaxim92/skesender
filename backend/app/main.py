@@ -424,6 +424,52 @@ async def ensure_schema() -> None:
         await conn.execute(
             text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS mime_type VARCHAR(128)")
         )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS template_attachments (
+                    id SERIAL PRIMARY KEY,
+                    template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+                    kind VARCHAR(16) NOT NULL DEFAULT 'image',
+                    file_name VARCHAR(255) NOT NULL DEFAULT 'image.jpg',
+                    mime_type VARCHAR(128),
+                    size_bytes INTEGER,
+                    storage_path VARCHAR(512) NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_template_attachments_template_id "
+                "ON template_attachments (template_id)"
+            )
+        )
+        # Migrate legacy single-media rows into template_attachments once.
+        await conn.execute(
+            text(
+                """
+                INSERT INTO template_attachments (
+                    template_id, kind, file_name, mime_type, storage_path, sort_order, created_at
+                )
+                SELECT
+                    t.id,
+                    COALESCE(t.media_kind, 'image'),
+                    COALESCE(t.media_name, 'image.jpg'),
+                    t.mime_type,
+                    t.media_path,
+                    0,
+                    COALESCE(t.created_at, NOW())
+                FROM templates t
+                WHERE t.media_path IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM template_attachments a WHERE a.template_id = t.id
+                  )
+                """
+            )
+        )
 
 
 @asynccontextmanager

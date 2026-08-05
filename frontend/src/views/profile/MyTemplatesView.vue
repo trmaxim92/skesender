@@ -3,8 +3,20 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { FolderPlus, ImagePlus, Pencil, Trash2, X } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMyTemplatesStore } from '@/stores/myTemplates'
+import { fetchMyTemplateMediaBlob } from '@/api/cabinet'
 import type { ChannelTransport, Template, TemplateKind } from '@/types'
 import { transportLabel } from '@/types'
+
+const MAX_IMAGES = 10
+
+type DraftItem = {
+  key: string
+  file?: File
+  attachmentId?: number
+  previewUrl: string
+  name: string
+  local: boolean
+}
 
 const auth = useAuthStore()
 const templates = useMyTemplatesStore()
@@ -19,18 +31,15 @@ const body = ref('')
 const transport = ref<ChannelTransport | 'all'>('all')
 const kind = ref<TemplateKind>('general')
 const categoryId = ref<string>('')
-const mediaFile = ref<File | null>(null)
-const mediaPreview = ref<string | null>(null)
-const existingHasMedia = ref(false)
-const clearExistingMedia = ref(false)
+const draftItems = ref<DraftItem[]>([])
+const removedAttachmentIds = ref<number[]>([])
+const dragOver = ref(false)
 const saving = ref(false)
 const savingCategory = ref(false)
 const editingId = ref<string | null>(null)
 
 const canSave = computed(
-  () =>
-    Boolean(name.value.trim()) &&
-    Boolean(body.value.trim() || mediaFile.value || existingHasMedia.value),
+  () => Boolean(name.value.trim()) && Boolean(body.value.trim() || draftItems.value.length),
 )
 
 const grouped = computed(() => {
@@ -51,14 +60,15 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  revokePreview()
+  clearDraft()
 })
 
-function revokePreview() {
-  if (mediaPreview.value) {
-    URL.revokeObjectURL(mediaPreview.value)
-    mediaPreview.value = null
+function clearDraft() {
+  for (const item of draftItems.value) {
+    if (item.local) URL.revokeObjectURL(item.previewUrl)
   }
+  draftItems.value = []
+  removedAttachmentIds.value = []
 }
 
 function resetForm() {
@@ -68,10 +78,7 @@ function resetForm() {
   kind.value = 'general'
   categoryId.value = ''
   editingId.value = null
-  mediaFile.value = null
-  existingHasMedia.value = false
-  clearExistingMedia.value = false
-  revokePreview()
+  clearDraft()
 }
 
 function startEdit(t: Template) {
@@ -81,47 +88,82 @@ function startEdit(t: Template) {
   transport.value = t.transport
   kind.value = t.kind
   categoryId.value = t.categoryId ?? ''
-  mediaFile.value = null
-  existingHasMedia.value = t.hasMedia
-  clearExistingMedia.value = false
-  revokePreview()
-  if (t.hasMedia) {
-    void loadExistingPreview(t.id)
+  clearDraft()
+  if (t.attachments.length) {
+    void loadExistingPreviews(t)
+  } else if (t.hasMedia) {
+    void loadLegacyPreview(t.id)
   }
 }
 
-async function loadExistingPreview(id: string) {
+async function loadExistingPreviews(t: Template) {
+  for (const att of t.attachments) {
+    try {
+      const blob = await fetchMyTemplateMediaBlob(Number(t.id), att.id)
+      if (editingId.value !== t.id) return
+      draftItems.value.push({
+        key: `att-${att.id}`,
+        attachmentId: att.id,
+        previewUrl: URL.createObjectURL(blob),
+        name: att.fileName,
+        local: true,
+      })
+    } catch {
+      // skip broken preview
+    }
+  }
+}
+
+async function loadLegacyPreview(id: string) {
   try {
-    const { fetchMyTemplateMediaBlob } = await import('@/api/cabinet')
-    const blob = await fetchMyTemplateMediaBlob(Number(id))
+    const blob = await fetchMyTemplateMediaBlob(Number(id), 0)
     if (editingId.value !== id) return
-    revokePreview()
-    mediaPreview.value = URL.createObjectURL(blob)
+    draftItems.value.push({
+      key: 'att-0',
+      attachmentId: 0,
+      previewUrl: URL.createObjectURL(blob),
+      name: 'image.jpg',
+      local: true,
+    })
   } catch {
-    // preview optional
+    // optional
+  }
+}
+
+function addFiles(fileList: FileList | File[] | null) {
+  if (!fileList) return
+  const incoming = Array.from(fileList).filter((f) => f.type.startsWith('image/'))
+  const room = MAX_IMAGES - draftItems.value.length
+  for (const file of incoming.slice(0, Math.max(0, room))) {
+    draftItems.value.push({
+      key: `file-${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      name: file.name,
+      local: true,
+    })
   }
 }
 
 function onMediaChange(e: Event) {
   const input = e.target as HTMLInputElement
-  const file = input.files?.[0] ?? null
-  revokePreview()
-  mediaFile.value = file
-  clearExistingMedia.value = false
-  if (file) {
-    existingHasMedia.value = false
-    mediaPreview.value = URL.createObjectURL(file)
-  }
+  addFiles(input.files)
   input.value = ''
 }
 
-function removeMedia() {
-  if (editingId.value && (existingHasMedia.value || (!mediaFile.value && mediaPreview.value))) {
-    clearExistingMedia.value = true
+function onDrop(e: DragEvent) {
+  dragOver.value = false
+  addFiles(e.dataTransfer?.files ?? null)
+}
+
+function removeDraftItem(index: number) {
+  const item = draftItems.value[index]
+  if (!item) return
+  if (item.attachmentId != null) {
+    removedAttachmentIds.value = [...removedAttachmentIds.value, item.attachmentId]
   }
-  mediaFile.value = null
-  existingHasMedia.value = false
-  revokePreview()
+  if (item.local) URL.revokeObjectURL(item.previewUrl)
+  draftItems.value = draftItems.value.filter((_, i) => i !== index)
 }
 
 async function addCategory() {
@@ -161,6 +203,7 @@ async function saveTemplate() {
   if (!canSave.value) return
   saving.value = true
   const cat = categoryId.value || null
+  const newFiles = draftItems.value.map((d) => d.file).filter((f): f is File => Boolean(f))
   let ok = false
   if (editingId.value) {
     ok = await templates.updateTemplate(editingId.value, {
@@ -169,8 +212,8 @@ async function saveTemplate() {
       transport: transport.value,
       kind: kind.value,
       categoryId: cat,
-      media: mediaFile.value,
-      clearMedia: clearExistingMedia.value,
+      media: newFiles,
+      removeAttachmentIds: removedAttachmentIds.value,
     })
   } else {
     ok = await templates.addTemplate({
@@ -179,7 +222,7 @@ async function saveTemplate() {
       transport: transport.value,
       kind: kind.value,
       categoryId: cat,
-      media: mediaFile.value,
+      media: newFiles,
     })
   }
   saving.value = false
@@ -199,8 +242,8 @@ async function removeTemplate(id: string) {
     <div class="mb-4">
       <h1 class="text-lg font-semibold">Мои шаблоны</h1>
       <p class="mt-1 text-sm text-muted">
-        Личные ответы с категориями — видны только вам. В чате вставляются одним кликом вместе с
-        картинкой.
+        Личные ответы с категориями — видны только вам. Можно прикрепить до {{ MAX_IMAGES }}
+        изображений (выбор или перетаскивание).
       </p>
     </div>
 
@@ -309,34 +352,64 @@ async function removeTemplate(id: string) {
               <textarea
                 v-model="body"
                 rows="4"
-                placeholder="Можно оставить пустым, если есть картинка"
+                placeholder="Можно оставить пустым, если есть картинки"
                 class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
               />
             </label>
             <div class="block sm:col-span-2">
-              <span class="mb-1 block text-xs font-semibold text-muted">Изображение</span>
-              <div class="flex flex-wrap items-start gap-3">
-                <label
-                  class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-line bg-surface px-3 py-2 text-sm text-muted hover:border-brand/40 hover:text-ink"
-                >
-                  <ImagePlus class="size-4" />
-                  {{ mediaFile || existingHasMedia || mediaPreview ? 'Заменить' : 'Выбрать файл' }}
-                  <input type="file" accept="image/*" class="hidden" @change="onMediaChange" />
-                </label>
-                <div v-if="mediaPreview" class="relative">
-                  <img
-                    :src="mediaPreview"
-                    alt=""
-                    class="h-20 w-20 rounded-xl object-cover ring-1 ring-line"
-                  />
-                  <button
-                    type="button"
-                    class="absolute -right-1.5 -top-1.5 rounded-full bg-panel p-0.5 text-muted ring-1 ring-line hover:text-danger"
-                    title="Убрать"
-                    @click="removeMedia"
+              <span class="mb-1 block text-xs font-semibold text-muted">
+                Изображения
+                <span class="font-normal">· {{ draftItems.length }}/{{ MAX_IMAGES }}</span>
+              </span>
+              <div
+                class="rounded-xl border border-dashed px-3 py-4 transition"
+                :class="
+                  dragOver
+                    ? 'border-brand bg-brand-soft/40'
+                    : 'border-line bg-surface'
+                "
+                @dragenter.prevent="dragOver = true"
+                @dragover.prevent="dragOver = true"
+                @dragleave.prevent="dragOver = false"
+                @drop.prevent="onDrop"
+              >
+                <div class="flex flex-wrap items-center gap-3">
+                  <label
+                    class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-sm text-muted hover:border-brand/40 hover:text-ink"
                   >
-                    <X class="size-3.5" />
-                  </button>
+                    <ImagePlus class="size-4" />
+                    Выбрать файлы
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      class="hidden"
+                      :disabled="draftItems.length >= MAX_IMAGES"
+                      @change="onMediaChange"
+                    />
+                  </label>
+                  <span class="text-xs text-muted">или перетащите сюда</span>
+                </div>
+                <div v-if="draftItems.length" class="mt-3 flex flex-wrap gap-2">
+                  <div
+                    v-for="(item, idx) in draftItems"
+                    :key="item.key"
+                    class="relative"
+                  >
+                    <img
+                      :src="item.previewUrl"
+                      :alt="item.name"
+                      class="h-20 w-20 rounded-xl object-cover ring-1 ring-line"
+                    />
+                    <button
+                      type="button"
+                      class="absolute -right-1.5 -top-1.5 rounded-full bg-panel p-0.5 text-muted ring-1 ring-line hover:text-danger"
+                      title="Убрать"
+                      @click="removeDraftItem(idx)"
+                    >
+                      <X class="size-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -417,7 +490,10 @@ async function removeTemplate(id: string) {
                           ? 'Все каналы'
                           : transportLabel[t.transport]
                       }}
-                      <span v-if="t.hasMedia"> · изображение</span>
+                      <span v-if="t.mediaCount">
+                        · {{ t.mediaCount }}
+                        {{ t.mediaCount === 1 ? 'изображение' : 'изобр.' }}
+                      </span>
                     </p>
                   </div>
                   <div v-if="canWrite" class="flex gap-0.5">
@@ -443,7 +519,7 @@ async function removeTemplate(id: string) {
                   <div
                     v-if="t.hasMedia"
                     class="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-surface text-muted ring-1 ring-line"
-                    title="Есть изображение"
+                    :title="`${t.mediaCount} изображений`"
                   >
                     <ImagePlus class="size-6" />
                   </div>

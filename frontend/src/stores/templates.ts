@@ -14,7 +14,13 @@ function mapTemplate(t: ApiTemplate): Template {
     categoryId: null,
     categoryName: null,
     hasMedia: Boolean(t.has_media),
+    mediaCount: t.media_count ?? (t.has_media ? 1 : 0),
     mediaName: t.media_name ?? null,
+    attachments: (t.attachments ?? []).map((a) => ({
+      id: a.id,
+      fileName: a.file_name,
+      mimeType: a.mime_type,
+    })),
     isMine: false,
     updatedAt: t.updated_at,
   }

@@ -44,6 +44,8 @@ def _template_out(tpl: MessageTemplate) -> TemplateOut:
         media_name=getattr(tpl, "media_name", None),
         mime_type=getattr(tpl, "mime_type", None),
         has_media=bool(getattr(tpl, "media_path", None)),
+        media_count=1 if getattr(tpl, "media_path", None) else 0,
+        attachments=[],
         created_by_id=tpl.created_by_id,
         is_mine=False,
         created_at=tpl.created_at,

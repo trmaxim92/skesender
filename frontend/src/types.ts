@@ -227,7 +227,9 @@ export interface Template {
   categoryId: string | null
   categoryName: string | null
   hasMedia: boolean
+  mediaCount: number
   mediaName: string | null
+  attachments: { id: number; fileName: string; mimeType: string | null }[]
   isMine: boolean
   updatedAt: string
 }

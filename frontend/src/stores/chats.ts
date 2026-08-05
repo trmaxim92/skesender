@@ -677,10 +677,20 @@ export const useChatsStore = defineStore('chats', () => {
     if (!template.hasMedia) return
     try {
       const { fetchMyTemplateMediaBlob } = await import('@/api/cabinet')
-      const blob = await fetchMyTemplateMediaBlob(Number(template.id))
-      const name = template.mediaName || 'image.jpg'
-      const file = new File([blob], name, { type: blob.type || 'image/jpeg' })
-      pendingFiles.value = [...pendingFiles.value, file]
+      const attachments =
+        template.attachments.length > 0
+          ? template.attachments
+          : [{ id: 0, fileName: template.mediaName || 'image.jpg', mimeType: null }]
+      const files: File[] = []
+      for (const att of attachments) {
+        const blob = await fetchMyTemplateMediaBlob(Number(template.id), att.id)
+        files.push(
+          new File([blob], att.fileName || 'image.jpg', {
+            type: blob.type || att.mimeType || 'image/jpeg',
+          }),
+        )
+      }
+      if (files.length) pendingFiles.value = [...pendingFiles.value, ...files]
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить изображение шаблона'
     }

@@ -495,6 +495,7 @@ class MessageTemplate(Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("template_categories.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Legacy single-media columns (kept for migration / first attachment mirror).
     media_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     media_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     media_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -504,6 +505,29 @@ class MessageTemplate(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     category: Mapped[TemplateCategory | None] = relationship()
+    attachments: Mapped[list["TemplateAttachment"]] = relationship(
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by="TemplateAttachment.sort_order",
+    )
+
+
+class TemplateAttachment(Base):
+    __tablename__ = "template_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("templates.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), default=AttachmentKind.IMAGE.value)
+    file_name: Mapped[str] = mapped_column(String(255), default="image.jpg")
+    mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    storage_path: Mapped[str] = mapped_column(String(512))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    template: Mapped[MessageTemplate] = relationship(back_populates="attachments")
 
 
 class OutboundWebhook(Base):

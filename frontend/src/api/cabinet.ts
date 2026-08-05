@@ -41,6 +41,13 @@ export interface ApiTemplateCategory {
   updated_at: string
 }
 
+export interface ApiTemplateAttachment {
+  id: number
+  file_name: string
+  mime_type: string | null
+  sort_order?: number
+}
+
 export interface ApiTemplate {
   id: number
   name: string
@@ -53,6 +60,8 @@ export interface ApiTemplate {
   media_name?: string | null
   mime_type?: string | null
   has_media?: boolean
+  media_count?: number
+  attachments?: ApiTemplateAttachment[]
   created_by_id?: number | null
   is_mine?: boolean
   created_at: string
@@ -182,12 +191,19 @@ export async function deleteMyTemplateRequest(id: number) {
   return api<void>(`/api/me/templates/${id}`, { method: 'DELETE' })
 }
 
-export async function fetchMyTemplateMediaBlob(id: number): Promise<Blob> {
+export async function fetchMyTemplateMediaBlob(
+  templateId: number,
+  attachmentId?: number,
+): Promise<Blob> {
   const token = localStorage.getItem('oe_access_token')
   const headers = new Headers()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const base = import.meta.env.VITE_API_URL ?? ''
-  const response = await fetch(`${base}/api/me/templates/${id}/media`, { headers })
+  const path =
+    attachmentId != null
+      ? `/api/me/templates/${templateId}/media/${attachmentId}`
+      : `/api/me/templates/${templateId}/media`
+  const response = await fetch(`${base}${path}`, { headers })
   if (!response.ok) {
     throw new ApiError(response.status, `HTTP ${response.status}`)
   }

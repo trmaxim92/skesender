@@ -426,7 +426,9 @@ watch(
             >
               <div class="text-sm font-semibold">
                 {{ t.name }}
-                <span v-if="t.hasMedia" class="ml-1 text-[10px] font-medium text-muted">· фото</span>
+                <span v-if="t.mediaCount" class="ml-1 text-[10px] font-medium text-muted">
+                  · {{ t.mediaCount }} фото
+                </span>
               </div>
               <div class="mt-1 line-clamp-2 text-xs text-muted">{{ t.body || 'Изображение' }}</div>
             </button>
