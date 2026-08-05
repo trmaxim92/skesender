@@ -1612,7 +1612,11 @@ async def assign_dialog(
     )
     dialog_obj = result.scalar_one()
     updated = dialog_updated_event(dialog_obj)
-    assigned = dialog_assigned_event(dialog_obj)
+    assigned = dialog_assigned_event(
+        dialog_obj,
+        assigned_by_id=user.id,
+        assigned_by_name=user.name,
+    )
     await emit_event(updated)
     await emit_event(assigned)
     return to_dialog_out(dialog_obj)

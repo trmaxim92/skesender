@@ -108,11 +108,20 @@ def dialog_updated_event(
 def dialog_assigned_event(
     dialog: Dialog,
     transport: str | ChannelTransport | None = None,
+    *,
+    assigned_by_id: int | None = None,
+    assigned_by_name: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    event: dict[str, Any] = {
         "type": "dialog.assigned",
         "dialog": dialog_to_out(dialog, transport).model_dump(mode="json"),
     }
+    if assigned_by_id is not None:
+        event["assigned_by"] = {
+            "id": assigned_by_id,
+            "name": (assigned_by_name or "").strip() or None,
+        }
+    return event
 
 
 def channel_status_event(channel_payload: dict[str, Any]) -> dict[str, Any]:

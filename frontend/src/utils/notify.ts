@@ -346,4 +346,38 @@ export function notifyIncomingMessage(payload: IncomingNotifyPayload) {
   }
 }
 
+/** Transfer / assign to current manager — toast even without OS push. */
+export function notifyChatAssigned(payload: {
+  dialogId: string
+  contactName: string
+  fromName?: string | null
+  isActiveDialog?: boolean
+}) {
+  const name = payload.contactName || 'Клиент'
+  const from = (payload.fromName || '').trim()
+  const text = from ? `${from} передал(а) вам обращение` : 'Вам передали обращение'
+
+  playIncomingSound()
+  void showOsNotification({
+    dialogId: payload.dialogId,
+    contactName: name,
+    text,
+    isActiveDialog: payload.isActiveDialog,
+  }).then((r) => {
+    if (r.ok) return
+    debugLog('assign os skip', r.reason)
+  })
+
+  if (payload.isActiveDialog) return
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+
+  showInAppToast({
+    title: name,
+    text,
+    kind: 'message',
+    dialogId: payload.dialogId,
+    initials: initials(name),
+  })
+}
+
 export { shouldShowOsPush, explainOsPushDecision, initials as notifyInitials }

@@ -26,7 +26,7 @@ import { ApiError } from '@/api/client'
 import { ChatsSocket, type ChatSocketEvent } from '@/api/ws'
 import type { Appeal, Dialog, DialogSidebar, Message, Template, User } from '@/types'
 import { useAuthStore } from '@/stores/auth'
-import { notifyIncomingMessage, showInAppToast } from '@/utils/notify'
+import { notifyChatAssigned, notifyIncomingMessage, showInAppToast } from '@/utils/notify'
 
 type DialogDraft = { text: string; files: File[] }
 
@@ -329,6 +329,23 @@ export const useChatsStore = defineStore('chats', () => {
 
     if (event.type === 'dialog.updated' || event.type === 'dialog.assigned') {
       const mappedDialog = mapDialog(event.dialog)
+      if (
+        event.type === 'dialog.assigned' &&
+        event.assigned_by &&
+        mappedDialog.assigneeId != null
+      ) {
+        const auth = useAuthStore()
+        const me = auth.user?.id
+        const byId = event.assigned_by.id
+        if (me != null && mappedDialog.assigneeId === me && byId !== me) {
+          notifyChatAssigned({
+            dialogId: mappedDialog.id,
+            contactName: mappedDialog.contactName,
+            fromName: event.assigned_by.name,
+            isActiveDialog: activeDialogId.value === mappedDialog.id,
+          })
+        }
+      }
       if (activeDialogId.value === mappedDialog.id) {
         const prevAppealId = dialogs.value.find((d) => d.id === mappedDialog.id)?.appealId
         if (mappedDialog.appealId != null && mappedDialog.appealId !== prevAppealId) {
