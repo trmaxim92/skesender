@@ -522,6 +522,10 @@ class TemplateOut(BaseModel):
     kind: TemplateKind = TemplateKind.GENERAL
     category_id: int | None = None
     category_name: str | None = None
+    media_kind: str | None = None
+    media_name: str | None = None
+    mime_type: str | None = None
+    has_media: bool = False
     created_by_id: int | None = None
     is_mine: bool = False
     created_at: datetime
@@ -532,7 +536,7 @@ class TemplateOut(BaseModel):
 
 class TemplateCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    body: str = Field(min_length=1, max_length=8000)
+    body: str = Field(default="", max_length=8000)
     transport: str = "all"
     kind: TemplateKind = TemplateKind.GENERAL
     category_id: int | None = None
@@ -540,7 +544,7 @@ class TemplateCreateRequest(BaseModel):
 
 class TemplateUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    body: str | None = Field(default=None, min_length=1, max_length=8000)
+    body: str | None = Field(default=None, max_length=8000)
     transport: str | None = None
     kind: TemplateKind | None = None
     category_id: int | None = None

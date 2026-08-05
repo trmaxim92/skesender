@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { FolderPlus, Pencil, Trash2 } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { FolderPlus, ImagePlus, Pencil, Trash2, X } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMyTemplatesStore } from '@/stores/myTemplates'
 import type { ChannelTransport, Template, TemplateKind } from '@/types'
@@ -19,9 +19,19 @@ const body = ref('')
 const transport = ref<ChannelTransport | 'all'>('all')
 const kind = ref<TemplateKind>('general')
 const categoryId = ref<string>('')
+const mediaFile = ref<File | null>(null)
+const mediaPreview = ref<string | null>(null)
+const existingHasMedia = ref(false)
+const clearExistingMedia = ref(false)
 const saving = ref(false)
 const savingCategory = ref(false)
 const editingId = ref<string | null>(null)
+
+const canSave = computed(
+  () =>
+    Boolean(name.value.trim()) &&
+    Boolean(body.value.trim() || mediaFile.value || existingHasMedia.value),
+)
 
 const grouped = computed(() => {
   const groups: { id: string | null; name: string; items: Template[] }[] = []
@@ -40,6 +50,17 @@ onMounted(() => {
   void templates.fetchAll()
 })
 
+onUnmounted(() => {
+  revokePreview()
+})
+
+function revokePreview() {
+  if (mediaPreview.value) {
+    URL.revokeObjectURL(mediaPreview.value)
+    mediaPreview.value = null
+  }
+}
+
 function resetForm() {
   name.value = ''
   body.value = ''
@@ -47,6 +68,10 @@ function resetForm() {
   kind.value = 'general'
   categoryId.value = ''
   editingId.value = null
+  mediaFile.value = null
+  existingHasMedia.value = false
+  clearExistingMedia.value = false
+  revokePreview()
 }
 
 function startEdit(t: Template) {
@@ -56,6 +81,47 @@ function startEdit(t: Template) {
   transport.value = t.transport
   kind.value = t.kind
   categoryId.value = t.categoryId ?? ''
+  mediaFile.value = null
+  existingHasMedia.value = t.hasMedia
+  clearExistingMedia.value = false
+  revokePreview()
+  if (t.hasMedia) {
+    void loadExistingPreview(t.id)
+  }
+}
+
+async function loadExistingPreview(id: string) {
+  try {
+    const { fetchMyTemplateMediaBlob } = await import('@/api/cabinet')
+    const blob = await fetchMyTemplateMediaBlob(Number(id))
+    if (editingId.value !== id) return
+    revokePreview()
+    mediaPreview.value = URL.createObjectURL(blob)
+  } catch {
+    // preview optional
+  }
+}
+
+function onMediaChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  revokePreview()
+  mediaFile.value = file
+  clearExistingMedia.value = false
+  if (file) {
+    existingHasMedia.value = false
+    mediaPreview.value = URL.createObjectURL(file)
+  }
+  input.value = ''
+}
+
+function removeMedia() {
+  if (editingId.value && (existingHasMedia.value || (!mediaFile.value && mediaPreview.value))) {
+    clearExistingMedia.value = true
+  }
+  mediaFile.value = null
+  existingHasMedia.value = false
+  revokePreview()
 }
 
 async function addCategory() {
@@ -92,7 +158,7 @@ async function removeCategory(id: string) {
 }
 
 async function saveTemplate() {
-  if (!name.value.trim() || !body.value.trim()) return
+  if (!canSave.value) return
   saving.value = true
   const cat = categoryId.value || null
   let ok = false
@@ -103,15 +169,18 @@ async function saveTemplate() {
       transport: transport.value,
       kind: kind.value,
       categoryId: cat,
+      media: mediaFile.value,
+      clearMedia: clearExistingMedia.value,
     })
   } else {
-    ok = await templates.addTemplate(
-      name.value.trim(),
-      body.value.trim(),
-      transport.value,
-      kind.value,
-      cat,
-    )
+    ok = await templates.addTemplate({
+      name: name.value.trim(),
+      body: body.value.trim(),
+      transport: transport.value,
+      kind: kind.value,
+      categoryId: cat,
+      media: mediaFile.value,
+    })
   }
   saving.value = false
   if (!ok) return
@@ -130,7 +199,8 @@ async function removeTemplate(id: string) {
     <div class="mb-4">
       <h1 class="text-lg font-semibold">Мои шаблоны</h1>
       <p class="mt-1 text-sm text-muted">
-        Личные ответы с категориями — видны только вам. В чате вставляются одним кликом.
+        Личные ответы с категориями — видны только вам. В чате вставляются одним кликом вместе с
+        картинкой.
       </p>
     </div>
 
@@ -238,11 +308,38 @@ async function removeTemplate(id: string) {
               <span class="mb-1 block text-xs font-semibold text-muted">Текст</span>
               <textarea
                 v-model="body"
-                required
                 rows="4"
+                placeholder="Можно оставить пустым, если есть картинка"
                 class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
               />
             </label>
+            <div class="block sm:col-span-2">
+              <span class="mb-1 block text-xs font-semibold text-muted">Изображение</span>
+              <div class="flex flex-wrap items-start gap-3">
+                <label
+                  class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-line bg-surface px-3 py-2 text-sm text-muted hover:border-brand/40 hover:text-ink"
+                >
+                  <ImagePlus class="size-4" />
+                  {{ mediaFile || existingHasMedia || mediaPreview ? 'Заменить' : 'Выбрать файл' }}
+                  <input type="file" accept="image/*" class="hidden" @change="onMediaChange" />
+                </label>
+                <div v-if="mediaPreview" class="relative">
+                  <img
+                    :src="mediaPreview"
+                    alt=""
+                    class="h-20 w-20 rounded-xl object-cover ring-1 ring-line"
+                  />
+                  <button
+                    type="button"
+                    class="absolute -right-1.5 -top-1.5 rounded-full bg-panel p-0.5 text-muted ring-1 ring-line hover:text-danger"
+                    title="Убрать"
+                    @click="removeMedia"
+                  >
+                    <X class="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
             <label class="block">
               <span class="mb-1 block text-xs font-semibold text-muted">Категория</span>
               <select
@@ -276,7 +373,7 @@ async function removeTemplate(id: string) {
             <button
               type="submit"
               class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              :disabled="saving"
+              :disabled="saving || !canSave"
             >
               {{ saving ? '…' : editingId ? 'Сохранить' : 'Добавить' }}
             </button>
@@ -320,6 +417,7 @@ async function removeTemplate(id: string) {
                           ? 'Все каналы'
                           : transportLabel[t.transport]
                       }}
+                      <span v-if="t.hasMedia"> · изображение</span>
                     </p>
                   </div>
                   <div v-if="canWrite" class="flex gap-0.5">
@@ -341,7 +439,18 @@ async function removeTemplate(id: string) {
                     </button>
                   </div>
                 </div>
-                <p class="whitespace-pre-wrap text-sm text-ink/90">{{ t.body }}</p>
+                <div class="flex gap-3">
+                  <div
+                    v-if="t.hasMedia"
+                    class="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-surface text-muted ring-1 ring-line"
+                    title="Есть изображение"
+                  >
+                    <ImagePlus class="size-6" />
+                  </div>
+                  <p class="min-w-0 flex-1 whitespace-pre-wrap text-sm text-ink/90">
+                    {{ t.body || '—' }}
+                  </p>
+                </div>
               </article>
             </div>
           </section>

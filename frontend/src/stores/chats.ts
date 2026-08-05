@@ -667,13 +667,23 @@ export const useChatsStore = defineStore('chats', () => {
     pendingFiles.value = pendingFiles.value.filter((_, i) => i !== index)
   }
 
-  function applyTemplate(template: Template) {
+  async function applyTemplate(template: Template) {
     const auth = useAuthStore()
     const contact = activeDialog.value?.contactName || 'Клиент'
-    const text = template.body
+    const text = (template.body || '')
       .replaceAll('{{operator}}', auth.user?.name || 'Оператор')
       .replaceAll('{{contact}}', contact)
     draft.value = text
+    if (!template.hasMedia) return
+    try {
+      const { fetchMyTemplateMediaBlob } = await import('@/api/cabinet')
+      const blob = await fetchMyTemplateMediaBlob(Number(template.id))
+      const name = template.mediaName || 'image.jpg'
+      const file = new File([blob], name, { type: blob.type || 'image/jpeg' })
+      pendingFiles.value = [...pendingFiles.value, file]
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить изображение шаблона'
+    }
   }
 
   async function setFilter(value: 'new' | 'mine' | 'others', opts?: { keepActive?: boolean }) {

@@ -495,6 +495,10 @@ class MessageTemplate(Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("template_categories.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    media_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    media_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    media_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

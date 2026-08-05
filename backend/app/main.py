@@ -412,6 +412,18 @@ async def ensure_schema() -> None:
                 "ON mailing_recipients (next_attempt_at)"
             )
         )
+        await conn.execute(
+            text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_kind VARCHAR(16)")
+        )
+        await conn.execute(
+            text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_path VARCHAR(512)")
+        )
+        await conn.execute(
+            text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_name VARCHAR(255)")
+        )
+        await conn.execute(
+            text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS mime_type VARCHAR(128)")
+        )
 
 
 @asynccontextmanager

@@ -226,6 +226,8 @@ export interface Template {
   kind: TemplateKind
   categoryId: string | null
   categoryName: string | null
+  hasMedia: boolean
+  mediaName: string | null
   isMine: boolean
   updatedAt: string
 }

@@ -13,6 +13,8 @@ function mapTemplate(t: ApiTemplate): Template {
     kind: t.kind ?? 'appeal_closed',
     categoryId: null,
     categoryName: null,
+    hasMedia: Boolean(t.has_media),
+    mediaName: t.media_name ?? null,
     isMine: false,
     updatedAt: t.updated_at,
   }

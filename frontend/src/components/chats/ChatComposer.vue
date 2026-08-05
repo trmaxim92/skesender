@@ -424,8 +424,11 @@ watch(
                 templatesOpen = false
               "
             >
-              <div class="text-sm font-semibold">{{ t.name }}</div>
-              <div class="mt-1 line-clamp-2 text-xs text-muted">{{ t.body }}</div>
+              <div class="text-sm font-semibold">
+                {{ t.name }}
+                <span v-if="t.hasMedia" class="ml-1 text-[10px] font-medium text-muted">· фото</span>
+              </div>
+              <div class="mt-1 line-clamp-2 text-xs text-muted">{{ t.body || 'Изображение' }}</div>
             </button>
           </div>
         </section>

@@ -1,4 +1,4 @@
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type {
   AccessRole,
   ChannelTransport,
@@ -49,6 +49,10 @@ export interface ApiTemplate {
   kind?: 'general' | 'appeal_closed'
   category_id?: number | null
   category_name?: string | null
+  media_kind?: string | null
+  media_name?: string | null
+  mime_type?: string | null
+  has_media?: boolean
   created_by_id?: number | null
   is_mine?: boolean
   created_at: string
@@ -166,31 +170,28 @@ export async function listMyTemplatesRequest() {
   return api<ApiTemplate[]>('/api/me/templates')
 }
 
-export async function createMyTemplateRequest(payload: {
-  name: string
-  body: string
-  transport: ChannelTransport | 'all'
-  kind?: 'general' | 'appeal_closed'
-  category_id?: number | null
-}) {
-  return api<ApiTemplate>('/api/me/templates', { method: 'POST', json: payload })
+export async function createMyTemplateRequest(form: FormData) {
+  return api<ApiTemplate>('/api/me/templates', { method: 'POST', body: form })
 }
 
-export async function updateMyTemplateRequest(
-  id: number,
-  payload: {
-    name?: string
-    body?: string
-    transport?: ChannelTransport | 'all'
-    kind?: 'general' | 'appeal_closed'
-    category_id?: number | null
-  },
-) {
-  return api<ApiTemplate>(`/api/me/templates/${id}`, { method: 'PATCH', json: payload })
+export async function updateMyTemplateRequest(id: number, form: FormData) {
+  return api<ApiTemplate>(`/api/me/templates/${id}`, { method: 'PATCH', body: form })
 }
 
 export async function deleteMyTemplateRequest(id: number) {
   return api<void>(`/api/me/templates/${id}`, { method: 'DELETE' })
+}
+
+export async function fetchMyTemplateMediaBlob(id: number): Promise<Blob> {
+  const token = localStorage.getItem('oe_access_token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const base = import.meta.env.VITE_API_URL ?? ''
+  const response = await fetch(`${base}/api/me/templates/${id}/media`, { headers })
+  if (!response.ok) {
+    throw new ApiError(response.status, `HTTP ${response.status}`)
+  }
+  return response.blob()
 }
 
 export async function listTemplatesRequest() {

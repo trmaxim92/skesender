@@ -39,6 +39,8 @@ function mapTemplate(t: ApiTemplate): Template {
     kind: t.kind ?? 'general',
     categoryId: t.category_id != null ? String(t.category_id) : null,
     categoryName: t.category_name ?? null,
+    hasMedia: Boolean(t.has_media),
+    mediaName: t.media_name ?? null,
     isMine: true,
     updatedAt: t.updated_at,
   }
@@ -112,21 +114,23 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
     }
   }
 
-  async function addTemplate(
-    name: string,
-    body: string,
-    transport: ChannelTransport | 'all',
-    kind: TemplateKind = 'general',
-    categoryId: string | null = null,
-  ) {
+  async function addTemplate(payload: {
+    name: string
+    body: string
+    transport: ChannelTransport | 'all'
+    kind?: TemplateKind
+    categoryId?: string | null
+    media?: File | null
+  }) {
     try {
-      const created = await createMyTemplateRequest({
-        name,
-        body,
-        transport,
-        kind,
-        category_id: categoryId != null ? Number(categoryId) : null,
-      })
+      const form = new FormData()
+      form.append('name', payload.name)
+      form.append('body', payload.body)
+      form.append('transport', payload.transport)
+      form.append('kind', payload.kind ?? 'general')
+      if (payload.categoryId) form.append('category_id', payload.categoryId)
+      if (payload.media) form.append('media', payload.media)
+      const created = await createMyTemplateRequest(form)
       templates.value.unshift(mapTemplate(created))
       return true
     } catch (e) {
@@ -138,23 +142,25 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
   async function updateTemplate(
     id: string,
     payload: {
-      name?: string
-      body?: string
-      transport?: ChannelTransport | 'all'
+      name: string
+      body: string
+      transport: ChannelTransport | 'all'
       kind?: TemplateKind
       categoryId?: string | null
+      media?: File | null
+      clearMedia?: boolean
     },
   ) {
     try {
-      const body: Parameters<typeof updateMyTemplateRequest>[1] = {}
-      if (payload.name !== undefined) body.name = payload.name
-      if (payload.body !== undefined) body.body = payload.body
-      if (payload.transport !== undefined) body.transport = payload.transport
-      if (payload.kind !== undefined) body.kind = payload.kind
-      if (payload.categoryId !== undefined) {
-        body.category_id = payload.categoryId != null ? Number(payload.categoryId) : null
-      }
-      const updated = await updateMyTemplateRequest(Number(id), body)
+      const form = new FormData()
+      form.append('name', payload.name)
+      form.append('body', payload.body)
+      form.append('transport', payload.transport)
+      form.append('kind', payload.kind ?? 'general')
+      form.append('category_id', payload.categoryId ?? '')
+      if (payload.clearMedia) form.append('clear_media', 'true')
+      if (payload.media) form.append('media', payload.media)
+      const updated = await updateMyTemplateRequest(Number(id), form)
       const mapped = mapTemplate(updated)
       templates.value = templates.value.map((t) => (t.id === id ? mapped : t))
       return true
