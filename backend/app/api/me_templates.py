@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import attributes, selectinload
 
 from app.db import get_db
 from app.deps import get_current_user
@@ -146,7 +147,8 @@ def _unlink_path(relative: str | None) -> None:
 
 
 def _sync_legacy_media(tpl: MessageTemplate) -> None:
-    rows = sorted(list(tpl.attachments or []), key=lambda a: (a.sort_order, a.id))
+    _ensure_attachments_loaded(tpl)
+    rows = sorted(list(tpl.attachments or []), key=lambda a: (a.sort_order, a.id or 0))
     if not rows:
         tpl.media_kind = None
         tpl.media_path = None
@@ -160,7 +162,15 @@ def _sync_legacy_media(tpl: MessageTemplate) -> None:
     tpl.mime_type = first.mime_type
 
 
+def _ensure_attachments_loaded(tpl: MessageTemplate) -> None:
+    """Avoid async lazy-load when appending to a new/unloaded collection."""
+    insp = sa_inspect(tpl)
+    if "attachments" in insp.unloaded:
+        attributes.set_committed_value(tpl, "attachments", [])
+
+
 async def _add_images(tpl: MessageTemplate, files: list[UploadFile]) -> int:
+    _ensure_attachments_loaded(tpl)
     existing = len(list(tpl.attachments or []))
     added = 0
     for media in files:
@@ -197,6 +207,7 @@ async def _add_images(tpl: MessageTemplate, files: list[UploadFile]) -> int:
 
 
 def _clear_all_media(tpl: MessageTemplate) -> None:
+    _ensure_attachments_loaded(tpl)
     paths = {a.storage_path for a in list(tpl.attachments or []) if a.storage_path}
     if tpl.media_path:
         paths.add(tpl.media_path)
