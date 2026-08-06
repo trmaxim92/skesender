@@ -429,12 +429,16 @@ async def list_dialogs(
                 select(Appeal.dialog_id).where(cast(Appeal.number, String).ilike(like))
             ),
         ]
-        if needle.lstrip("#").isdigit():
+        raw_num = needle.lstrip("#")
+        if raw_num.isdigit():
             conditions.append(cast(Dialog.id, String).ilike(like))
-            num = int(needle.lstrip("#"))
-            conditions.append(
-                Dialog.id.in_(select(Appeal.dialog_id).where(Appeal.number == num))
-            )
+            # Exact appeal.number match uses PG INTEGER (int32). Phone queries
+            # like 7932… overflow asyncpg — skip exact int when out of range.
+            num = int(raw_num)
+            if 0 <= num <= 2_147_483_647:
+                conditions.append(
+                    Dialog.id.in_(select(Appeal.dialog_id).where(Appeal.number == num))
+                )
         stmt = stmt.where(or_(*conditions))
 
     stmt = stmt.offset(offset).limit(limit + 1)

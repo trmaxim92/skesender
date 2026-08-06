@@ -133,12 +133,15 @@ class MaxPersonalRuntime:
             state.status = "error"
             state.client = None
         await self._restore_channel(channel_id)
-        for _ in range(50):
+        # Reconnect after socket drop often takes a few seconds; wait longer than 10s.
+        for _ in range(100):
             client = self.get_client(channel_id)
             if client:
                 return client
-            await asyncio.sleep(0.2)
-        raise IntegrationError("MAX personal client is offline; reconnect channel")
+            await asyncio.sleep(0.3)
+        raise IntegrationError(
+            "Канал MAX · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал."
+        )
 
     async def stop_all(self) -> None:
         tasks = []

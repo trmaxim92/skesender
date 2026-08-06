@@ -638,6 +638,7 @@ export const useChatsStore = defineStore('chats', () => {
     sidePanelOpen.value = false
     sidebar.value = null
     dialogAppeals.value = []
+    error.value = ''
     const dialog = dialogs.value.find((d) => d.id === id)
     viewingAppealId.value = dialog?.appealId ?? null
     await fetchDialogAppeals(id)

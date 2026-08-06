@@ -200,7 +200,9 @@ class TelegramUserRuntime:
             if client and client.is_connected():
                 return client
             await asyncio.sleep(0.2)
-        raise IntegrationError("Telegram personal client is offline; reconnect channel")
+        raise IntegrationError(
+            "Канал Telegram · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал."
+        )
 
     async def stop_all(self) -> None:
         tasks = []
