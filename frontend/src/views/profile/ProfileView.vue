@@ -12,7 +12,6 @@ import {
   prepareNotifyServiceWorker,
   setPushEnabled,
   setSoundEnabled,
-  testOsPush,
   unlockNotifyAudio,
 } from '@/utils/notify'
 import {
@@ -24,7 +23,7 @@ import {
   promptPwaInstall,
   wasInstallDismissed,
 } from '@/utils/pwa'
-import { isWebPushSupported, subscribeWebPush, unsubscribeWebPush } from '@/utils/webPush'
+import { isWebPushSupported, subscribeWebPush, testServerWebPush, unsubscribeWebPush } from '@/utils/webPush'
 
 type TabId = 'profile' | 'security' | 'notifications'
 
@@ -180,10 +179,10 @@ async function togglePush() {
       pushTestHint.value = `Разрешение есть, но подписка на шторку не удалась (${sub.reason})`
       return
     }
-    const test = await testOsPush()
+    const test = await testServerWebPush()
     pushTestHint.value = test.ok
-      ? 'Включено: уведомления будут в шторке телефона'
-      : `Подписка ок, тест: ${test.reason}`
+      ? `Включено — проверьте всплывающее на экране блокировки (устройств: ${test.sent})`
+      : test.detail || 'Подписка есть, но тестовый пуш не ушёл'
     return
   }
   pushOn.value = false
@@ -208,13 +207,13 @@ async function runPushTest() {
       pushTestHint.value = `Подписка: ${sub.reason}`
       return
     }
-    const test = await testOsPush()
+    pushOn.value = true
+    setPushEnabled(true)
+    const test = await testServerWebPush()
     if (test.ok) {
-      pushOn.value = true
-      setPushEnabled(true)
-      pushTestHint.value = 'OK — проверьте шторку уведомлений телефона'
+      pushTestHint.value = `OK — отправлено на ${test.sent} устройств. Заблокируйте экран и проверьте шторку.`
     } else {
-      pushTestHint.value = `Не ок: ${test.reason}`
+      pushTestHint.value = test.detail || 'Сервер не смог отправить пуш'
     }
   } catch (e) {
     pushTestHint.value = `Ошибка: ${e instanceof Error ? e.message : String(e)}`

@@ -60,6 +60,12 @@ export async function subscribeWebPush(): Promise<{ ok: boolean; reason: string 
   return { ok: true, reason: 'subscribed' }
 }
 
+export async function testServerWebPush(): Promise<{ ok: boolean; sent: number; detail?: string }> {
+  return api<{ ok: boolean; sent: number; detail?: string }>('/api/push/test', {
+    method: 'POST',
+  })
+}
+
 export async function unsubscribeWebPush(): Promise<void> {
   if (!isWebPushSupported()) return
   try {

@@ -82,15 +82,29 @@ def public_vapid_key() -> str:
     return get_vapid_keys()["publicKey"]
 
 
+def _vapid_signer() -> Vapid:
+    """pywebpush expects a Vapid instance or raw/base64 key — PEM must use from_pem."""
+    keys = get_vapid_keys()
+    private = keys["privateKey"].strip()
+    if private.startswith("-----BEGIN"):
+        pem = private.encode("ascii") if isinstance(private, str) else private
+        return Vapid.from_pem(pem)
+    return Vapid.from_string(private_key=private)
+
+
 def _send_one(subscription: dict[str, Any], payload: dict[str, Any]) -> None:
     keys = get_vapid_keys()
     webpush(
         subscription_info=subscription,
         data=json.dumps(payload, ensure_ascii=False),
-        vapid_private_key=keys["privateKey"],
+        vapid_private_key=_vapid_signer(),
         vapid_claims={"sub": keys["mailto"]},
-        ttl=60,
-        timeout=10,
+        # Long TTL + high urgency so FCM/APNs can wake a locked phone.
+        ttl=86_400,
+        timeout=15,
+        headers={
+            "Urgency": "high",
+        },
     )
 
 
@@ -242,6 +256,7 @@ async def notify_inbound_message(
                 "dialogId": str(dialog_id),
                 "tag": f"oe-chat-{dialog_id}",
                 "kind": "message",
+                "requireInteraction": True,
             }
             n = await send_push_to_users(session, user_ids, payload)
             await session.commit()
@@ -274,6 +289,7 @@ async def notify_chat_assigned(
                 "dialogId": str(dialog_id),
                 "tag": f"oe-assign-{dialog_id}",
                 "kind": "assign",
+                "requireInteraction": True,
             }
             n = await send_push_to_users(session, [assignee_id], payload)
             await session.commit()

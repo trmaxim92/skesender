@@ -65,6 +65,9 @@ self.addEventListener('push', (event) => {
     badge: BADGE,
     tag: data.tag || (dialogId ? `oe-chat-${dialogId}` : 'oe-chat'),
     renotify: true,
+    requireInteraction: data.requireInteraction !== false,
+    silent: false,
+    vibrate: [160, 80, 160],
     lang: 'ru',
     data: { dialogId, kind: data.kind || 'message' },
     actions: [
