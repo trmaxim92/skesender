@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2, X } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -108,7 +108,6 @@ function onMdMqChange() {
 
 const emptyHint = computed(() => {
   if (chats.searchQuery.trim()) return 'Ничего не найдено по запросу.'
-  if (chats.channelFilterId != null) return 'В этом канале нет диалогов по текущему фильтру.'
   if (chats.filter === 'new') return 'Новых обращений нет — хороший знак.'
   if (chats.filter === 'mine') return 'Пока нет ваших чатов. Заберите из «Новые».'
   return 'Чужих чатов в этой вкладке нет.'
@@ -133,10 +132,10 @@ async function onOutboundCreated(dialogId: number) {
   await router.replace({ name: 'chats', query: { ...route.query, dialog: String(dialogId) } })
 }
 
-function onChannelFilterChange(ev: Event) {
-  const raw = (ev.target as HTMLSelectElement).value
-  const id = raw === '' ? null : Number(raw)
-  void chats.setChannelFilter(Number.isFinite(id as number) ? id : null)
+function clearSearch() {
+  searchInput.value = ''
+  if (searchTimer) window.clearTimeout(searchTimer)
+  void chats.setSearchQuery('')
 }
 
 const closePreview = computed(() => {
@@ -511,27 +510,37 @@ onUnmounted(() => {
           <Plus class="size-4" />
         </button>
       </div>
-      <div class="space-y-2 border-b border-line p-3 pt-0">
+      <div class="border-b border-line px-3 py-2.5">
         <div class="relative">
-          <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
+          <Search
+            class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted/70"
+          />
           <input
             v-model="searchInput"
-            type="search"
-            placeholder="Имя, телефон, #обращения…"
-            class="w-full rounded-lg border border-line bg-surface py-2 pl-8 pr-2 text-xs outline-none ring-brand focus:ring-2"
+            type="text"
+            inputmode="search"
+            autocomplete="off"
+            placeholder="Поиск по всем чатам…"
+            class="w-full rounded-xl border border-line bg-panel py-2.5 pl-10 pr-10 text-sm text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] outline-none transition placeholder:text-muted/70 ring-brand/30 focus:border-brand/40 focus:ring-2"
             @input="onSearchInput"
+            @keydown.escape.prevent="clearSearch"
           />
+          <button
+            v-if="searchInput"
+            type="button"
+            class="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-ink"
+            title="Очистить"
+            @click="clearSearch"
+          >
+            <X class="size-3.5" />
+          </button>
         </div>
-        <select
-          class="w-full rounded-lg border border-line bg-surface px-2.5 py-2 text-xs outline-none ring-brand focus:ring-2"
-          :value="chats.channelFilterId ?? ''"
-          @change="onChannelFilterChange"
+        <p
+          v-if="chats.searchQuery.trim()"
+          class="mt-1.5 px-0.5 text-[11px] text-muted"
         >
-          <option value="">Все каналы</option>
-          <option v-for="ch in channels.channels" :key="ch.id" :value="ch.id">
-            {{ ch.name }}
-          </option>
-        </select>
+          Ищем во всех вкладках и каналах
+        </p>
       </div>
       <div class="min-h-0 flex-1 overflow-auto" @scroll="onDialogsScroll">
         <p v-if="chats.loadingDialogs && !chats.dialogs.length" class="p-4 text-center text-sm text-muted">

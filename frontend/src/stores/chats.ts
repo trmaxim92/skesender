@@ -151,7 +151,6 @@ export const useChatsStore = defineStore('chats', () => {
   const dialogAppeals = ref<Appeal[]>([])
   const viewingAppealId = ref<number | null>(null)
   const filter = ref<'new' | 'mine' | 'others'>('new')
-  const channelFilterId = ref<number | null>(null)
   const searchQuery = ref('')
   const unreadByTab = ref({ new: 0, mine: 0, others: 0 })
   const loadingDialogs = ref(false)
@@ -218,6 +217,25 @@ export const useChatsStore = defineStore('chats', () => {
 
   function matchesFilter(d: Dialog): boolean {
     if (d.appealStatus === 'closed') return false
+    const q = searchQuery.value.trim().toLowerCase()
+    if (q) {
+      const digits = q.replace(/\D/g, '')
+      const hay = [
+        d.contactName,
+        d.contactPhone,
+        d.id,
+        d.appealNumber != null ? String(d.appealNumber) : '',
+        d.appealNumber != null ? `#${d.appealNumber}` : '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      if (hay.includes(q)) return true
+      if (digits.length >= 4) {
+        const phoneDigits = (d.contactPhone || '').replace(/\D/g, '')
+        if (phoneDigits.includes(digits)) return true
+      }
+      return false
+    }
     const auth = useAuthStore()
     if (filter.value === 'new') return !d.assigneeId
     if (filter.value === 'mine') return d.assigneeId === auth.user?.id
@@ -481,11 +499,14 @@ export const useChatsStore = defineStore('chats', () => {
     }
     error.value = ''
     try {
-      const page = await listDialogsRequest(filter.value, searchQuery.value, {
-        limit: DIALOGS_PAGE_SIZE,
-        offset,
-        channelId: channelFilterId.value,
-      })
+      const page = await listDialogsRequest(
+        searchQuery.value.trim() ? 'all' : filter.value,
+        searchQuery.value,
+        {
+          limit: DIALOGS_PAGE_SIZE,
+          offset,
+        },
+      )
       if (reqId !== dialogsRequestId) return
       const mapped = page.items
         .map(mapDialog)
@@ -733,25 +754,6 @@ export const useChatsStore = defineStore('chats', () => {
       }
       return
     }
-    if (activeDialogId.value && !dialogs.value.some((d) => d.id === activeDialogId.value)) {
-      activeDialogId.value = dialogs.value[0]?.id ?? null
-      if (activeDialogId.value) {
-        const dialog = dialogs.value.find((d) => d.id === activeDialogId.value)
-        viewingAppealId.value = dialog?.appealId ?? null
-        dialogAppeals.value = []
-        await fetchDialogAppeals(activeDialogId.value)
-        await fetchMessages(activeDialogId.value, viewingAppealId.value)
-      } else {
-        viewingAppealId.value = null
-        dialogAppeals.value = []
-        messages.value = []
-      }
-    }
-  }
-
-  async function setChannelFilter(channelId: number | null) {
-    channelFilterId.value = channelId
-    await fetchDialogs({ reloadMessages: false })
     if (activeDialogId.value && !dialogs.value.some((d) => d.id === activeDialogId.value)) {
       activeDialogId.value = dialogs.value[0]?.id ?? null
       if (activeDialogId.value) {
@@ -1133,7 +1135,6 @@ export const useChatsStore = defineStore('chats', () => {
     isViewingPastAppeal,
     canCompose,
     filter,
-    channelFilterId,
     searchQuery,
     unreadByTab,
     totalUnread,
@@ -1169,7 +1170,6 @@ export const useChatsStore = defineStore('chats', () => {
     clearReply,
     setNoteMode,
     setFilter,
-    setChannelFilter,
     setSearchQuery,
     assignOperator,
     sendMessage,

@@ -99,7 +99,7 @@ export interface ApiMessage {
 }
 
 export async function listDialogsRequest(
-  filter: 'new' | 'mine' | 'others' = 'new',
+  filter: 'new' | 'mine' | 'others' | 'all' = 'new',
   q: string = '',
   opts: { limit?: number; offset?: number; channelId?: number | null } = {},
 ) {
