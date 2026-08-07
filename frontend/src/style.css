@@ -41,6 +41,17 @@ body {
   color: var(--color-ink);
   background: var(--color-surface);
   -webkit-font-smoothing: antialiased;
+  /* PWA / iOS notch */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+@media (display-mode: standalone) {
+  body {
+    /* Feel closer to a native shell */
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 button,

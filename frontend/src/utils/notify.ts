@@ -76,6 +76,7 @@ export function isPushEnabled(): boolean {
 
 export function setPushEnabled(value: boolean) {
   writeFlag(PUSH_KEY, value)
+  if (value) void prepareNotifyServiceWorker()
 }
 
 export function notificationPermission(): NotificationPermission | 'unsupported' {
@@ -159,6 +160,12 @@ async function ensureNotifySw(): Promise<ServiceWorkerRegistration | null> {
       })
   }
   return swRegPromise
+}
+
+/** Register notify SW early (call after enabling push / on cabinet mount). */
+export async function prepareNotifyServiceWorker(): Promise<boolean> {
+  const reg = await ensureNotifySw()
+  return reg != null
 }
 
 function formatOsTitle(payload: IncomingNotifyPayload, force?: boolean): string {

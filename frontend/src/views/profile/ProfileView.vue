@@ -9,11 +9,21 @@ import {
   isSoundEnabled,
   notificationPermission,
   playIncomingSound,
+  prepareNotifyServiceWorker,
   setPushEnabled,
   setSoundEnabled,
   testOsPush,
   unlockNotifyAudio,
 } from '@/utils/notify'
+import {
+  dismissInstallHint,
+  isIosDevice,
+  isInstallPromptReady,
+  isStandaloneDisplay,
+  onInstallPromptAvailable,
+  promptPwaInstall,
+  wasInstallDismissed,
+} from '@/utils/pwa'
 
 type TabId = 'profile' | 'security' | 'notifications'
 
@@ -108,6 +118,15 @@ const pushPermission = ref(notificationPermission())
 const pushOn = ref(isPushEnabled() && pushPermission.value === 'granted')
 const pushTestHint = ref('')
 
+const standalone = ref(isStandaloneDisplay())
+const installReady = ref(isInstallPromptReady())
+const installDismissed = ref(wasInstallDismissed())
+const iosHint = computed(() => isIosDevice() && !standalone.value)
+const showInstallCard = computed(
+  () => !standalone.value && !installDismissed.value && (installReady.value || iosHint.value),
+)
+const installHint = ref('')
+
 onMounted(() => {
   pushPermission.value = notificationPermission()
   if (pushPermission.value !== 'granted') {
@@ -115,7 +134,11 @@ onMounted(() => {
     setPushEnabled(false)
   } else {
     pushOn.value = isPushEnabled()
+    if (pushOn.value) void prepareNotifyServiceWorker()
   }
+  return onInstallPromptAvailable((ready) => {
+    installReady.value = ready
+  })
 })
 
 function toggleSound() {
@@ -141,6 +164,7 @@ async function togglePush() {
     }
     setPushEnabled(true)
     pushOn.value = true
+    await prepareNotifyServiceWorker()
     const test = await testOsPush()
     pushTestHint.value = test.ok
       ? `Включено (${test.reason})`
@@ -156,6 +180,7 @@ async function runPushTest() {
   try {
     await ensureNotificationPermission()
     pushPermission.value = notificationPermission()
+    await prepareNotifyServiceWorker()
     const test = await testOsPush()
     if (test.ok) {
       pushOn.value = true
@@ -167,6 +192,26 @@ async function runPushTest() {
   } catch (e) {
     pushTestHint.value = `Ошибка: ${e instanceof Error ? e.message : String(e)}`
   }
+}
+
+async function installApp() {
+  installHint.value = ''
+  const outcome = await promptPwaInstall()
+  if (outcome === 'accepted') {
+    installDismissed.value = true
+    installHint.value = 'Приложение установлено'
+    return
+  }
+  if (outcome === 'unavailable' && iosHint.value) {
+    installHint.value = 'На iPhone: Поделиться → На экран «Домой»'
+    return
+  }
+  installHint.value = outcome === 'dismissed' ? 'Установка отменена' : 'Установка недоступна в этом браузере'
+}
+
+function hideInstallCard() {
+  dismissInstallHint()
+  installDismissed.value = true
 }
 </script>
 
@@ -288,6 +333,46 @@ async function runPushTest() {
 
       <!-- Notifications -->
       <div v-else class="mt-5 space-y-3">
+        <div
+          v-if="standalone"
+          class="rounded-2xl border border-ok/30 bg-ok/10 px-4 py-3 text-sm text-ink"
+        >
+          Открыто как приложение — оповещения работают в полноэкранном режиме.
+        </div>
+
+        <div
+          v-else-if="showInstallCard"
+          class="rounded-2xl border border-brand/30 bg-brand-soft px-4 py-3.5"
+        >
+          <div class="text-sm font-semibold text-ink">Установить на телефон</div>
+          <p class="mt-1 text-xs leading-snug text-muted">
+            <template v-if="iosHint && !installReady">
+              Safari → Поделиться → «На экран „Домой“». После установки включите пуш ниже.
+            </template>
+            <template v-else>
+              Ярлык на домашнем экране, режим как у приложения и системные уведомления.
+            </template>
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              v-if="installReady"
+              type="button"
+              class="rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white"
+              @click="installApp"
+            >
+              Установить
+            </button>
+            <button
+              type="button"
+              class="rounded-xl px-3 py-2 text-xs font-semibold text-muted hover:bg-panel"
+              @click="hideInstallCard"
+            >
+              Скрыть
+            </button>
+          </div>
+          <p v-if="installHint" class="mt-2 text-xs text-muted">{{ installHint }}</p>
+        </div>
+
         <button
           type="button"
           class="flex w-full items-center justify-between rounded-2xl border border-line bg-panel px-4 py-3.5 text-left transition hover:border-brand/30"
@@ -314,7 +399,9 @@ async function runPushTest() {
         >
           <div>
             <div class="text-sm font-semibold">Пуш-уведомления</div>
-            <div class="text-xs text-muted">Системные уведомления ОС / браузера</div>
+            <div class="text-xs text-muted">
+              Системные уведомления (как в приложении). На iOS — после установки на Домой.
+            </div>
           </div>
           <span
             class="text-xs font-bold"

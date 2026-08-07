@@ -17,6 +17,8 @@ import {
   UserRound,
   X,
   CircleUserRound,
+  Download,
+  Share,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
@@ -27,10 +29,20 @@ import type { PresenceStatus } from '@/types'
 import {
   isPushEnabled,
   notificationPermission,
+  prepareNotifyServiceWorker,
   setPushEnabled,
   unlockNotifyAudio,
 } from '@/utils/notify'
 import { resetFavicon, setFaviconUnread } from '@/utils/faviconBadge'
+import {
+  dismissInstallHint,
+  isIosDevice,
+  isStandaloneDisplay,
+  onInstallPromptAvailable,
+  promptPwaInstall,
+  setAppBadgeCount,
+  wasInstallDismissed,
+} from '@/utils/pwa'
 
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
 const USERS_GROUP_KEY = 'oe_nav_users_open'
@@ -178,9 +190,43 @@ watch(
   (n) => {
     document.title = n > 0 ? `(${n > 99 ? '99+' : n}) ${BASE_TITLE}` : BASE_TITLE
     setFaviconUnread(n)
+    void setAppBadgeCount(n)
   },
   { immediate: true },
 )
+
+const showInstallBanner = ref(false)
+const installPromptReady = ref(false)
+const iosInstallHint = computed(() => isIosDevice() && !isStandaloneDisplay())
+
+function refreshInstallBanner() {
+  if (isStandaloneDisplay() || wasInstallDismissed()) {
+    showInstallBanner.value = false
+    return
+  }
+  showInstallBanner.value = installPromptReady.value || iosInstallHint.value
+}
+
+async function onInstallApp() {
+  const outcome = await promptPwaInstall()
+  if (outcome === 'unavailable' && iosInstallHint.value) {
+    // Keep banner — instructions below
+    return
+  }
+  refreshInstallBanner()
+}
+
+function onDismissInstall() {
+  dismissInstallHint()
+  showInstallBanner.value = false
+}
+
+let stopInstallWatch: (() => void) | null = null
+stopInstallWatch = onInstallPromptAvailable((ready) => {
+  installPromptReady.value = ready
+  refreshInstallBanner()
+})
+refreshInstallBanner()
 
 function onInAppToast(ev: Event) {
   const detail = (ev as CustomEvent<{
@@ -359,6 +405,8 @@ onMounted(() => {
   }
   if (isPushEnabled() && notificationPermission() !== 'granted') {
     setPushEnabled(false)
+  } else if (isPushEnabled()) {
+    void prepareNotifyServiceWorker()
   }
   if (auth.canSection('/chats')) {
     chats.connectRealtime()
@@ -379,9 +427,11 @@ onUnmounted(() => {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
   }
   if (inAppToastTimer != null) window.clearTimeout(inAppToastTimer)
+  stopInstallWatch?.()
   chats.disconnectRealtime()
   document.title = BASE_TITLE
   resetFavicon()
+  void setAppBadgeCount(0)
 })
 </script>
 
@@ -671,6 +721,54 @@ onUnmounted(() => {
           </Teleport>
         </div>
       </header>
+
+      <div
+        v-if="showInstallBanner"
+        class="shrink-0 border-b border-brand/20 bg-brand-soft px-3 py-2.5 md:px-4"
+      >
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white">
+            <Download class="size-4" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-ink">Установить как приложение</div>
+            <p v-if="iosInstallHint && !installPromptReady" class="mt-0.5 text-xs leading-snug text-muted">
+              На iPhone: нажмите
+              <Share class="mx-0.5 inline size-3.5 align-text-bottom text-brand" />
+              «Поделиться» → «На экран „Домой“».
+            </p>
+            <p v-else class="mt-0.5 text-xs leading-snug text-muted">
+              Ярлык на телефоне, полноэкранный режим и оповещения как в приложении.
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-if="installPromptReady"
+                type="button"
+                class="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
+                @click="onInstallApp"
+              >
+                Установить
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-panel"
+                @click="onDismissInstall"
+              >
+                Позже
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="rounded-lg p-1 text-muted hover:bg-panel"
+            title="Закрыть"
+            @click="onDismissInstall"
+          >
+            <X class="size-4" />
+          </button>
+        </div>
+      </div>
+
       <main class="min-h-0 flex-1 overflow-hidden">
         <RouterView />
       </main>
