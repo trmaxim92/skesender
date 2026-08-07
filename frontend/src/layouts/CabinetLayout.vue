@@ -30,6 +30,7 @@ import {
   setPushEnabled,
   unlockNotifyAudio,
 } from '@/utils/notify'
+import { resetFavicon, setFaviconUnread } from '@/utils/faviconBadge'
 
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
 const USERS_GROUP_KEY = 'oe_nav_users_open'
@@ -176,6 +177,7 @@ watch(
   chatsUnread,
   (n) => {
     document.title = n > 0 ? `(${n > 99 ? '99+' : n}) ${BASE_TITLE}` : BASE_TITLE
+    setFaviconUnread(n)
   },
   { immediate: true },
 )
@@ -379,6 +381,7 @@ onUnmounted(() => {
   if (inAppToastTimer != null) window.clearTimeout(inAppToastTimer)
   chats.disconnectRealtime()
   document.title = BASE_TITLE
+  resetFavicon()
 })
 </script>
 
