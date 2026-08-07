@@ -24,6 +24,7 @@ import {
   promptPwaInstall,
   wasInstallDismissed,
 } from '@/utils/pwa'
+import { isWebPushSupported, subscribeWebPush, unsubscribeWebPush } from '@/utils/webPush'
 
 type TabId = 'profile' | 'security' | 'notifications'
 
@@ -134,7 +135,10 @@ onMounted(() => {
     setPushEnabled(false)
   } else {
     pushOn.value = isPushEnabled()
-    if (pushOn.value) void prepareNotifyServiceWorker()
+    if (pushOn.value) {
+      void prepareNotifyServiceWorker()
+      void subscribeWebPush()
+    }
   }
   return onInstallPromptAvailable((ready) => {
     installReady.value = ready
@@ -151,6 +155,12 @@ function toggleSound() {
 async function togglePush() {
   pushTestHint.value = ''
   if (!pushOn.value) {
+    if (!isWebPushSupported()) {
+      pushTestHint.value = iosHint.value
+        ? 'На iPhone сначала установите приложение на Домой, затем включите пуш здесь'
+        : 'Этот браузер не поддерживает push в шторку уведомлений'
+      return
+    }
     const perm = await ensureNotificationPermission()
     pushPermission.value = perm
     if (perm !== 'granted') {
@@ -165,27 +175,44 @@ async function togglePush() {
     setPushEnabled(true)
     pushOn.value = true
     await prepareNotifyServiceWorker()
+    const sub = await subscribeWebPush()
+    if (!sub.ok) {
+      pushTestHint.value = `Разрешение есть, но подписка на шторку не удалась (${sub.reason})`
+      return
+    }
     const test = await testOsPush()
     pushTestHint.value = test.ok
-      ? `Включено (${test.reason})`
-      : `Включено, тест: ${test.reason}`
+      ? 'Включено: уведомления будут в шторке телефона'
+      : `Подписка ок, тест: ${test.reason}`
     return
   }
   pushOn.value = false
   setPushEnabled(false)
+  await unsubscribeWebPush()
 }
 
 async function runPushTest() {
   pushTestHint.value = 'Запрос…'
   try {
+    if (!isWebPushSupported()) {
+      pushTestHint.value = iosHint.value
+        ? 'Сначала «На экран Домой», потом пуш'
+        : 'Push не поддерживается'
+      return
+    }
     await ensureNotificationPermission()
     pushPermission.value = notificationPermission()
     await prepareNotifyServiceWorker()
+    const sub = await subscribeWebPush()
+    if (!sub.ok) {
+      pushTestHint.value = `Подписка: ${sub.reason}`
+      return
+    }
     const test = await testOsPush()
     if (test.ok) {
       pushOn.value = true
       setPushEnabled(true)
-      pushTestHint.value = `OK (${test.reason}). Смотри тост и центр уведомлений.`
+      pushTestHint.value = 'OK — проверьте шторку уведомлений телефона'
     } else {
       pushTestHint.value = `Не ок: ${test.reason}`
     }
@@ -398,9 +425,10 @@ function hideInstallCard() {
           @click="togglePush"
         >
           <div>
-            <div class="text-sm font-semibold">Пуш-уведомления</div>
+            <div class="text-sm font-semibold">Пуш в шторку телефона</div>
             <div class="text-xs text-muted">
-              Системные уведомления (как в приложении). На iOS — после установки на Домой.
+              Системные уведомления даже когда кабинет свёрнут. На iPhone — только после установки на
+              Домой.
             </div>
           </div>
           <span

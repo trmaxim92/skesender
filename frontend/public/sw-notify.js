@@ -1,4 +1,4 @@
-/* SkySender notify + PWA service worker */
+/* SkySender notify + PWA + Web Push service worker */
 const ICON = '/oe-notify-icon.png'
 const BADGE = '/oe-badge.png'
 
@@ -45,6 +45,49 @@ async function openOrFocusChat(dialogId) {
   }
 }
 
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    try {
+      data = { body: event.data ? event.data.text() : '' }
+    } catch {
+      data = {}
+    }
+  }
+
+  const title = data.title || 'SkySender'
+  const dialogId = data.dialogId != null ? String(data.dialogId) : null
+  const options = {
+    body: data.body || 'Новое сообщение',
+    icon: ICON,
+    badge: BADGE,
+    tag: data.tag || (dialogId ? `oe-chat-${dialogId}` : 'oe-chat'),
+    renotify: true,
+    lang: 'ru',
+    data: { dialogId, kind: data.kind || 'message' },
+    actions: [
+      { action: 'open', title: 'Открыть' },
+      { action: 'dismiss', title: 'Скрыть' },
+    ],
+  }
+
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, options)
+      try {
+        const n = Number(data.badgeCount)
+        if (Number.isFinite(n) && n > 0 && self.registration.setAppBadge) {
+          await self.registration.setAppBadge(n)
+        }
+      } catch {
+        // optional
+      }
+    })(),
+  )
+})
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const dialogId = event.notification?.data?.dialogId
@@ -55,10 +98,9 @@ self.addEventListener('notificationclick', (event) => {
 })
 
 self.addEventListener('notificationclose', () => {
-  // no-op — reserved for analytics later
+  // no-op
 })
 
-// Allow page to ask SW to show a styled notification (keeps options in one place).
 self.addEventListener('message', (event) => {
   const data = event.data
   if (!data || typeof data !== 'object') return

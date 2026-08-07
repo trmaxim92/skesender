@@ -407,6 +407,9 @@ onMounted(() => {
     setPushEnabled(false)
   } else if (isPushEnabled()) {
     void prepareNotifyServiceWorker()
+    void import('@/utils/webPush').then(({ subscribeWebPush }) => {
+      void subscribeWebPush()
+    })
   }
   if (auth.canSection('/chats')) {
     chats.connectRealtime()

@@ -132,7 +132,7 @@ def channel_status_event(channel_payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def emit_event(event: dict[str, Any]) -> None:
-    """Broadcast to WS clients and fan-out to outbound webhooks."""
+    """Broadcast to WS clients, webhooks, and Web Push (phone shade)."""
     import asyncio
 
     try:
@@ -142,7 +142,7 @@ async def emit_event(event: dict[str, Any]) -> None:
     event_type = event.get("type")
     message = event.get("message")
     if isinstance(message, dict) and message.get("is_internal"):
-        # Internal notes stay inside the CRM — do not fan out to webhooks.
+        # Internal notes stay inside the CRM — do not fan out to webhooks/push.
         return
     if isinstance(event_type, str):
         payload = {k: v for k, v in event.items() if k != "type"}
@@ -154,6 +154,48 @@ async def emit_event(event: dict[str, Any]) -> None:
                 logger.exception("Webhook fan-out failed for %s", event_type)
 
         asyncio.create_task(_fanout())
+        asyncio.create_task(_fanout_web_push(event_type, event))
+
+
+async def _fanout_web_push(event_type: str, event: dict[str, Any]) -> None:
+    try:
+        from app.push import notify_chat_assigned, notify_inbound_message
+
+        if event_type == "message.created":
+            message = event.get("message") or {}
+            dialog = event.get("dialog") or {}
+            if message.get("direction") != "in":
+                return
+            if message.get("is_internal"):
+                return
+            dialog_id = dialog.get("id")
+            if dialog_id is None:
+                return
+            await notify_inbound_message(
+                dialog_id=int(dialog_id),
+                contact_name=str(dialog.get("contact_name") or "Клиент"),
+                text=str(message.get("text") or ""),
+            )
+            return
+
+        if event_type == "dialog.assigned":
+            dialog = event.get("dialog") or {}
+            assigned_by = event.get("assigned_by") or {}
+            dialog_id = dialog.get("id")
+            assignee_id = dialog.get("assignee_id")
+            by_id = assigned_by.get("id")
+            if dialog_id is None or assignee_id is None or by_id is None:
+                return
+            if int(assignee_id) == int(by_id):
+                return
+            await notify_chat_assigned(
+                dialog_id=int(dialog_id),
+                assignee_id=int(assignee_id),
+                contact_name=str(dialog.get("contact_name") or "Клиент"),
+                from_name=assigned_by.get("name"),
+            )
+    except Exception:
+        logger.exception("Web Push fan-out failed for %s", event_type)
 
 
 async def publish_message_created(

@@ -489,6 +489,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Telegram proxy health check failed")
     await ensure_schema()
+    try:
+        from app.push import get_vapid_keys
+
+        get_vapid_keys()
+        logger.info("Web Push VAPID public key ready")
+    except Exception:
+        logger.exception("Web Push VAPID init failed — phone shade push disabled until fixed")
     async with SessionLocal() as session:
         await seed_database(session)
 

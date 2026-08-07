@@ -14,4 +14,4 @@ TelethonFakeTLS>=2022.4.4
 PySocks==1.7.1
 alembic==1.16.4
 maxapi-python>=2.3.1
-redis>=5.2.0
+pywebpush==2.0.3

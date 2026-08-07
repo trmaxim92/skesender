@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Optional. Enables multi-worker WS fan-out + leader election for pollers/mailing/outbox.
     # Example: redis://127.0.0.1:6379/0
     redis_url: str = ""
+    # Web Push (VAPID). Empty = auto-generate keys under data/vapid.json
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_mailto: str = "mailto:admin@skysender.local"
 
     @property
     def cors_origin_list(self) -> list[str]:
