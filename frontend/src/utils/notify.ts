@@ -246,6 +246,22 @@ async function deliverOsNotification(
   }
 }
 
+/** True when this browser has a server Web Push subscription (lock-screen path). */
+async function hasWebPushSubscription(): Promise<boolean> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false
+  }
+  try {
+    const reg =
+      (await navigator.serviceWorker.getRegistration('/sw-notify.js')) ||
+      (await navigator.serviceWorker.ready)
+    const sub = await reg?.pushManager.getSubscription()
+    return Boolean(sub)
+  } catch {
+    return false
+  }
+}
+
 export async function showOsNotification(
   payload: IncomingNotifyPayload,
   opts: { force?: boolean } = {},
@@ -265,6 +281,12 @@ export async function showOsNotification(
   if (!decision.show) return { ok: false, reason: decision.reason }
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return { ok: false, reason: 'unsupported' }
+  }
+
+  // Server Web Push already paints the shade — local WS notify would twin it.
+  if (!opts.force && (await hasWebPushSubscription())) {
+    debugLog('skip local OS — web push subscription active')
+    return { ok: false, reason: 'web_push_active' }
   }
 
   return deliverOsNotification(payload, opts)

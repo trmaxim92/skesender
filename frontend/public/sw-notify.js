@@ -78,7 +78,18 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(
     (async () => {
-      await self.registration.showNotification(title, options)
+      // Focused CRM tab already handles UX via WebSocket (sound + toast).
+      // Showing another OS card here causes an identical duplicate.
+      const windows = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      })
+      const foreground = windows.some(
+        (c) => sameOrigin(c.url) && c.visibilityState === 'visible' && c.focused,
+      )
+      if (!foreground) {
+        await self.registration.showNotification(title, options)
+      }
       try {
         const n = Number(data.badgeCount)
         if (Number.isFinite(n) && n > 0 && self.registration.setAppBadge) {
