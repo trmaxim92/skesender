@@ -101,7 +101,7 @@ def _send_one(subscription: dict[str, Any], payload: dict[str, Any]) -> None:
         vapid_claims={"sub": keys["mailto"]},
         # Long TTL + high urgency so FCM/APNs can wake a locked phone.
         ttl=86_400,
-        timeout=15,
+        timeout=8,
         headers={
             "Urgency": "high",
         },
@@ -188,6 +188,59 @@ async def resolve_notify_user_ids(session: AsyncSession, dialog: Dialog) -> list
     return out
 
 
+def _is_mobile_ua(ua: str | None) -> bool:
+    s = (ua or "").lower()
+    return any(x in s for x in ("android", "iphone", "ipad", "mobile"))
+
+
+def _sort_mobile_first(rows: list[PushSubscription]) -> list[PushSubscription]:
+    # Prefer phone endpoints so a slow desktop FCM call doesn't delay the wake.
+    return sorted(rows, key=lambda r: (0 if _is_mobile_ua(r.user_agent) else 1, r.id))
+
+
+async def _deliver_rows(
+    session: AsyncSession,
+    rows: list[PushSubscription],
+    payload: dict[str, Any],
+) -> int:
+    """Send in parallel; drop 404/410 subscriptions."""
+
+    async def _one(row: PushSubscription) -> str:
+        sub = {
+            "endpoint": row.endpoint,
+            "keys": {"p256dh": row.p256dh, "auth": row.auth},
+        }
+        try:
+            await asyncio.to_thread(_send_one, sub, payload)
+            row.last_seen_at = utcnow()
+            return "ok"
+        except WebPushException as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code in {404, 410}:
+                return "stale"
+            logger.warning(
+                "Web Push failed user=%s status=%s: %s",
+                row.user_id,
+                status_code,
+                exc,
+            )
+            return "fail"
+        except Exception:
+            logger.exception("Web Push unexpected error user=%s", row.user_id)
+            return "fail"
+
+    results = await asyncio.gather(*(_one(r) for r in rows))
+    sent = 0
+    for row, status in zip(rows, results, strict=True):
+        if status == "ok":
+            sent += 1
+        elif status == "stale":
+            await session.delete(row)
+    if any(s == "stale" for s in results):
+        await session.flush()
+    return sent
+
+
 async def send_push_to_users(
     session: AsyncSession,
     user_ids: list[int],
@@ -198,40 +251,10 @@ async def send_push_to_users(
     result = await session.execute(
         select(PushSubscription).where(PushSubscription.user_id.in_(user_ids))
     )
-    rows = list(result.scalars().all())
+    rows = _sort_mobile_first(list(result.scalars().all()))
     if not rows:
         return 0
-
-    sent = 0
-    stale: list[PushSubscription] = []
-    for row in rows:
-        sub = {
-            "endpoint": row.endpoint,
-            "keys": {"p256dh": row.p256dh, "auth": row.auth},
-        }
-        try:
-            await asyncio.to_thread(_send_one, sub, payload)
-            row.last_seen_at = utcnow()
-            sent += 1
-        except WebPushException as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", None)
-            if status_code in {404, 410}:
-                stale.append(row)
-            else:
-                logger.warning(
-                    "Web Push failed user=%s status=%s: %s",
-                    row.user_id,
-                    status_code,
-                    exc,
-                )
-        except Exception:
-            logger.exception("Web Push unexpected error user=%s", row.user_id)
-
-    for row in stale:
-        await session.delete(row)
-    if stale:
-        await session.flush()
-    return sent
+    return await _deliver_rows(session, rows, payload)
 
 
 async def notify_inbound_message(
@@ -239,29 +262,53 @@ async def notify_inbound_message(
     dialog_id: int,
     contact_name: str,
     text: str,
+    assignee_id: int | None = None,
+    message_id: int | None = None,
 ) -> None:
     """Fire-and-forget from emit_event — opens its own DB session."""
+    started = asyncio.get_running_loop().time()
     try:
         async with SessionLocal() as session:
-            dialog = await session.get(Dialog, dialog_id)
-            if dialog is None:
+            if assignee_id is not None:
+                user_ids = [int(assignee_id)]
+            else:
+                dialog = await session.get(Dialog, dialog_id)
+                if dialog is None:
+                    return
+                user_ids = await resolve_notify_user_ids(session, dialog)
+            if not user_ids:
                 return
-            user_ids = await resolve_notify_user_ids(session, dialog)
             body = (text or "").strip() or "Новое сообщение"
             if len(body) > 120:
                 body = body[:119] + "…"
+            # Unique tag per message — same-tag collapse on Android can look like a long delay.
+            tag = (
+                f"oe-chat-{dialog_id}-{message_id}"
+                if message_id is not None
+                else f"oe-chat-{dialog_id}-{int(started * 1000) % 1_000_000}"
+            )
             payload = {
                 "title": (contact_name or "Клиент").strip() or "Клиент",
                 "body": body,
                 "dialogId": str(dialog_id),
-                "tag": f"oe-chat-{dialog_id}",
+                "tag": tag,
                 "kind": "message",
                 "requireInteraction": True,
             }
-            n = await send_push_to_users(session, user_ids, payload)
+            result = await session.execute(
+                select(PushSubscription).where(PushSubscription.user_id.in_(user_ids))
+            )
+            rows = _sort_mobile_first(list(result.scalars().all()))
+            n = await _deliver_rows(session, rows, payload) if rows else 0
             await session.commit()
-            if n:
-                logger.info("Web Push inbound dialog=%s recipients=%s sent=%s", dialog_id, user_ids, n)
+            elapsed_ms = int((asyncio.get_running_loop().time() - started) * 1000)
+            logger.info(
+                "Web Push inbound dialog=%s recipients=%s sent=%s in %sms",
+                dialog_id,
+                user_ids,
+                n,
+                elapsed_ms,
+            )
     except Exception:
         logger.exception("Web Push inbound notify failed dialog=%s", dialog_id)
 

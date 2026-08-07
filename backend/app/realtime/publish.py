@@ -135,13 +135,20 @@ async def emit_event(event: dict[str, Any]) -> None:
     """Broadcast to WS clients, webhooks, and Web Push (phone shade)."""
     import asyncio
 
+    event_type = event.get("type")
+    message = event.get("message")
+    is_internal = isinstance(message, dict) and bool(message.get("is_internal"))
+
+    # Start Web Push ASAP — before WS fan-out waits on slow clients.
+    if isinstance(event_type, str) and not is_internal:
+        asyncio.create_task(_fanout_web_push(event_type, event))
+
     try:
         await hub.broadcast(event)
     except Exception:
         logger.exception("WS broadcast failed for %s", event.get("type"))
-    event_type = event.get("type")
-    message = event.get("message")
-    if isinstance(message, dict) and message.get("is_internal"):
+
+    if is_internal:
         # Internal notes stay inside the CRM — do not fan out to webhooks/push.
         return
     if isinstance(event_type, str):
@@ -154,7 +161,6 @@ async def emit_event(event: dict[str, Any]) -> None:
                 logger.exception("Webhook fan-out failed for %s", event_type)
 
         asyncio.create_task(_fanout())
-        asyncio.create_task(_fanout_web_push(event_type, event))
 
 
 async def _fanout_web_push(event_type: str, event: dict[str, Any]) -> None:
@@ -171,10 +177,14 @@ async def _fanout_web_push(event_type: str, event: dict[str, Any]) -> None:
             dialog_id = dialog.get("id")
             if dialog_id is None:
                 return
+            assignee_raw = dialog.get("assignee_id")
+            message_id_raw = message.get("id")
             await notify_inbound_message(
                 dialog_id=int(dialog_id),
                 contact_name=str(dialog.get("contact_name") or "Клиент"),
                 text=str(message.get("text") or ""),
+                assignee_id=int(assignee_raw) if assignee_raw is not None else None,
+                message_id=int(message_id_raw) if message_id_raw is not None else None,
             )
             return
 
