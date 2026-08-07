@@ -8,15 +8,15 @@ let lastApplied: number | null = null
 
 function loadBaseIcon(): Promise<HTMLImageElement> {
   if (!basePromise) {
-    basePromise = new Promise((resolve, reject) => {
+    basePromise = new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image()
       img.decoding = 'async'
       img.onload = () => resolve(img)
-      img.onerror = () => reject(new Error('favicon load failed'))
+      img.onerror = () => {
+        basePromise = null
+        reject(new Error('favicon load failed'))
+      }
       img.src = DEFAULT_HREF
-    }).catch((err) => {
-      basePromise = null
-      throw err
     })
   }
   return basePromise
