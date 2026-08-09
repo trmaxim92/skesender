@@ -3,6 +3,7 @@ export type Role = 'admin' | 'operator' | 'viewer'
 export type PermissionCode =
   | 'section.chats'
   | 'section.appeals'
+  | 'section.contacts'
   | 'section.mailing'
   | 'section.channels'
   | 'section.employees'
@@ -13,6 +14,14 @@ export type PermissionCode =
   | 'action.manage_channels'
   | 'action.manage_users'
   | 'action.delete_appeals'
+
+export type ContactStatus = 'new' | 'in_work' | 'done'
+
+export const contactStatusLabel: Record<ContactStatus, string> = {
+  new: 'Новый',
+  in_work: 'В работе',
+  done: 'Завершён',
+}
 
 export type FieldType = 'text' | 'textarea' | 'number' | 'phone' | 'select' | 'date' | 'bool' | 'link'
 export type FieldScope = 'client' | 'appeal'
@@ -284,6 +293,7 @@ export const roleLabel: Record<Role, string> = {
 export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/chats': 'section.chats',
   '/appeals': 'section.appeals',
+  '/contacts': 'section.contacts',
   '/mailing': 'section.mailing',
   '/channels': 'section.channels',
   '/users': 'section.employees',
@@ -301,6 +311,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
 export const FIRST_SECTION_PATHS = [
   '/chats',
   '/appeals',
+  '/contacts',
   '/mailing',
   '/channels',
   '/users',

@@ -19,6 +19,7 @@ import {
   CircleUserRound,
   Download,
   Share,
+  ContactRound,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
@@ -60,6 +61,7 @@ type NavLeaf = { to: string; label: string; icon: typeof MessageSquare }
 const navFlat: NavLeaf[] = [
   { to: '/chats', label: 'Чаты', icon: MessageSquare },
   { to: '/appeals', label: 'Обращения', icon: Inbox },
+  { to: '/contacts', label: 'Контакты', icon: ContactRound },
   { to: '/employees', label: 'На смене', icon: CircleUserRound },
   { to: '/mailing', label: 'Рассылки', icon: Megaphone },
 ]

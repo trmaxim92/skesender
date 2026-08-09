@@ -71,6 +71,8 @@ class AppealStatus(StrEnum):
 class FieldScope(StrEnum):
     CLIENT = "client"
     APPEAL = "appeal"
+    # Same FieldDefinition catalog as CLIENT; values keyed by contact.id (avoids dialog id clash).
+    CONTACT = "contact"
 
 
 class FieldType(StrEnum):
@@ -127,6 +129,12 @@ class WebhookOutboxStatus(StrEnum):
     DEAD = "dead"
 
 
+class ContactStatus(StrEnum):
+    NEW = "new"
+    IN_WORK = "in_work"
+    DONE = "done"
+
+
 class PresenceStatus(Base):
     """Operator presence mode — runtime overlay that can only tighten role rights."""
 
@@ -179,6 +187,10 @@ class User(Base):
     channels: Mapped[list["Channel"]] = relationship(back_populates="created_by")
     assigned_dialogs: Mapped[list["Dialog"]] = relationship(back_populates="assignee")
     closed_appeals: Mapped[list["Appeal"]] = relationship(back_populates="closed_by")
+    assigned_contacts: Mapped[list["Contact"]] = relationship(
+        back_populates="assignee",
+        foreign_keys="Contact.assignee_id",
+    )
 
 
 class Department(Base):
@@ -695,4 +707,46 @@ class PushSubscription(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped[User] = relationship()
+
+
+class Contact(Base):
+    """Phone-centric CRM contact for outbound calls / messenger start."""
+
+    __tablename__ = "contacts"
+    __table_args__ = (Index("ix_contacts_phone", "phone"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default=ContactStatus.NEW.value, index=True)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    assignee: Mapped[User | None] = relationship(
+        back_populates="assigned_contacts",
+        foreign_keys=[assignee_id],
+    )
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+    comments: Mapped[list["ContactComment"]] = relationship(
+        back_populates="contact",
+        cascade="all, delete-orphan",
+        order_by="ContactComment.created_at",
+    )
+
+
+class ContactComment(Base):
+    __tablename__ = "contact_comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contact_id: Mapped[int] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    contact: Mapped[Contact] = relationship(back_populates="comments")
+    author: Mapped[User] = relationship()
 

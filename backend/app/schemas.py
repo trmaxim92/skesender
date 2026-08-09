@@ -682,3 +682,73 @@ class WidgetMessageOut(BaseModel):
     direction: MessageDirection
     text: str
     created_at: datetime
+
+
+class ContactCommentOut(BaseModel):
+    id: int
+    text: str
+    author_id: int
+    author_name: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ContactOut(BaseModel):
+    id: int
+    name: str
+    phone: str
+    status: str
+    assignee_id: int | None = None
+    assignee_name: str | None = None
+    created_by_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    comments: list[ContactCommentOut] = []
+    # Same catalog as chat client card (settings → client fields).
+    client_fields: list[FieldDefinitionOut] = []
+    client_values: dict[str, str] = {}
+
+    model_config = {"from_attributes": True}
+
+
+class ContactsPageOut(BaseModel):
+    items: list[ContactOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ContactCreateRequest(BaseModel):
+    name: str = Field(default="", max_length=255)
+    phone: str = Field(min_length=3, max_length=64)
+
+
+class ContactUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, min_length=3, max_length=64)
+    status: str | None = None
+
+
+class ContactFieldsUpdateRequest(BaseModel):
+    """Mirrors chat client-fields: system full_name/phone + custom values."""
+
+    full_name: str | None = None
+    phone: str | None = None
+    external_id: str | None = None
+    values: list[FieldValueItem] = []
+
+
+class ContactCommentCreateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class ContactMessageRequest(BaseModel):
+    channel_id: int
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class ContactImportResult(BaseModel):
+    created: int
+    skipped: int
+    errors: list[str] = []

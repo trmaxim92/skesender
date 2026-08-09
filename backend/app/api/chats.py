@@ -633,12 +633,29 @@ async def start_outbound_chat(
     """Create/open dialog + appeal and send the first outbound text."""
     _require_write(user)
     user = await load_user_rbac(db, user)
+    return await execute_start_chat(
+        db,
+        user=user,
+        channel_id=body.channel_id,
+        recipient=body.recipient,
+        text=body.text,
+    )
 
-    text = (body.text or "").strip()
+
+async def execute_start_chat(
+    db: AsyncSession,
+    *,
+    user: User,
+    channel_id: int,
+    recipient: str,
+    text: str,
+) -> StartChatOut:
+    """Shared outbound start used by /chats/start and contacts message."""
+    text = (text or "").strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Введите текст сообщения")
 
-    channel = await db.get(Channel, body.channel_id)
+    channel = await db.get(Channel, channel_id)
     if channel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Канал не найден")
     await ensure_channel_access(user, channel.id, db)
@@ -656,7 +673,7 @@ async def start_outbound_chat(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Канал недоступен")
 
     try:
-        peer = await resolve_outbound_peer(channel, body.recipient, db)
+        peer = await resolve_outbound_peer(channel, recipient, db)
     except PeerResolveError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
 

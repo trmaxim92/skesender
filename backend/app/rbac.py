@@ -12,6 +12,7 @@ from app.models import AccessRole, Role, RoleChannel, RolePermission, User, User
 # Permission codes
 SECTION_CHATS = "section.chats"
 SECTION_APPEALS = "section.appeals"
+SECTION_CONTACTS = "section.contacts"
 SECTION_MAILING = "section.mailing"
 SECTION_CHANNELS = "section.channels"
 SECTION_EMPLOYEES = "section.employees"
@@ -26,6 +27,7 @@ ACTION_DELETE_APPEALS = "action.delete_appeals"
 ALL_PERMISSIONS: tuple[str, ...] = (
     SECTION_CHATS,
     SECTION_APPEALS,
+    SECTION_CONTACTS,
     SECTION_MAILING,
     SECTION_CHANNELS,
     SECTION_EMPLOYEES,
@@ -40,6 +42,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
 SECTION_LABELS: dict[str, str] = {
     SECTION_CHATS: "Чаты",
     SECTION_APPEALS: "Обращения",
+    SECTION_CONTACTS: "Контакты",
     SECTION_MAILING: "Рассылки",
     SECTION_CHANNELS: "Раздел «Каналы» (настройки)",
     SECTION_EMPLOYEES: "Сотрудники",
@@ -57,12 +60,14 @@ LEGACY_PERMISSIONS: dict[str, set[str]] = {
     Role.OPERATOR.value: {
         SECTION_CHATS,
         SECTION_APPEALS,
+        SECTION_CONTACTS,
         SECTION_MAILING,
         ACTION_WRITE,
     },
     Role.VIEWER.value: {
         SECTION_CHATS,
         SECTION_APPEALS,
+        SECTION_CONTACTS,
     },
 }
 
@@ -81,6 +86,7 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
         "permissions": [
             SECTION_CHATS,
             SECTION_APPEALS,
+            SECTION_CONTACTS,
             SECTION_MAILING,
             ACTION_WRITE,
         ],
@@ -89,7 +95,7 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
         "slug": "viewer",
         "name": "Наблюдатель",
         "all_channels": False,
-        "permissions": [SECTION_CHATS, SECTION_APPEALS],
+        "permissions": [SECTION_CHATS, SECTION_APPEALS, SECTION_CONTACTS],
     },
 )
 

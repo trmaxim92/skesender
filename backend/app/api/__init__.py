@@ -5,6 +5,7 @@ from app.api import (
     auth,
     channels,
     chats,
+    contacts,
     departments,
     mailing,
     me_templates,
@@ -26,6 +27,7 @@ api_router.include_router(presence.router)
 api_router.include_router(channels.router)
 api_router.include_router(chats.router)
 api_router.include_router(appeals.router)
+api_router.include_router(contacts.router)
 api_router.include_router(mailing.router)
 api_router.include_router(users.router)
 api_router.include_router(roles.router)
