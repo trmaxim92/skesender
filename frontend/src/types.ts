@@ -76,6 +76,19 @@ export interface PresenceStatus {
   onDuty: boolean
 }
 
+export interface AppealStatusDef {
+  id: number
+  name: string
+  slug: string
+  color: string
+  sortOrder: number
+  isSystem: boolean
+  isActive: boolean
+  isTerminal: boolean
+  needsCallback: boolean
+  countsAsOpen: boolean
+}
+
 export interface PresenceEmployee {
   id: number
   name: string
@@ -316,6 +329,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/settings/client-fields': 'section.settings',
   '/settings/close-template': 'section.settings',
   '/settings/presence-statuses': 'section.settings',
+  '/settings/appeal-statuses': 'section.settings',
 }
 
 export const FIRST_SECTION_PATHS = [

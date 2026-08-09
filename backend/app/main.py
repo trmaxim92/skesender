@@ -512,6 +512,59 @@ async def ensure_schema() -> None:
                 "ON contact_call_results (outcome)"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS department_id "
+                "INTEGER REFERENCES departments(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contacts_department_id ON contacts (department_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS appeal_statuses (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(128) NOT NULL,
+                    slug VARCHAR(64) NOT NULL UNIQUE,
+                    color VARCHAR(16) NOT NULL DEFAULT '#9ca3af',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    is_terminal BOOLEAN NOT NULL DEFAULT FALSE,
+                    needs_callback BOOLEAN NOT NULL DEFAULT FALSE,
+                    counts_as_open BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_appeal_statuses_slug ON appeal_statuses (slug)")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE appeals ADD COLUMN IF NOT EXISTS contact_id "
+                "INTEGER REFERENCES contacts(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_appeals_contact_id ON appeals (contact_id)")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE appeals ADD COLUMN IF NOT EXISTS status_id "
+                "INTEGER REFERENCES appeal_statuses(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_appeals_status_id ON appeals (status_id)")
+        )
+        await conn.execute(text("ALTER TABLE appeals ALTER COLUMN dialog_id DROP NOT NULL"))
 
 
 @asynccontextmanager

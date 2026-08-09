@@ -7,7 +7,7 @@ import {
   claimContactRequest,
   claimNextContactRequest,
   getContactRequest,
-  setContactOutcomeRequest,
+  setContactAppealStatusRequest,
   telHref,
   updateContactFieldsRequest,
   updateContactRequest,
@@ -18,9 +18,7 @@ import ContactSendModal from '@/views/contacts/ContactSendModal.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
 import {
-  contactOutcomeLabel,
   contactStatusLabel,
-  type ContactCallOutcome,
   type ContactStatus,
   type FieldDefinition,
 } from '@/types'
@@ -36,22 +34,14 @@ const detail = ref<Contact | null>(null)
 const loading = ref(false)
 const error = ref('')
 const fieldsDraft = ref<Record<string, string>>({})
+const appealDraft = ref<Record<string, string>>({})
 const fieldsSaving = ref(false)
 const commentText = ref('')
 const commentBusy = ref(false)
 const claimBusy = ref(false)
-const outcomeBusy = ref(false)
+const statusBusy = ref(false)
 const nextBusy = ref(false)
-const awaitingOutcome = ref(false)
 const sendOpen = ref(false)
-
-const OUTCOME_BUTTONS: { id: ContactCallOutcome; label: string }[] = [
-  { id: 'answered', label: 'Дозвонился' },
-  { id: 'no_answer', label: 'Нет ответа' },
-  { id: 'callback', label: 'Перезвонить' },
-  { id: 'rejected', label: 'Отказ' },
-  { id: 'agreed', label: 'Согласие' },
-]
 
 const contactId = computed(() => Number(route.params.contactId))
 
@@ -65,33 +55,27 @@ const isMineOrFree = computed(() => {
   return detail.value.assigneeId == null || detail.value.assigneeId === auth.user?.id
 })
 
-type TimelineItem =
-  | { kind: 'call'; id: string; at: string; outcome: string; note: string; author: string | null }
-  | { kind: 'comment'; id: string; at: string; text: string; author: string | null }
+const currentStatusId = computed(() => detail.value?.currentAppeal?.statusId ?? null)
+
+type TimelineItem = {
+  kind: 'comment'
+  id: string
+  at: string
+  text: string
+  author: string | null
+}
 
 const timeline = computed((): TimelineItem[] => {
   if (!detail.value) return []
-  const items: TimelineItem[] = []
-  for (const cr of detail.value.callResults) {
-    items.push({
-      kind: 'call',
-      id: `call-${cr.id}`,
-      at: cr.createdAt,
-      outcome: cr.outcome,
-      note: cr.note,
-      author: cr.authorName,
-    })
-  }
-  for (const cm of detail.value.comments) {
-    items.push({
-      kind: 'comment',
+  return detail.value.comments
+    .map((cm) => ({
+      kind: 'comment' as const,
       id: `c-${cm.id}`,
       at: cm.createdAt,
       text: cm.text,
       author: cm.authorName,
-    })
-  }
-  return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    }))
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 })
 
 async function load() {
@@ -101,10 +85,10 @@ async function load() {
   }
   loading.value = true
   error.value = ''
-  awaitingOutcome.value = false
   try {
     detail.value = await getContactRequest(contactId.value)
     fieldsDraft.value = { ...detail.value.clientValues }
+    appealDraft.value = { ...detail.value.appealValues }
   } catch (e) {
     detail.value = null
     error.value = e instanceof ApiError ? e.detail : 'Не удалось открыть контакт'
@@ -159,10 +143,6 @@ function goBack() {
   void router.push({ name: 'contacts' })
 }
 
-function onCallClick() {
-  awaitingOutcome.value = true
-}
-
 async function saveFields() {
   if (!detail.value || !canWrite.value || fieldsSaving.value) return
   fieldsSaving.value = true
@@ -171,13 +151,19 @@ async function saveFields() {
     const values = Object.entries(fieldsDraft.value)
       .filter(([key]) => !['full_name', 'phone', 'external_id'].includes(key))
       .map(([key, value]) => ({ key, value }))
+    const appeal_values = Object.entries(appealDraft.value).map(([key, value]) => ({
+      key,
+      value,
+    }))
     detail.value = await updateContactFieldsRequest(detail.value.id, {
       full_name: fieldsDraft.value.full_name ?? '',
       phone: fieldsDraft.value.phone ?? '',
       external_id: fieldsDraft.value.external_id ?? '',
       values,
+      appeal_values,
     })
     fieldsDraft.value = { ...detail.value.clientValues }
+    appealDraft.value = { ...detail.value.appealValues }
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить поля'
   } finally {
@@ -192,6 +178,7 @@ async function onClaim() {
   try {
     detail.value = await claimContactRequest(detail.value.id)
     fieldsDraft.value = { ...detail.value.clientValues }
+    appealDraft.value = { ...detail.value.appealValues }
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail : 'Не удалось взять в работу'
   } finally {
@@ -199,19 +186,19 @@ async function onClaim() {
   }
 }
 
-async function onOutcome(outcome: ContactCallOutcome) {
-  if (!detail.value || !canWrite.value || outcomeBusy.value) return
-  outcomeBusy.value = true
+async function onAppealStatus(statusId: number) {
+  if (!detail.value || !canWrite.value || statusBusy.value) return
+  if (currentStatusId.value === statusId) return
+  statusBusy.value = true
   error.value = ''
   try {
-    detail.value = await setContactOutcomeRequest(detail.value.id, { outcome })
+    detail.value = await setContactAppealStatusRequest(detail.value.id, statusId)
     fieldsDraft.value = { ...detail.value.clientValues }
-    awaitingOutcome.value = false
-    if (outcome === 'agreed') openSend()
+    appealDraft.value = { ...detail.value.appealValues }
   } catch (e) {
-    error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить исход'
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось сменить статус'
   } finally {
-    outcomeBusy.value = false
+    statusBusy.value = false
   }
 }
 
@@ -272,34 +259,30 @@ function onSent(dialogId: number) {
 
 <template>
   <div class="flex h-full min-h-0 flex-col bg-surface md:flex-row">
-    <!-- Left: client card -->
+    <!-- Left: client + appeal card (same light palette as the rest) -->
     <aside
-      class="flex w-full shrink-0 flex-col border-b border-line bg-[#1f2937] text-white md:h-full md:w-[340px] md:border-b-0 md:border-r md:border-line"
+      class="flex w-full shrink-0 flex-col border-b border-line bg-panel md:h-full md:w-[360px] md:border-b-0 md:border-r"
     >
-      <div class="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+      <div class="flex items-center gap-2 border-b border-line px-4 py-3">
         <button
           type="button"
-          class="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+          class="rounded-lg p-1.5 text-muted hover:bg-surface hover:text-ink"
           title="К списку"
           @click="goBack"
         >
           <ArrowLeft class="size-4" />
         </button>
         <div class="min-w-0 flex-1">
-          <div class="truncate text-sm font-semibold">
+          <div class="truncate text-sm font-semibold text-ink">
             {{ detail?.name || (loading ? '…' : 'Контакт') }}
           </div>
-          <div class="text-[11px] text-white/50">#{{ contactId }}</div>
+          <div class="text-[11px] text-muted">#{{ contactId }}</div>
         </div>
       </div>
 
-      <div class="border-b border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white/60">
-        Карточка клиента
-      </div>
-
-      <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        <p v-if="loading" class="text-sm text-white/60">Загрузка…</p>
-        <p v-else-if="error && !detail" class="text-sm text-red-300">{{ error }}</p>
+      <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
+        <p v-else-if="error && !detail" class="text-sm text-red-600">{{ error }}</p>
         <template v-else-if="detail">
           <div class="flex flex-wrap items-center gap-2">
             <span
@@ -308,77 +291,139 @@ function onSent(dialogId: number) {
             >
               {{ contactStatusLabel[detail.status] || detail.status }}
             </span>
-            <span v-if="detail.assigneeName" class="text-[11px] text-white/60">
+            <span v-if="detail.assigneeName" class="text-[11px] text-muted">
               {{ detail.assigneeName }}
             </span>
-            <span v-else class="text-[11px] text-white/60">Свободный</span>
+            <span v-else class="text-[11px] text-muted">Свободный</span>
           </div>
 
-          <div
-            v-for="f in detail.clientFields"
-            :key="f.key"
-            class="space-y-1"
-          >
-            <label class="text-[11px] font-semibold uppercase tracking-wide text-white/50">
-              {{ f.label }}
-            </label>
-            <textarea
-              v-if="f.fieldType === 'textarea'"
-              v-model="fieldsDraft[f.key]"
-              rows="3"
-              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
-              :readonly="!canWrite"
-            />
-            <select
-              v-else-if="f.fieldType === 'select'"
-              v-model="fieldsDraft[f.key]"
-              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
-              :disabled="!canWrite"
-            >
-              <option value="">—</option>
-              <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-            <div v-else-if="f.fieldType === 'link'" class="space-y-1">
-              <input
+          <section class="space-y-3">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">
+              Карточка клиента
+            </h3>
+            <div v-for="f in detail.clientFields" :key="'c-' + f.key" class="space-y-1">
+              <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                {{ f.label }}
+              </label>
+              <textarea
+                v-if="f.fieldType === 'textarea'"
                 v-model="fieldsDraft[f.key]"
-                type="url"
-                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+                rows="3"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
                 :readonly="!canWrite"
               />
-              <a
-                v-if="fieldsDraft[f.key]?.trim()"
-                :href="linkHref(fieldsDraft[f.key])"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-brand hover:underline"
-              >
-                Открыть
-              </a>
-            </div>
-            <label
-              v-else-if="f.fieldType === 'bool'"
-              class="flex items-center gap-2 text-sm text-white"
-            >
-              <input
-                type="checkbox"
-                :checked="fieldsDraft[f.key] === 'true' || fieldsDraft[f.key] === '1'"
+              <select
+                v-else-if="f.fieldType === 'select'"
+                v-model="fieldsDraft[f.key]"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
                 :disabled="!canWrite"
-                @change="
-                  fieldsDraft[f.key] = ($event.target as HTMLInputElement).checked
-                    ? 'true'
-                    : 'false'
-                "
+              >
+                <option value="">—</option>
+                <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+              <div v-else-if="f.fieldType === 'link'" class="space-y-1">
+                <input
+                  v-model="fieldsDraft[f.key]"
+                  type="url"
+                  class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                  :readonly="!canWrite"
+                />
+                <a
+                  v-if="fieldsDraft[f.key]?.trim()"
+                  :href="linkHref(fieldsDraft[f.key])"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-xs text-brand hover:underline"
+                >
+                  Открыть
+                </a>
+              </div>
+              <label
+                v-else-if="f.fieldType === 'bool'"
+                class="flex items-center gap-2 text-sm text-ink"
+              >
+                <input
+                  type="checkbox"
+                  :checked="fieldsDraft[f.key] === 'true' || fieldsDraft[f.key] === '1'"
+                  :disabled="!canWrite"
+                  @change="
+                    fieldsDraft[f.key] = ($event.target as HTMLInputElement).checked
+                      ? 'true'
+                      : 'false'
+                  "
+                />
+                Да
+              </label>
+              <input
+                v-else
+                v-model="fieldsDraft[f.key]"
+                :type="fieldInputType(f)"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                :readonly="!canWrite"
               />
-              Да
-            </label>
-            <input
-              v-else
-              v-model="fieldsDraft[f.key]"
-              :type="fieldInputType(f)"
-              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
-              :readonly="!canWrite"
-            />
-          </div>
+            </div>
+          </section>
+
+          <section class="space-y-3 border-t border-line pt-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">
+              Поля обращения
+            </h3>
+            <p v-if="!detail.appealFields.length" class="text-xs text-muted">
+              Нет полей обращения для отдела. Добавьте их в настройках.
+            </p>
+            <div v-for="f in detail.appealFields" :key="'a-' + f.key" class="space-y-1">
+              <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                {{ f.label }}
+              </label>
+              <textarea
+                v-if="f.fieldType === 'textarea'"
+                v-model="appealDraft[f.key]"
+                rows="3"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                :readonly="!canWrite"
+              />
+              <select
+                v-else-if="f.fieldType === 'select'"
+                v-model="appealDraft[f.key]"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                :disabled="!canWrite"
+              >
+                <option value="">—</option>
+                <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+              <div v-else-if="f.fieldType === 'link'" class="space-y-1">
+                <input
+                  v-model="appealDraft[f.key]"
+                  type="url"
+                  class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                  :readonly="!canWrite"
+                />
+              </div>
+              <label
+                v-else-if="f.fieldType === 'bool'"
+                class="flex items-center gap-2 text-sm text-ink"
+              >
+                <input
+                  type="checkbox"
+                  :checked="appealDraft[f.key] === 'true' || appealDraft[f.key] === '1'"
+                  :disabled="!canWrite"
+                  @change="
+                    appealDraft[f.key] = ($event.target as HTMLInputElement).checked
+                      ? 'true'
+                      : 'false'
+                  "
+                />
+                Да
+              </label>
+              <input
+                v-else
+                v-model="appealDraft[f.key]"
+                :type="fieldInputType(f)"
+                class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
+                :readonly="!canWrite"
+              />
+            </div>
+          </section>
 
           <button
             v-if="canWrite"
@@ -396,14 +441,13 @@ function onSent(dialogId: number) {
     <!-- Right: activity -->
     <section class="flex min-w-0 flex-1 flex-col bg-surface">
       <header class="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-4 py-3 md:px-6">
-        <div class="text-sm font-semibold text-ink">Активность</div>
+        <div class="text-sm font-semibold text-ink">История</div>
         <div class="flex flex-wrap gap-2">
           <a
             v-if="detail"
             :href="telHref(detail.phone)"
             class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:opacity-90"
             title="Откроет SIP / телефонное приложение"
-            @click="onCallClick"
           >
             <Phone class="size-4" />
             Связаться
@@ -451,49 +495,64 @@ function onSent(dialogId: number) {
         {{ error }}
       </p>
 
-      <!-- Call outcome panel -->
+      <!-- Appeal status panel -->
       <div
         v-if="detail && canWrite && isMineOrFree"
         class="border-b border-line bg-panel px-4 py-4 md:px-6"
       >
-        <div class="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
-          <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
-            <Phone class="size-4 text-rose-500" />
-            <span class="font-semibold text-ink">Связаться</span>
-            <a :href="telHref(detail.phone)" class="font-medium text-brand hover:underline" @click="onCallClick">
+        <div class="rounded-2xl border border-line bg-surface/80 p-4">
+          <div class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-semibold text-ink">
+              Обращение
+              <template v-if="detail.currentAppeal">#{{ detail.currentAppeal.number }}</template>
+            </span>
+            <span
+              v-if="detail.currentAppeal?.statusDef"
+              class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
+              :style="{
+                background: detail.currentAppeal.statusDef.color + '22',
+                color: detail.currentAppeal.statusDef.color,
+              }"
+            >
+              <span
+                class="size-1.5 rounded-full"
+                :style="{ background: detail.currentAppeal.statusDef.color }"
+              />
+              {{ detail.currentAppeal.statusDef.name }}
+            </span>
+            <a :href="telHref(detail.phone)" class="ml-auto font-medium text-brand hover:underline">
               {{ detail.phone }}
             </a>
-            <span
-              v-if="detail.lastOutcome"
-              class="text-xs text-muted"
-            >
-              · последний:
-              {{ contactOutcomeLabel[detail.lastOutcome as ContactCallOutcome] || detail.lastOutcome }}
-            </span>
           </div>
-          <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Добавить результат
-          </p>
+          <p class="mb-2 text-xs text-muted">Статус обращения</p>
           <div class="flex flex-wrap gap-2">
             <button
-              v-for="btn in OUTCOME_BUTTONS"
-              :key="btn.id"
+              v-for="st in detail.appealStatuses"
+              :key="st.id"
               type="button"
-              class="rounded-xl border border-line bg-white px-3 py-1.5 text-xs font-medium text-ink hover:border-brand/40 disabled:opacity-50"
-              :class="awaitingOutcome || !detail.lastOutcome ? '' : ''"
-              :disabled="outcomeBusy"
-              @click="onOutcome(btn.id)"
+              class="rounded-full border px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-50"
+              :class="
+                currentStatusId === st.id
+                  ? 'border-transparent text-white'
+                  : 'border-line bg-panel text-ink hover:border-brand/40 hover:bg-brand-soft/50'
+              "
+              :style="currentStatusId === st.id ? { background: st.color } : undefined"
+              :disabled="statusBusy"
+              @click="onAppealStatus(st.id)"
             >
-              {{ btn.label }}
+              {{ st.name }}
             </button>
           </div>
+          <p v-if="!detail.appealStatuses.length" class="text-xs text-muted">
+            Статусы ещё не настроены. Добавьте их в Настройки → Статусы обращений.
+          </p>
         </div>
       </div>
 
       <!-- Timeline -->
       <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 md:px-6">
         <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
-        <p v-else-if="!timeline.length" class="text-sm text-muted">Пока нет событий</p>
+        <p v-else-if="!timeline.length" class="text-sm text-muted">Пока нет примечаний</p>
         <ul v-else class="space-y-3">
           <li
             v-for="item in timeline"
@@ -501,19 +560,12 @@ function onSent(dialogId: number) {
             class="rounded-xl border border-line bg-panel px-3 py-2.5"
           >
             <div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted">
-              <span class="font-medium text-ink">
-                <template v-if="item.kind === 'call'">
-                  Звонок ·
-                  {{ contactOutcomeLabel[item.outcome as ContactCallOutcome] || item.outcome }}
-                </template>
-                <template v-else>Примечание</template>
-              </span>
+              <span class="font-medium text-ink">Примечание</span>
               <span>{{ formatDate(item.at) }}</span>
             </div>
-            <p v-if="item.kind === 'comment'" class="whitespace-pre-wrap text-sm text-ink">
+            <p class="whitespace-pre-wrap text-sm text-ink">
               {{ item.text }}
             </p>
-            <p v-else-if="item.note" class="text-sm text-ink">{{ item.note }}</p>
             <p class="mt-1 text-[11px] text-muted">{{ item.author || 'Менеджер' }}</p>
           </li>
         </ul>

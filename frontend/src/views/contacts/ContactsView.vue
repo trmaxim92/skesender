@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Search, Upload, SkipForward } from 'lucide-vue-next'
+import { Hand, Phone, Plus, Search, SkipForward, Upload, X } from 'lucide-vue-next'
 import {
+  claimContactsBatchRequest,
   claimNextContactRequest,
   contactsSummaryRequest,
   createContactRequest,
@@ -16,9 +17,7 @@ import { ApiError } from '@/api/client'
 import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
-  contactOutcomeLabel,
   contactStatusLabel,
-  type ContactCallOutcome,
   type ContactStatus,
 } from '@/types'
 
@@ -35,6 +34,9 @@ const loadError = ref('')
 const q = ref('')
 const filter = ref<ContactFilter>('all')
 const nextBusy = ref(false)
+const claimBusy = ref(false)
+
+const selected = ref<Set<number>>(new Set())
 
 const createOpen = ref(false)
 const createName = ref('')
@@ -46,6 +48,7 @@ const importInput = ref<HTMLInputElement | null>(null)
 const importBusy = ref(false)
 const importMsg = ref('')
 const actionError = ref('')
+const actionOk = ref('')
 
 function fieldValue(c: Contact, keys: string[]) {
   const values = c.clientValues || {}
@@ -53,7 +56,6 @@ function fieldValue(c: Contact, keys: string[]) {
     const v = (values[key] || '').trim()
     if (v) return v
   }
-  // match by lowercase key contains
   for (const [k, v] of Object.entries(values)) {
     const lk = k.toLowerCase()
     if (keys.some((want) => lk === want || lk.includes(want)) && (v || '').trim()) {
@@ -69,6 +71,48 @@ function companyOf(c: Contact) {
 
 function emailOf(c: Contact) {
   return fieldValue(c, ['email', 'e_mail', 'почта', 'mail'])
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase()
+  return (parts[0].slice(0, 1) + parts[1].slice(0, 1)).toUpperCase()
+}
+
+function isClaimable(c: Contact) {
+  return c.assigneeId == null
+}
+
+const claimableItems = computed(() => items.value.filter(isClaimable))
+
+const selectedCount = computed(() => selected.value.size)
+
+const allClaimableSelected = computed(() => {
+  const free = claimableItems.value
+  if (!free.length) return false
+  return free.every((c) => selected.value.has(c.id))
+})
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+function toggleSelect(id: number, claimable: boolean) {
+  if (!claimable || !canWrite.value) return
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+
+function toggleSelectAll() {
+  if (!canWrite.value) return
+  if (allClaimableSelected.value) {
+    clearSelection()
+    return
+  }
+  selected.value = new Set(claimableItems.value.map((c) => c.id))
 }
 
 async function loadSummary() {
@@ -91,6 +135,9 @@ async function loadList() {
     })
     items.value = page.items
     total.value = page.total
+    // Drop selections that left the page / are no longer free.
+    const visibleFree = new Set(page.items.filter(isClaimable).map((c) => c.id))
+    selected.value = new Set([...selected.value].filter((id) => visibleFree.has(id)))
     await loadSummary()
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить контакты'
@@ -104,10 +151,14 @@ onMounted(() => {
 })
 
 watch(filter, () => {
+  clearSelection()
+  actionOk.value = ''
+  actionError.value = ''
   void loadList()
 })
 
 function onSearch() {
+  clearSelection()
   void loadList()
 }
 
@@ -118,7 +169,7 @@ function openContact(id: number) {
 function statusBadge(status: ContactStatus | string) {
   if (status === 'in_work') return 'bg-amber-100 text-amber-800'
   if (status === 'done') return 'bg-emerald-100 text-emerald-800'
-  return 'bg-slate-100 text-slate-700'
+  return 'bg-slate-100 text-slate-600'
 }
 
 function openCreate() {
@@ -150,6 +201,7 @@ async function onNext() {
   if (!canWrite.value || nextBusy.value) return
   nextBusy.value = true
   actionError.value = ''
+  actionOk.value = ''
   try {
     const c = await claimNextContactRequest()
     await router.push({ name: 'contact-detail', params: { contactId: String(c.id) } })
@@ -157,6 +209,34 @@ async function onNext() {
     actionError.value = e instanceof ApiError ? e.detail : 'Нет свободных контактов'
   } finally {
     nextBusy.value = false
+  }
+}
+
+async function onClaimSelected() {
+  if (!canWrite.value || claimBusy.value || !selectedCount.value) return
+  claimBusy.value = true
+  actionError.value = ''
+  actionOk.value = ''
+  try {
+    const ids = [...selected.value]
+    const res = await claimContactsBatchRequest(ids)
+    const n = res.claimed.length
+    const skip = res.skipped.length
+    if (n && !skip) {
+      actionOk.value = `Взято в работу: ${n}`
+    } else if (n && skip) {
+      actionOk.value = `Взято: ${n}, пропущено: ${skip}`
+    } else {
+      actionError.value = skip
+        ? `Не удалось взять: ${res.skipped.map((s) => `#${s.id}`).join(', ')}`
+        : 'Не удалось взять контакты'
+    }
+    clearSelection()
+    await loadList()
+  } catch (e) {
+    actionError.value = e instanceof ApiError ? e.detail : 'Не удалось взять контакты'
+  } finally {
+    claimBusy.value = false
   }
 }
 
@@ -192,48 +272,40 @@ function clearFilters() {
 const title = computed(() => {
   if (filter.value === 'mine') return 'Мои контакты'
   if (filter.value === 'callback') return 'Перезвонить'
-  return 'Все контакты'
+  return 'Контакты'
+})
+
+const subtitle = computed(() => {
+  if (filter.value === 'mine') return 'Контакты, которые вы уже взяли в работу'
+  if (filter.value === 'callback') return 'Нужно перезвонить клиенту'
+  return 'Свободные лиды — отметьте и заберите пачкой или по одному'
 })
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-surface">
-    <header class="border-b border-line bg-panel px-4 py-3 md:px-6">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+  <div class="relative flex h-full min-h-0 flex-col">
+    <div class="border-b border-line bg-panel px-4 py-4 md:px-6">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
-          <h1 class="truncate text-sm font-bold uppercase tracking-wide text-ink">
-            {{ title }}
-          </h1>
-          <p class="text-xs text-muted">{{ total }} элементов</p>
+          <h1 class="text-lg font-bold tracking-tight text-ink">{{ title }}</h1>
+          <p class="mt-0.5 text-xs text-muted">{{ subtitle }}</p>
         </div>
-
-        <form class="flex min-w-0 flex-1 lg:max-w-xl" @submit.prevent="onSearch">
-          <div class="relative w-full">
-            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              v-model="q"
-              type="search"
-              placeholder="Поиск и фильтр"
-              class="w-full rounded-xl border border-line bg-surface py-2 pl-9 pr-3 text-sm outline-none ring-brand focus:ring-2"
-            />
-          </div>
-        </form>
-
         <div class="flex flex-wrap items-center gap-2">
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-xs font-medium text-ink hover:bg-panel disabled:opacity-50"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
             :disabled="nextBusy"
+            title="Взять следующий свободный"
             @click="onNext"
           >
-            <SkipForward class="size-3.5" />
+            <SkipForward class="size-4" />
             Следующий
           </button>
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex size-9 items-center justify-center rounded-xl border border-line bg-surface text-ink hover:bg-panel"
+            class="inline-flex size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
             title="Импорт CSV"
             :disabled="importBusy"
             @click="triggerImport"
@@ -243,14 +315,38 @@ const title = computed(() => {
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-xs font-bold uppercase tracking-wide text-white hover:opacity-90"
+            class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
             @click="openCreate"
           >
             <Plus class="size-4" />
-            Добавить контакт
+            Добавить
           </button>
         </div>
       </div>
+
+      <form class="flex flex-col gap-3 md:flex-row md:items-end" @submit.prevent="onSearch">
+        <label class="min-w-0 w-full md:flex-1">
+          <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Поиск
+          </span>
+          <div class="relative">
+            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+            <input
+              v-model="q"
+              type="search"
+              placeholder="Имя или телефон…"
+              class="w-full rounded-xl border border-line bg-surface py-2 pl-9 pr-3 text-sm outline-none ring-brand focus:ring-2"
+            />
+          </div>
+        </label>
+        <button
+          type="submit"
+          class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 md:w-auto"
+          :disabled="loading"
+        >
+          Найти
+        </button>
+      </form>
 
       <input
         ref="importInput"
@@ -260,89 +356,184 @@ const title = computed(() => {
         @change="onImportFile"
       />
       <p v-if="importMsg" class="mt-2 text-xs text-muted">{{ importMsg }}</p>
-      <p v-if="actionError" class="mt-2 text-xs text-red-600">{{ actionError }}</p>
+      <p v-if="actionOk" class="mt-2 text-xs text-ok">{{ actionOk }}</p>
+      <p v-if="actionError" class="mt-2 text-xs text-danger">{{ actionError }}</p>
 
-      <div class="mt-3 flex flex-wrap gap-1">
+      <div class="mt-4 flex flex-wrap gap-2">
         <button
           v-for="opt in [
-            { id: 'all' as const, label: `Все (${summary.all})` },
-            { id: 'mine' as const, label: `Мои (${summary.mine})` },
-            { id: 'callback' as const, label: `Перезвонить (${summary.callback})` },
+            { id: 'all' as const, label: 'Свободные', count: summary.all },
+            { id: 'mine' as const, label: 'Мои', count: summary.mine },
+            { id: 'callback' as const, label: 'Перезвонить', count: summary.callback },
           ]"
           :key="opt.id"
           type="button"
-          class="rounded-lg px-3 py-1.5 text-xs font-medium transition"
-          :class="filter === opt.id ? 'bg-brand text-white' : 'bg-surface text-muted hover:text-ink'"
+          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
+          :class="
+            filter === opt.id
+              ? 'bg-brand text-white shadow-sm'
+              : 'bg-surface text-muted hover:bg-brand-soft/60 hover:text-ink'
+          "
           @click="filter = opt.id"
         >
           {{ opt.label }}
+          <span
+            class="ml-1 tabular-nums"
+            :class="filter === opt.id ? 'text-white/80' : 'text-muted'"
+          >
+            {{ opt.count }}
+          </span>
         </button>
       </div>
-    </header>
+    </div>
 
-    <div class="min-h-0 flex-1 overflow-auto">
-      <p v-if="loading" class="px-6 py-8 text-sm text-muted">Загрузка…</p>
-      <p v-else-if="loadError" class="px-6 py-8 text-sm text-red-600">{{ loadError }}</p>
+    <div class="relative min-h-0 flex-1 overflow-auto p-4 md:p-6" :class="selectedCount ? 'pb-24' : ''">
+      <p v-if="loading && !items.length" class="text-sm text-muted">Загрузка…</p>
+      <p v-else-if="loadError" class="text-sm text-danger">{{ loadError }}</p>
 
-      <div v-else class="min-w-full">
-        <table class="w-full min-w-[720px] border-collapse text-left text-sm">
-          <thead class="sticky top-0 z-10 border-b border-line bg-panel text-[11px] font-bold uppercase tracking-wide text-muted">
-            <tr>
-              <th class="px-4 py-3 md:px-6">Наименование</th>
-              <th class="px-3 py-3">Компания</th>
-              <th class="px-3 py-3">Телефон</th>
-              <th class="px-3 py-3">Email</th>
-              <th class="px-3 py-3">Статус</th>
-              <th class="px-4 py-3 md:px-6">Исход</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="!items.length">
-              <td colspan="6" class="px-6 py-10 text-center text-sm text-red-600">
-                К сожалению, контактов с выбранными вами условиями не найдено.
-                <button type="button" class="ml-1 underline" @click="clearFilters">
-                  Показать все
-                </button>
-              </td>
-            </tr>
-            <tr
-              v-for="c in items"
-              :key="c.id"
-              class="cursor-pointer border-b border-line bg-panel transition hover:bg-surface"
-              @click="openContact(c.id)"
-            >
-              <td class="px-4 py-3 font-medium text-ink md:px-6">
-                {{ c.name || 'Без имени' }}
-              </td>
-              <td class="px-3 py-3 text-muted">{{ companyOf(c) || '—' }}</td>
-              <td class="px-3 py-3" @click.stop>
-                <a
-                  :href="telHref(c.phone)"
-                  class="font-medium text-brand hover:underline"
-                  title="Откроет SIP / телефон"
-                >
-                  {{ c.phone }}
-                </a>
-              </td>
-              <td class="px-3 py-3 text-muted">{{ emailOf(c) || '—' }}</td>
-              <td class="px-3 py-3">
-                <span
-                  class="inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                  :class="statusBadge(c.status)"
-                >
-                  {{ contactStatusLabel[c.status as ContactStatus] || c.status }}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-xs text-muted md:px-6">
-                {{
-                  c.lastOutcome
-                    ? contactOutcomeLabel[c.lastOutcome as ContactCallOutcome] || c.lastOutcome
-                    : '—'
-                }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <template v-else>
+        <p v-if="!items.length" class="rounded-2xl border border-dashed border-line bg-panel px-6 py-12 text-center text-sm text-muted">
+          Контактов с такими условиями нет.
+          <button type="button" class="ml-1 font-semibold text-brand hover:underline" @click="clearFilters">
+            Показать свободные
+          </button>
+        </p>
+
+        <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel shadow-sm">
+          <table class="w-full min-w-[760px] text-left text-sm">
+            <thead class="border-b border-line bg-surface/80 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <tr>
+                <th v-if="canWrite" class="w-12 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    class="size-4 rounded border-line accent-brand"
+                    :checked="allClaimableSelected"
+                    :disabled="!claimableItems.length"
+                    :title="claimableItems.length ? 'Выбрать все свободные' : 'Нет свободных на странице'"
+                    @change="toggleSelectAll"
+                  />
+                </th>
+                <th class="px-4 py-3">Клиент</th>
+                <th class="px-4 py-3">Компания</th>
+                <th class="px-4 py-3">Телефон</th>
+                <th class="px-4 py-3">Статус</th>
+                <th class="px-4 py-3">Менеджер</th>
+                <th class="px-4 py-3">Статус обращения</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="c in items"
+                :key="c.id"
+                class="cursor-pointer border-b border-line last:border-0 transition"
+                :class="
+                  selected.has(c.id)
+                    ? 'bg-brand-soft/50'
+                    : 'hover:bg-brand-soft/30'
+                "
+                @click="openContact(c.id)"
+              >
+                <td v-if="canWrite" class="px-3 py-3" @click.stop>
+                  <input
+                    type="checkbox"
+                    class="size-4 rounded border-line accent-brand disabled:opacity-30"
+                    :checked="selected.has(c.id)"
+                    :disabled="!isClaimable(c)"
+                    :title="isClaimable(c) ? 'Отметить' : 'Уже назначен'"
+                    @change="toggleSelect(c.id, isClaimable(c))"
+                  />
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand"
+                    >
+                      {{ initials(c.name || c.phone) }}
+                    </div>
+                    <div class="min-w-0">
+                      <div class="truncate font-semibold text-ink">
+                        {{ c.name || 'Без имени' }}
+                      </div>
+                      <div class="truncate text-xs text-muted">
+                        {{ emailOf(c) || '—' }}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-muted">{{ companyOf(c) || '—' }}</td>
+                <td class="px-4 py-3" @click.stop>
+                  <a
+                    :href="telHref(c.phone)"
+                    class="inline-flex items-center gap-1.5 font-medium text-brand hover:underline"
+                    title="Позвонить"
+                  >
+                    <Phone class="size-3.5 opacity-70" />
+                    {{ c.phone }}
+                  </a>
+                </td>
+                <td class="px-4 py-3">
+                  <span
+                    class="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    :class="statusBadge(c.status)"
+                  >
+                    {{ contactStatusLabel[c.status as ContactStatus] || c.status }}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-muted">
+                  {{ c.assigneeName || 'Свободный' }}
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  <span
+                    v-if="c.currentAppeal?.statusDef"
+                    class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium"
+                    :style="{
+                      background: c.currentAppeal.statusDef.color + '22',
+                      color: c.currentAppeal.statusDef.color,
+                    }"
+                  >
+                    {{ c.currentAppeal.statusDef.name }}
+                  </span>
+                  <span v-else class="text-muted">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="total" class="mt-3 text-xs text-muted">
+          Показано {{ items.length }} из {{ total }}
+        </div>
+      </template>
+    </div>
+
+    <!-- Bulk claim bar -->
+    <div
+      v-if="canWrite && selectedCount"
+      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 md:pb-6"
+    >
+      <div
+        class="pointer-events-auto flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3 shadow-lg"
+      >
+        <span class="text-sm font-semibold text-ink">
+          Выбрано: {{ selectedCount }}
+        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          :disabled="claimBusy"
+          @click="onClaimSelected"
+        >
+          <Hand class="size-4" />
+          {{ claimBusy ? 'Забираем…' : 'Взять в работу' }}
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-xl px-2 py-2 text-sm text-muted hover:text-ink"
+          title="Снять выделение"
+          @click="clearSelection"
+        >
+          <X class="size-4" />
+        </button>
       </div>
     </div>
 
@@ -358,7 +549,7 @@ const title = computed(() => {
           />
         </label>
         <label class="block">
-          <span class="mb-1 block text-xs font-semibold text-muted">Телефон / номер</span>
+          <span class="mb-1 block text-xs font-semibold text-muted">Телефон</span>
           <input
             v-model="createPhone"
             type="tel"
@@ -367,7 +558,7 @@ const title = computed(() => {
             placeholder="+79991234567"
           />
         </label>
-        <p v-if="createError" class="text-sm text-red-600">{{ createError }}</p>
+        <p v-if="createError" class="text-sm text-danger">{{ createError }}</p>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="rounded-xl px-3 py-2 text-sm text-muted" @click="createOpen = false">
             Отмена

@@ -5,6 +5,7 @@ import {
   IdCard,
   Radio,
   CircleDot,
+  Tags,
   Webhook,
 } from 'lucide-vue-next'
 import type { PermissionCode } from '@/types'
@@ -57,6 +58,13 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         label: 'Поля обращения',
         description: 'Дополнительные поля в обращении',
         icon: FormInput,
+        permission: 'section.settings',
+      },
+      {
+        to: '/settings/appeal-statuses',
+        label: 'Статусы обращений',
+        description: 'Этапы работы и очередь «Перезвонить»',
+        icon: Tags,
         permission: 'section.settings',
       },
       {

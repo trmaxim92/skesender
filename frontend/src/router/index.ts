@@ -118,6 +118,12 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
+          path: 'settings/appeal-statuses',
+          name: 'appeal-statuses',
+          component: () => import('@/views/settings/AppealStatusesView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/WebhooksView.vue'),

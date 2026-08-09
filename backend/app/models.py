@@ -73,6 +73,8 @@ class FieldScope(StrEnum):
     APPEAL = "appeal"
     # Same FieldDefinition catalog as CLIENT; values keyed by contact.id (avoids dialog id clash).
     CONTACT = "contact"
+    # Appeal-scope FieldDefinitions; values keyed by contact.id.
+    CONTACT_APPEAL = "contact_appeal"
 
 
 class FieldType(StrEnum):
@@ -97,6 +99,18 @@ class PresenceStatusSlug(StrEnum):
     ONLINE = "online"
     OFFLINE = "offline"
     TRAINING = "training"
+
+
+class AppealStatusSlug(StrEnum):
+    """Reserved system slugs for appeal workflow statuses."""
+
+    NEW = "new"
+    IN_WORK = "in_work"
+    NO_ANSWER = "no_answer"
+    CALLBACK = "callback"
+    REJECTED = "rejected"
+    AGREED = "agreed"
+    CLOSED = "closed"
 
 
 class MailingCampaignStatus(StrEnum):
@@ -163,6 +177,27 @@ class PresenceStatus(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     users: Mapped[list["User"]] = relationship(back_populates="presence_status")
+
+
+class AppealStatusDef(Base):
+    """Configurable appeal workflow status (replaces hardcoded call outcomes)."""
+
+    __tablename__ = "appeal_statuses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    color: Mapped[str] = mapped_column(String(16), default="#9ca3af")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_terminal: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_callback: Mapped[bool] = mapped_column(Boolean, default=False)
+    counts_as_open: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    appeals: Mapped[list["Appeal"]] = relationship(back_populates="status_def")
 
 
 class User(Base):
@@ -372,18 +407,30 @@ class Appeal(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    dialog_id: Mapped[int] = mapped_column(ForeignKey("dialogs.id", ondelete="CASCADE"), index=True)
+    # Nullable: phone-only contact appeals exist before messenger dialog is created.
+    dialog_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dialogs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     number: Mapped[int] = mapped_column(Integer, default=1)
+    # Legacy open/closed lifecycle — kept in sync with status_def.is_terminal.
     status: Mapped[str] = mapped_column(String(16), default=AppealStatus.OPEN.value, index=True)
+    status_id: Mapped[int | None] = mapped_column(
+        ForeignKey("appeal_statuses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    dialog: Mapped[Dialog] = relationship(
+    dialog: Mapped[Dialog | None] = relationship(
         back_populates="appeals",
         foreign_keys=[dialog_id],
     )
+    contact: Mapped["Contact | None"] = relationship(back_populates="appeals")
+    status_def: Mapped[AppealStatusDef | None] = relationship(back_populates="appeals")
     closed_by: Mapped[User | None] = relationship(back_populates="closed_appeals")
     messages: Mapped[list["ChatMessage"]] = relationship(back_populates="appeal")
 
@@ -728,6 +775,9 @@ class Contact(Base):
     phone: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default=ContactStatus.NEW.value, index=True)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     last_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     last_outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -738,6 +788,7 @@ class Contact(Base):
         back_populates="assigned_contacts",
         foreign_keys=[assignee_id],
     )
+    department: Mapped["Department | None"] = relationship()
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
     comments: Mapped[list["ContactComment"]] = relationship(
         back_populates="contact",
@@ -748,6 +799,10 @@ class Contact(Base):
         back_populates="contact",
         cascade="all, delete-orphan",
         order_by="ContactCallResult.id",
+    )
+    appeals: Mapped[list["Appeal"]] = relationship(
+        back_populates="contact",
+        foreign_keys="Appeal.contact_id",
     )
 
 

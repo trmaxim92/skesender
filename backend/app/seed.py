@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -12,7 +12,10 @@ from app.departments import (
     ensure_system_client_fields,
 )
 from app.integrations.maxbot.connector import upsert_seed_channel
+from app.appeal_statuses import get_default_closed_status, get_default_open_status, seed_appeal_statuses
 from app.models import (
+    Appeal,
+    AppealStatus,
     MessageTemplate,
     Role,
     RoleChannel,
@@ -63,6 +66,19 @@ async def seed_database(session: AsyncSession) -> None:
 
     by_slug = await seed_access_roles(session)
     presence_by_slug = await seed_presence_statuses(session)
+    await seed_appeal_statuses(session)
+    open_st = await get_default_open_status(session)
+    closed_st = await get_default_closed_status(session)
+    await session.execute(
+        update(Appeal)
+        .where(Appeal.status_id.is_(None), Appeal.status == AppealStatus.OPEN.value)
+        .values(status_id=open_st.id)
+    )
+    await session.execute(
+        update(Appeal)
+        .where(Appeal.status_id.is_(None), Appeal.status == AppealStatus.CLOSED.value)
+        .values(status_id=closed_st.id)
+    )
 
     dept = await ensure_default_department(session)
     await ensure_system_client_fields(session)

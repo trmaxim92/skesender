@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.appeals import ensure_open_appeal, get_current_appeal
+from app.appeals import close_appeal_with_status, ensure_open_appeal, get_current_appeal
 from app.config import get_settings
 from app.db import get_db
 from app.departments import accessible_department_ids, ensure_department_access
@@ -649,6 +649,7 @@ async def execute_start_chat(
     channel_id: int,
     recipient: str,
     text: str,
+    reuse_appeal: Appeal | None = None,
 ) -> StartChatOut:
     """Shared outbound start used by /chats/start and contacts message."""
     text = (text or "").strip()
@@ -694,7 +695,18 @@ async def execute_start_chat(
     ):
         dialog.contact_name = peer.contact_name
 
-    appeal = await ensure_open_appeal(db, dialog)
+    if reuse_appeal is not None:
+        reuse_appeal.dialog_id = dialog.id
+        if reuse_appeal.status == AppealStatus.CLOSED.value:
+            from app.appeal_statuses import apply_status_def_to_appeal, get_default_open_status
+
+            open_status = await get_default_open_status(db)
+            apply_status_def_to_appeal(reuse_appeal, open_status)
+        dialog.current_appeal_id = reuse_appeal.id
+        appeal = reuse_appeal
+        await db.flush()
+    else:
+        appeal = await ensure_open_appeal(db, dialog)
     dialog.assignee_id = user.id
 
     adapter = get_adapter(channel.transport)
@@ -1067,9 +1079,7 @@ async def close_dialog_appeal(
 
     # Close first — never leave client with a goodbye while appeal stays open.
     appeal_id = appeal.id
-    appeal.status = AppealStatus.CLOSED.value
-    appeal.closed_at = utcnow()
-    appeal.closed_by_id = user.id
+    await close_appeal_with_status(db, appeal, closed_by_id=user.id)
     await clear_unread(db, dialog)
     await db.commit()
 

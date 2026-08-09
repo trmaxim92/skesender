@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -226,12 +226,12 @@ async def _refresh_dialog_preview(db: AsyncSession, dialog: Dialog) -> None:
         dialog.last_status = None
 
 
-@router.delete("/{appeal_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{appeal_id}")
 async def delete_appeal(
     appeal_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(ACTION_DELETE_APPEALS)),
-) -> None:
+) -> Response:
     """Hard-delete an appeal with its messages and appeal field values."""
     result = await db.execute(
         select(Appeal)
@@ -243,13 +243,12 @@ async def delete_appeal(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appeal not found")
 
     dialog = appeal.dialog
-    if dialog is None:
+    if dialog is None and appeal.dialog_id is not None:
         dialog = await db.get(Dialog, appeal.dialog_id)
-    if dialog is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dialog not found")
 
-    await ensure_channel_access(user, dialog.channel_id, db)
-    await ensure_department_access(user, dialog.department_id, db)
+    if dialog is not None:
+        await ensure_channel_access(user, dialog.channel_id, db)
+        await ensure_department_access(user, dialog.department_id, db)
 
     msg_ids = select(ChatMessage.id).where(ChatMessage.appeal_id == appeal.id)
     await db.execute(delete(MessageAttachment).where(MessageAttachment.message_id.in_(msg_ids)))
@@ -261,13 +260,13 @@ async def delete_appeal(
         )
     )
 
-    was_current = dialog.current_appeal_id == appeal.id
-    dialog_id = dialog.id
+    was_current = bool(dialog and dialog.current_appeal_id == appeal.id)
+    dialog_id = dialog.id if dialog else None
 
     await db.delete(appeal)
     await db.flush()
 
-    if was_current:
+    if dialog is not None and was_current and dialog_id is not None:
         remaining = await db.execute(
             select(Appeal)
             .where(Appeal.dialog_id == dialog_id)
@@ -276,20 +275,21 @@ async def delete_appeal(
         )
         next_appeal = remaining.scalar_one_or_none()
         dialog.current_appeal_id = next_appeal.id if next_appeal else None
-
-    await _refresh_dialog_preview(db, dialog)
-
-    loaded = await db.execute(
-        select(Dialog)
-        .options(
-            selectinload(Dialog.channel),
-            selectinload(Dialog.assignee),
-            selectinload(Dialog.current_appeal).selectinload(Appeal.closed_by),
+        await _refresh_dialog_preview(db, dialog)
+        loaded = await db.execute(
+            select(Dialog)
+            .options(
+                selectinload(Dialog.channel),
+                selectinload(Dialog.assignee),
+                selectinload(Dialog.current_appeal).selectinload(Appeal.closed_by),
+            )
+            .where(Dialog.id == dialog_id)
         )
-        .where(Dialog.id == dialog_id)
-    )
-    dialog_loaded = loaded.scalar_one()
-    event = dialog_updated_event(dialog_loaded)
-    await db.commit()
-    await emit_event(event)
+        dialog_loaded = loaded.scalar_one()
+        event = dialog_updated_event(dialog_loaded)
+        await db.commit()
+        await emit_event(event)
+    else:
+        await db.commit()
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

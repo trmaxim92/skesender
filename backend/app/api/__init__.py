@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    appeal_statuses,
     appeals,
     auth,
     channels,
@@ -24,6 +25,7 @@ api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
 api_router.include_router(me_templates.router)
 api_router.include_router(presence.router)
+api_router.include_router(appeal_statuses.router)
 api_router.include_router(channels.router)
 api_router.include_router(chats.router)
 api_router.include_router(appeals.router)

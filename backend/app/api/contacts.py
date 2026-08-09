@@ -12,9 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.chats import execute_start_chat
+from app.appeals import ensure_contact_appeal
+from app.appeal_statuses import apply_status_def_to_appeal
 from app.db import get_db
+from app.departments import ensure_default_department
 from app.fields import field_def_to_out, list_field_definitions, load_field_values, upsert_field_value
 from app.models import (
+    Appeal,
+    AppealStatus,
+    AppealStatusDef,
     Contact,
     ContactCallOutcome,
     ContactCallResult,
@@ -33,7 +39,13 @@ from app.rbac import (
     user_can,
 )
 from app.schemas import (
+    AppealOut,
+    AppealStatusDefOut,
+    ContactAppealStatusRequest,
     ContactCallResultOut,
+    ContactClaimBatchRequest,
+    ContactClaimBatchResult,
+    ContactClaimSkipped,
     ContactCommentCreateRequest,
     ContactCommentOut,
     ContactCreateRequest,
@@ -58,10 +70,6 @@ _CONTACT_LOAD = (
 
 _PHONE_STRIP = re.compile(r"[^\d+]")
 _SYSTEM_KEYS = {"full_name", "phone", "external_id"}
-_CALLBACK_OUTCOMES = {
-    ContactCallOutcome.NO_ANSWER.value,
-    ContactCallOutcome.CALLBACK.value,
-}
 
 
 def _require_write(user: User) -> None:
@@ -123,6 +131,10 @@ async def _contact_out(
 
     client_fields = []
     client_values: dict[str, str] = {}
+    appeal_fields = []
+    appeal_values: dict[str, str] = {}
+    current_appeal: AppealOut | None = None
+    appeal_statuses: list[AppealStatusDefOut] = []
     if with_fields:
         defs = await list_field_definitions(db, scope=FieldScope.CLIENT.value)
         client_fields = [field_def_to_out(f) for f in defs]
@@ -140,6 +152,68 @@ async def _contact_out(
         if not client_values["phone"] and stored.get("phone"):
             client_values["phone"] = stored["phone"]
 
+        dept_id = c.department_id
+        if dept_id is None:
+            general = await ensure_default_department(db)
+            dept_id = general.id
+        appeal_defs = await list_field_definitions(
+            db, scope=FieldScope.APPEAL.value, department_id=dept_id
+        )
+        appeal_fields = [field_def_to_out(f) for f in appeal_defs]
+        appeal_values = await load_field_values(
+            db, scope=FieldScope.CONTACT_APPEAL.value, owner_id=c.id
+        )
+
+        status_rows = (
+            await db.execute(
+                select(AppealStatusDef)
+                .where(AppealStatusDef.is_active.is_(True))
+                .order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
+            )
+        ).scalars().all()
+        appeal_statuses = [AppealStatusDefOut.model_validate(r) for r in status_rows]
+
+        appeal_row = (
+            await db.execute(
+                select(Appeal)
+                .options(selectinload(Appeal.status_def), selectinload(Appeal.closed_by))
+                .where(
+                    Appeal.contact_id == c.id,
+                    Appeal.status == AppealStatus.OPEN.value,
+                )
+                .order_by(Appeal.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if appeal_row is None:
+            appeal_row = (
+                await db.execute(
+                    select(Appeal)
+                    .options(selectinload(Appeal.status_def), selectinload(Appeal.closed_by))
+                    .where(Appeal.contact_id == c.id)
+                    .order_by(Appeal.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if appeal_row is not None:
+            current_appeal = AppealOut(
+                id=appeal_row.id,
+                dialog_id=appeal_row.dialog_id,
+                contact_id=appeal_row.contact_id,
+                number=appeal_row.number,
+                status=appeal_row.status,  # type: ignore[arg-type]
+                status_id=appeal_row.status_id,
+                status_def=(
+                    AppealStatusDefOut.model_validate(appeal_row.status_def)
+                    if appeal_row.status_def
+                    else None
+                ),
+                opened_at=appeal_row.opened_at,
+                closed_at=appeal_row.closed_at,
+                closed_by_id=appeal_row.closed_by_id,
+                closed_by_name=appeal_row.closed_by.name if appeal_row.closed_by else None,
+            )
+
     return ContactOut(
         id=c.id,
         name=c.name or "",
@@ -147,6 +221,7 @@ async def _contact_out(
         status=c.status,
         assignee_id=c.assignee_id,
         assignee_name=c.assignee.name if c.assignee else None,
+        department_id=c.department_id,
         created_by_id=c.created_by_id,
         last_outcome=c.last_outcome,
         last_outcome_at=c.last_outcome_at,
@@ -156,6 +231,10 @@ async def _contact_out(
         call_results=call_results,
         client_fields=client_fields,
         client_values=client_values,
+        appeal_fields=appeal_fields,
+        appeal_values=appeal_values,
+        current_appeal=current_appeal,
+        appeal_statuses=appeal_statuses,
     )
 
 
@@ -177,7 +256,11 @@ async def _apply_client_fields(
     phone: str | None,
     external_id: str | None,
     values: list,
+    appeal_values: list | None = None,
+    department_id: int | None = None,
 ) -> None:
+    if department_id is not None:
+        contact.department_id = department_id
     if full_name is not None:
         contact.name = full_name.strip() or contact.name
     if phone is not None:
@@ -212,6 +295,32 @@ async def _apply_client_fields(
             value=str(value or ""),
         )
 
+    if appeal_values is not None:
+        dept_id = contact.department_id
+        if dept_id is None:
+            general = await ensure_default_department(db)
+            dept_id = general.id
+            if contact.department_id is None:
+                contact.department_id = dept_id
+        appeal_defs = await list_field_definitions(
+            db, scope=FieldScope.APPEAL.value, department_id=dept_id
+        )
+        allowed_appeal = {f.key for f in appeal_defs}
+        for item in appeal_values:
+            key = getattr(item, "key", None) or (item.get("key") if isinstance(item, dict) else None)
+            value = getattr(item, "value", None)
+            if value is None and isinstance(item, dict):
+                value = item.get("value", "")
+            if not key or key not in allowed_appeal:
+                continue
+            await upsert_field_value(
+                db,
+                scope=FieldScope.CONTACT_APPEAL.value,
+                owner_id=contact.id,
+                field_key=str(key),
+                value=str(value or ""),
+            )
+
 
 @router.get("", response_model=ContactsPageOut)
 async def list_contacts(
@@ -233,14 +342,23 @@ async def list_contacts(
         stmt = stmt.where(Contact.assignee_id == user.id)
         count_stmt = count_stmt.where(Contact.assignee_id == user.id)
     elif filter == "callback":
+        callback_ids = (
+            select(Appeal.contact_id)
+            .join(AppealStatusDef, Appeal.status_id == AppealStatusDef.id)
+            .where(
+                Appeal.contact_id.is_not(None),
+                Appeal.status == AppealStatus.OPEN.value,
+                AppealStatusDef.needs_callback.is_(True),
+            )
+        )
         stmt = stmt.where(
             Contact.assignee_id == user.id,
-            Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+            Contact.id.in_(callback_ids),
             Contact.status != ContactStatus.DONE.value,
         )
         count_stmt = count_stmt.where(
             Contact.assignee_id == user.id,
-            Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+            Contact.id.in_(callback_ids),
             Contact.status != ContactStatus.DONE.value,
         )
     elif filter == "others":
@@ -279,6 +397,25 @@ async def list_contacts(
             values_by_owner.setdefault(fv.owner_id, {})[fv.field_key] = fv.value_text
 
     items = []
+    open_appeal_by_contact: dict[int, Appeal] = {}
+    if rows:
+        ids = [c.id for c in rows]
+        appeal_rows = (
+            await db.execute(
+                select(Appeal)
+                .options(selectinload(Appeal.status_def))
+                .where(
+                    Appeal.contact_id.in_(ids),
+                    Appeal.status == AppealStatus.OPEN.value,
+                )
+                .order_by(Appeal.id.desc())
+            )
+        ).scalars().all()
+        for a in appeal_rows:
+            if a.contact_id is None or a.contact_id in open_appeal_by_contact:
+                continue
+            open_appeal_by_contact[a.contact_id] = a
+
     for c in rows:
         out = await _contact_out(db, c)
         out.client_values = {
@@ -286,6 +423,21 @@ async def list_contacts(
             "phone": c.phone or "",
             **values_by_owner.get(c.id, {}),
         }
+        a = open_appeal_by_contact.get(c.id)
+        if a is not None:
+            out.current_appeal = AppealOut(
+                id=a.id,
+                dialog_id=a.dialog_id,
+                contact_id=a.contact_id,
+                number=a.number,
+                status=a.status,  # type: ignore[arg-type]
+                status_id=a.status_id,
+                status_def=(
+                    AppealStatusDefOut.model_validate(a.status_def) if a.status_def else None
+                ),
+                opened_at=a.opened_at,
+                closed_at=a.closed_at,
+            )
         items.append(out)
     return ContactsPageOut(items=items, total=total, limit=limit, offset=offset)
 
@@ -309,6 +461,15 @@ async def contacts_summary(
             )
         ).scalar_one()
     )
+    callback_ids = (
+        select(Appeal.contact_id)
+        .join(AppealStatusDef, Appeal.status_id == AppealStatusDef.id)
+        .where(
+            Appeal.contact_id.is_not(None),
+            Appeal.status == AppealStatus.OPEN.value,
+            AppealStatusDef.needs_callback.is_(True),
+        )
+    )
     callback_n = int(
         (
             await db.execute(
@@ -316,7 +477,7 @@ async def contacts_summary(
                 .select_from(Contact)
                 .where(
                     Contact.assignee_id == user.id,
-                    Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+                    Contact.id.in_(callback_ids),
                     Contact.status != ContactStatus.DONE.value,
                 )
             )
@@ -352,9 +513,68 @@ async def claim_next_contact(
             status_code=status.HTTP_409_CONFLICT,
             detail="Контакт уже забрали — попробуйте ещё раз",
         )
+    contact = await _get_contact(db, contact.id)
+    await ensure_contact_appeal(db, contact)
     await db.commit()
     contact = await _get_contact(db, contact.id)
     return await _contact_out(db, contact, with_comments=True, with_fields=True)
+
+
+@router.post("/claim-batch", response_model=ContactClaimBatchResult)
+async def claim_contacts_batch(
+    body: ContactClaimBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactClaimBatchResult:
+    """Claim several free contacts at once (manager bulk take)."""
+    _require_write(user)
+    # Preserve request order, drop duplicates.
+    seen: set[int] = set()
+    ids: list[int] = []
+    for cid in body.contact_ids:
+        if cid in seen:
+            continue
+        seen.add(cid)
+        ids.append(cid)
+
+    result = await db.execute(select(Contact).where(Contact.id.in_(ids)))
+    by_id = {c.id: c for c in result.scalars().all()}
+
+    claimed_ids: list[int] = []
+    skipped: list[ContactClaimSkipped] = []
+
+    for cid in ids:
+        contact = by_id.get(cid)
+        if contact is None:
+            skipped.append(ContactClaimSkipped(id=cid, reason="не найден"))
+            continue
+        if contact.assignee_id == user.id:
+            claimed_ids.append(cid)
+            continue
+        if contact.assignee_id is not None:
+            skipped.append(ContactClaimSkipped(id=cid, reason="уже у другого менеджера"))
+            continue
+        upd = await db.execute(
+            update(Contact)
+            .where(Contact.id == cid, Contact.assignee_id.is_(None))
+            .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+        )
+        if upd.rowcount == 0:
+            skipped.append(ContactClaimSkipped(id=cid, reason="уже забрали"))
+        else:
+            claimed_ids.append(cid)
+
+    await db.commit()
+
+    claimed_out: list[ContactOut] = []
+    for cid in claimed_ids:
+        contact = await _get_contact(db, cid)
+        await ensure_contact_appeal(db, contact)
+        await db.commit()
+        contact = await _get_contact(db, cid)
+        claimed_out.append(await _contact_out(db, contact))
+
+    return ContactClaimBatchResult(claimed=claimed_out, skipped=skipped)
 
 
 @router.post("", response_model=ContactOut, status_code=status.HTTP_201_CREATED)
@@ -486,6 +706,10 @@ async def get_contact(
     user: User = Depends(require_permission(SECTION_CONTACTS)),
 ) -> ContactOut:
     contact = await _get_contact(db, contact_id)
+    if contact.assignee_id == user.id:
+        await ensure_contact_appeal(db, contact)
+        await db.commit()
+        contact = await _get_contact(db, contact_id)
     return await _contact_out(db, contact, with_comments=True, with_fields=True)
 
 
@@ -532,6 +756,8 @@ async def update_contact_fields(
         phone=body.phone,
         external_id=body.external_id,
         values=body.values,
+        appeal_values=body.appeal_values,
+        department_id=body.department_id,
     )
     await db.commit()
     contact = await _get_contact(db, contact_id)
@@ -566,6 +792,68 @@ async def claim_contact(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Контакт уже забрали — обновите список",
             )
+    elif contact.status == ContactStatus.NEW.value:
+        contact.status = ContactStatus.IN_WORK.value
+
+    contact = await _get_contact(db, contact_id)
+    await ensure_contact_appeal(db, contact)
+    await db.commit()
+    contact = await _get_contact(db, contact_id)
+    return await _contact_out(db, contact, with_comments=True, with_fields=True)
+
+
+@router.post("/{contact_id}/appeal", response_model=ContactOut)
+async def open_contact_appeal(
+    contact_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactOut:
+    """Ensure an open appeal exists for this contact (phone outreach without dialog)."""
+    _require_write(user)
+    contact = await _get_contact(db, contact_id)
+    if contact.assignee_id is not None and contact.assignee_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Контакт в работе у другого менеджера",
+        )
+    if contact.assignee_id is None:
+        contact.assignee_id = user.id
+        contact.status = ContactStatus.IN_WORK.value
+    await ensure_contact_appeal(db, contact)
+    await db.commit()
+    contact = await _get_contact(db, contact_id)
+    return await _contact_out(db, contact, with_comments=True, with_fields=True)
+
+
+@router.patch("/{contact_id}/appeal/status", response_model=ContactOut)
+async def set_contact_appeal_status(
+    contact_id: int,
+    body: ContactAppealStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactOut:
+    """Set workflow status on the contact's current open appeal."""
+    _require_write(user)
+    contact = await _get_contact(db, contact_id)
+    if contact.assignee_id is not None and contact.assignee_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Статус может менять только ответственный менеджер",
+        )
+    if contact.assignee_id is None:
+        contact.assignee_id = user.id
+        contact.status = ContactStatus.IN_WORK.value
+
+    status_def = await db.get(AppealStatusDef, body.status_id)
+    if status_def is None or not status_def.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Статус не найден")
+
+    appeal = await ensure_contact_appeal(db, contact)
+    apply_status_def_to_appeal(appeal, status_def, closed_by_id=user.id)
+    if status_def.is_terminal:
+        contact.status = ContactStatus.DONE.value
+    elif contact.status == ContactStatus.DONE.value:
+        contact.status = ContactStatus.IN_WORK.value
     elif contact.status == ContactStatus.NEW.value:
         contact.status = ContactStatus.IN_WORK.value
 
@@ -659,9 +947,7 @@ async def send_contact_message(
             detail="Нет доступа к чатам для отправки сообщения",
         )
     user = await load_user_rbac(db, user)
-    contact = await db.get(Contact, contact_id)
-    if contact is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт не найден")
+    contact = await _get_contact(db, contact_id)
 
     if contact.assignee_id is None:
         await db.execute(
@@ -670,11 +956,14 @@ async def send_contact_message(
             .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
         )
         await db.flush()
+        contact = await _get_contact(db, contact_id)
 
+    appeal = await ensure_contact_appeal(db, contact)
     return await execute_start_chat(
         db,
         user=user,
         channel_id=body.channel_id,
         recipient=contact.phone,
         text=body.text,
+        reuse_appeal=appeal,
     )

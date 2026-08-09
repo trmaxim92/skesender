@@ -69,6 +69,41 @@ class PresenceStatusUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class AppealStatusDefOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    color: str
+    sort_order: int
+    is_system: bool
+    is_active: bool
+    is_terminal: bool
+    needs_callback: bool
+    counts_as_open: bool
+
+    model_config = {"from_attributes": True}
+
+
+class AppealStatusDefCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    color: str = Field(default="#9ca3af", min_length=4, max_length=16)
+    sort_order: int = 0
+    is_terminal: bool = False
+    needs_callback: bool = False
+    counts_as_open: bool = True
+    is_active: bool = True
+
+
+class AppealStatusDefUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    color: str | None = Field(default=None, min_length=4, max_length=16)
+    sort_order: int | None = None
+    is_terminal: bool | None = None
+    needs_callback: bool | None = None
+    counts_as_open: bool | None = None
+    is_active: bool | None = None
+
+
 class PresenceEmployeeOut(BaseModel):
     id: int
     name: str
@@ -262,9 +297,12 @@ class UnreadSummaryOut(BaseModel):
 
 class AppealOut(BaseModel):
     id: int
-    dialog_id: int
+    dialog_id: int | None = None
+    contact_id: int | None = None
     number: int
     status: AppealStatus
+    status_id: int | None = None
+    status_def: AppealStatusDefOut | None = None
     opened_at: datetime
     closed_at: datetime | None = None
     closed_by_id: int | None = None
@@ -712,6 +750,7 @@ class ContactOut(BaseModel):
     status: str
     assignee_id: int | None = None
     assignee_name: str | None = None
+    department_id: int | None = None
     created_by_id: int | None = None
     last_outcome: str | None = None
     last_outcome_at: datetime | None = None
@@ -719,9 +758,13 @@ class ContactOut(BaseModel):
     updated_at: datetime
     comments: list[ContactCommentOut] = []
     call_results: list[ContactCallResultOut] = []
-    # Same catalog as chat client card (settings → client fields).
+    # Same catalogs as chat sidebar (settings → client / appeal fields).
     client_fields: list[FieldDefinitionOut] = []
     client_values: dict[str, str] = {}
+    appeal_fields: list[FieldDefinitionOut] = []
+    appeal_values: dict[str, str] = {}
+    current_appeal: AppealOut | None = None
+    appeal_statuses: list[AppealStatusDefOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -751,12 +794,14 @@ class ContactUpdateRequest(BaseModel):
 
 
 class ContactFieldsUpdateRequest(BaseModel):
-    """Mirrors chat client-fields: system full_name/phone + custom values."""
+    """Mirrors chat sidebar: client system fields + custom client/appeal values."""
 
     full_name: str | None = None
     phone: str | None = None
     external_id: str | None = None
     values: list[FieldValueItem] = []
+    appeal_values: list[FieldValueItem] = []
+    department_id: int | None = None
 
 
 class ContactCommentCreateRequest(BaseModel):
@@ -768,6 +813,10 @@ class ContactOutcomeRequest(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class ContactAppealStatusRequest(BaseModel):
+    status_id: int = Field(ge=1)
+
+
 class ContactMessageRequest(BaseModel):
     channel_id: int
     text: str = Field(min_length=1, max_length=4000)
@@ -777,3 +826,17 @@ class ContactImportResult(BaseModel):
     created: int
     skipped: int
     errors: list[str] = []
+
+
+class ContactClaimBatchRequest(BaseModel):
+    contact_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class ContactClaimSkipped(BaseModel):
+    id: int
+    reason: str
+
+
+class ContactClaimBatchResult(BaseModel):
+    claimed: list[ContactOut] = []
+    skipped: list[ContactClaimSkipped] = []
