@@ -470,6 +470,48 @@ async def ensure_schema() -> None:
                 """
             )
         )
+        # Contacts: call outcomes (create_all won't ALTER existing contacts table).
+        await conn.execute(
+            text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_outcome VARCHAR(32)")
+        )
+        await conn.execute(
+            text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_outcome_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_contacts_last_outcome ON contacts (last_outcome)")
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS contact_call_results (
+                    id SERIAL PRIMARY KEY,
+                    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+                    author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    outcome VARCHAR(32) NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contact_call_results_contact_id "
+                "ON contact_call_results (contact_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contact_call_results_author_id "
+                "ON contact_call_results (author_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_contact_call_results_outcome "
+                "ON contact_call_results (outcome)"
+            )
+        )
 
 
 @asynccontextmanager
