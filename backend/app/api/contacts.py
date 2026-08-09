@@ -14,7 +14,16 @@ from sqlalchemy.orm import selectinload
 from app.api.chats import execute_start_chat
 from app.db import get_db
 from app.fields import field_def_to_out, list_field_definitions, load_field_values, upsert_field_value
-from app.models import Contact, ContactComment, ContactStatus, FieldScope, User
+from app.models import (
+    Contact,
+    ContactCallOutcome,
+    ContactCallResult,
+    ContactComment,
+    ContactStatus,
+    FieldScope,
+    User,
+    utcnow,
+)
 from app.rbac import (
     ACTION_WRITE,
     SECTION_CHATS,
@@ -24,6 +33,7 @@ from app.rbac import (
     user_can,
 )
 from app.schemas import (
+    ContactCallResultOut,
     ContactCommentCreateRequest,
     ContactCommentOut,
     ContactCreateRequest,
@@ -31,7 +41,9 @@ from app.schemas import (
     ContactImportResult,
     ContactMessageRequest,
     ContactOut,
+    ContactOutcomeRequest,
     ContactsPageOut,
+    ContactsSummaryOut,
     ContactUpdateRequest,
     StartChatOut,
 )
@@ -41,10 +53,15 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 _CONTACT_LOAD = (
     selectinload(Contact.assignee),
     selectinload(Contact.comments).selectinload(ContactComment.author),
+    selectinload(Contact.call_results).selectinload(ContactCallResult.author),
 )
 
 _PHONE_STRIP = re.compile(r"[^\d+]")
 _SYSTEM_KEYS = {"full_name", "phone", "external_id"}
+_CALLBACK_OUTCOMES = {
+    ContactCallOutcome.NO_ANSWER.value,
+    ContactCallOutcome.CALLBACK.value,
+}
 
 
 def _require_write(user: User) -> None:
@@ -89,6 +106,21 @@ async def _contact_out(
                 )
             )
 
+    call_results: list[ContactCallResultOut] = []
+    if with_comments:
+        rows = sorted(c.call_results or [], key=lambda r: r.id, reverse=True)
+        for row in rows[:30]:
+            call_results.append(
+                ContactCallResultOut(
+                    id=row.id,
+                    outcome=row.outcome,
+                    note=row.note or "",
+                    author_id=row.author_id,
+                    author_name=row.author.name if row.author else None,
+                    created_at=row.created_at,
+                )
+            )
+
     client_fields = []
     client_values: dict[str, str] = {}
     if with_fields:
@@ -103,7 +135,6 @@ async def _contact_out(
             "external_id": stored.get("external_id", ""),
             **{k: v for k, v in stored.items() if k not in _SYSTEM_KEYS},
         }
-        # Prefer stored full_name/phone only if Contact columns empty (shouldn't happen).
         if not client_values["full_name"] and stored.get("full_name"):
             client_values["full_name"] = stored["full_name"]
         if not client_values["phone"] and stored.get("phone"):
@@ -117,9 +148,12 @@ async def _contact_out(
         assignee_id=c.assignee_id,
         assignee_name=c.assignee.name if c.assignee else None,
         created_by_id=c.created_by_id,
+        last_outcome=c.last_outcome,
+        last_outcome_at=c.last_outcome_at,
         created_at=c.created_at,
         updated_at=c.updated_at,
         comments=comments,
+        call_results=call_results,
         client_fields=client_fields,
         client_values=client_values,
     )
@@ -182,23 +216,33 @@ async def _apply_client_fields(
 @router.get("", response_model=ContactsPageOut)
 async def list_contacts(
     q: str | None = Query(default=None),
-    filter: str = Query(default="all", pattern="^(all|mine|others)$"),
+    filter: str = Query(default="all", pattern="^(all|mine|callback|others)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(SECTION_CONTACTS)),
 ) -> ContactsPageOut:
-    """all = свободные (пул); mine = мои; others = чужие (для супервизора)."""
+    """all = свободные; mine = мои; callback = мои на перезвон; others = чужие."""
     stmt = select(Contact).options(selectinload(Contact.assignee))
     count_stmt = select(func.count()).select_from(Contact)
 
     if filter == "all":
-        # Общий список — только незабранные; claimed уходят в «Мои».
         stmt = stmt.where(Contact.assignee_id.is_(None))
         count_stmt = count_stmt.where(Contact.assignee_id.is_(None))
     elif filter == "mine":
         stmt = stmt.where(Contact.assignee_id == user.id)
         count_stmt = count_stmt.where(Contact.assignee_id == user.id)
+    elif filter == "callback":
+        stmt = stmt.where(
+            Contact.assignee_id == user.id,
+            Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+            Contact.status != ContactStatus.DONE.value,
+        )
+        count_stmt = count_stmt.where(
+            Contact.assignee_id == user.id,
+            Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+            Contact.status != ContactStatus.DONE.value,
+        )
     elif filter == "others":
         stmt = stmt.where(Contact.assignee_id.is_not(None), Contact.assignee_id != user.id)
         count_stmt = count_stmt.where(
@@ -217,8 +261,100 @@ async def list_contacts(
         stmt.order_by(Contact.updated_at.desc(), Contact.id.desc()).offset(offset).limit(limit)
     )
     rows = list(result.scalars().all())
-    items = [await _contact_out(db, c) for c in rows]
+    # Lightweight custom values for table columns (company / email).
+    values_by_owner: dict[int, dict[str, str]] = {c.id: {} for c in rows}
+    if rows:
+        from app.models import FieldValue
+
+        ids = [c.id for c in rows]
+        fv_rows = (
+            await db.execute(
+                select(FieldValue).where(
+                    FieldValue.scope == FieldScope.CONTACT.value,
+                    FieldValue.owner_id.in_(ids),
+                )
+            )
+        ).scalars().all()
+        for fv in fv_rows:
+            values_by_owner.setdefault(fv.owner_id, {})[fv.field_key] = fv.value_text
+
+    items = []
+    for c in rows:
+        out = await _contact_out(db, c)
+        out.client_values = {
+            "full_name": c.name or "",
+            "phone": c.phone or "",
+            **values_by_owner.get(c.id, {}),
+        }
+        items.append(out)
     return ContactsPageOut(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/summary", response_model=ContactsSummaryOut)
+async def contacts_summary(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactsSummaryOut:
+    all_n = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Contact).where(Contact.assignee_id.is_(None))
+            )
+        ).scalar_one()
+    )
+    mine_n = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(Contact).where(Contact.assignee_id == user.id)
+            )
+        ).scalar_one()
+    )
+    callback_n = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(Contact)
+                .where(
+                    Contact.assignee_id == user.id,
+                    Contact.last_outcome.in_(_CALLBACK_OUTCOMES),
+                    Contact.status != ContactStatus.DONE.value,
+                )
+            )
+        ).scalar_one()
+    )
+    return ContactsSummaryOut(all=all_n, mine=mine_n, callback=callback_n)
+
+
+@router.post("/next", response_model=ContactOut)
+async def claim_next_contact(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactOut:
+    """Claim the oldest free contact from the pool."""
+    _require_write(user)
+    result = await db.execute(
+        select(Contact)
+        .where(Contact.assignee_id.is_(None))
+        .order_by(Contact.created_at.asc(), Contact.id.asc())
+        .limit(1)
+    )
+    contact = result.scalar_one_or_none()
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Свободных контактов нет")
+
+    claimed = await db.execute(
+        update(Contact)
+        .where(Contact.id == contact.id, Contact.assignee_id.is_(None))
+        .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+    )
+    if claimed.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Контакт уже забрали — попробуйте ещё раз",
+        )
+    await db.commit()
+    contact = await _get_contact(db, contact.id)
+    return await _contact_out(db, contact, with_comments=True, with_fields=True)
 
 
 @router.post("", response_model=ContactOut, status_code=status.HTTP_201_CREATED)
@@ -463,6 +599,49 @@ async def add_comment(
         author_name=user.name,
         created_at=row.created_at,
     )
+
+
+@router.post("/{contact_id}/outcome", response_model=ContactOut)
+async def set_call_outcome(
+    contact_id: int,
+    body: ContactOutcomeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactOut:
+    """Record SIP/phone call outcome and update contact status."""
+    _require_write(user)
+    contact = await _get_contact(db, contact_id)
+    if contact.assignee_id is not None and contact.assignee_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Исход может ставить только ответственный менеджер",
+        )
+    if contact.assignee_id is None:
+        contact.assignee_id = user.id
+        contact.status = ContactStatus.IN_WORK.value
+
+    note = (body.note or "").strip()
+    row = ContactCallResult(
+        contact_id=contact.id,
+        author_id=user.id,
+        outcome=body.outcome,
+        note=note,
+    )
+    db.add(row)
+    contact.last_outcome = body.outcome
+    contact.last_outcome_at = utcnow()
+
+    if body.outcome in {
+        ContactCallOutcome.AGREED.value,
+        ContactCallOutcome.REJECTED.value,
+    }:
+        contact.status = ContactStatus.DONE.value
+    elif contact.status == ContactStatus.NEW.value:
+        contact.status = ContactStatus.IN_WORK.value
+
+    await db.commit()
+    contact = await _get_contact(db, contact_id)
+    return await _contact_out(db, contact, with_comments=True, with_fields=True)
 
 
 @router.post("/{contact_id}/message", response_model=StartChatOut)

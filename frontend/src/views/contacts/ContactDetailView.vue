@@ -1,0 +1,560 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, Phone, MessageSquare, Hand } from 'lucide-vue-next'
+import {
+  addContactCommentRequest,
+  claimContactRequest,
+  claimNextContactRequest,
+  getContactRequest,
+  setContactOutcomeRequest,
+  telHref,
+  updateContactFieldsRequest,
+  updateContactRequest,
+  type Contact,
+} from '@/api/contacts'
+import { ApiError } from '@/api/client'
+import ContactSendModal from '@/views/contacts/ContactSendModal.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useChannelsStore } from '@/stores/channels'
+import {
+  contactOutcomeLabel,
+  contactStatusLabel,
+  type ContactCallOutcome,
+  type ContactStatus,
+  type FieldDefinition,
+} from '@/types'
+
+const auth = useAuthStore()
+const channels = useChannelsStore()
+const route = useRoute()
+const router = useRouter()
+
+const canWrite = computed(() => auth.can('section.contacts') && auth.can('action.write'))
+
+const detail = ref<Contact | null>(null)
+const loading = ref(false)
+const error = ref('')
+const fieldsDraft = ref<Record<string, string>>({})
+const fieldsSaving = ref(false)
+const commentText = ref('')
+const commentBusy = ref(false)
+const claimBusy = ref(false)
+const outcomeBusy = ref(false)
+const nextBusy = ref(false)
+const awaitingOutcome = ref(false)
+const sendOpen = ref(false)
+
+const OUTCOME_BUTTONS: { id: ContactCallOutcome; label: string }[] = [
+  { id: 'answered', label: 'Дозвонился' },
+  { id: 'no_answer', label: 'Нет ответа' },
+  { id: 'callback', label: 'Перезвонить' },
+  { id: 'rejected', label: 'Отказ' },
+  { id: 'agreed', label: 'Согласие' },
+]
+
+const contactId = computed(() => Number(route.params.contactId))
+
+const canClaim = computed(() => {
+  if (!detail.value || !canWrite.value) return false
+  return detail.value.assigneeId == null || detail.value.assigneeId === auth.user?.id
+})
+
+const isMineOrFree = computed(() => {
+  if (!detail.value) return false
+  return detail.value.assigneeId == null || detail.value.assigneeId === auth.user?.id
+})
+
+type TimelineItem =
+  | { kind: 'call'; id: string; at: string; outcome: string; note: string; author: string | null }
+  | { kind: 'comment'; id: string; at: string; text: string; author: string | null }
+
+const timeline = computed((): TimelineItem[] => {
+  if (!detail.value) return []
+  const items: TimelineItem[] = []
+  for (const cr of detail.value.callResults) {
+    items.push({
+      kind: 'call',
+      id: `call-${cr.id}`,
+      at: cr.createdAt,
+      outcome: cr.outcome,
+      note: cr.note,
+      author: cr.authorName,
+    })
+  }
+  for (const cm of detail.value.comments) {
+    items.push({
+      kind: 'comment',
+      id: `c-${cm.id}`,
+      at: cm.createdAt,
+      text: cm.text,
+      author: cm.authorName,
+    })
+  }
+  return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+})
+
+async function load() {
+  if (!Number.isFinite(contactId.value) || contactId.value <= 0) {
+    error.value = 'Контакт не найден'
+    return
+  }
+  loading.value = true
+  error.value = ''
+  awaitingOutcome.value = false
+  try {
+    detail.value = await getContactRequest(contactId.value)
+    fieldsDraft.value = { ...detail.value.clientValues }
+  } catch (e) {
+    detail.value = null
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось открыть контакт'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  void load()
+})
+
+watch(
+  () => route.params.contactId,
+  () => {
+    void load()
+  },
+)
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function fieldInputType(f: FieldDefinition) {
+  if (f.fieldType === 'number') return 'number'
+  if (f.fieldType === 'phone') return 'tel'
+  if (f.fieldType === 'date') return 'date'
+  if (f.fieldType === 'link') return 'url'
+  return 'text'
+}
+
+function linkHref(value: string | undefined) {
+  const raw = (value || '').trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `https://${raw}`
+}
+
+function statusBadge(status: ContactStatus | string) {
+  if (status === 'in_work') return 'bg-amber-100 text-amber-800'
+  if (status === 'done') return 'bg-emerald-100 text-emerald-800'
+  return 'bg-slate-100 text-slate-700'
+}
+
+function goBack() {
+  void router.push({ name: 'contacts' })
+}
+
+function onCallClick() {
+  awaitingOutcome.value = true
+}
+
+async function saveFields() {
+  if (!detail.value || !canWrite.value || fieldsSaving.value) return
+  fieldsSaving.value = true
+  error.value = ''
+  try {
+    const values = Object.entries(fieldsDraft.value)
+      .filter(([key]) => !['full_name', 'phone', 'external_id'].includes(key))
+      .map(([key, value]) => ({ key, value }))
+    detail.value = await updateContactFieldsRequest(detail.value.id, {
+      full_name: fieldsDraft.value.full_name ?? '',
+      phone: fieldsDraft.value.phone ?? '',
+      external_id: fieldsDraft.value.external_id ?? '',
+      values,
+    })
+    fieldsDraft.value = { ...detail.value.clientValues }
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить поля'
+  } finally {
+    fieldsSaving.value = false
+  }
+}
+
+async function onClaim() {
+  if (!detail.value || claimBusy.value || !canWrite.value) return
+  claimBusy.value = true
+  error.value = ''
+  try {
+    detail.value = await claimContactRequest(detail.value.id)
+    fieldsDraft.value = { ...detail.value.clientValues }
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось взять в работу'
+  } finally {
+    claimBusy.value = false
+  }
+}
+
+async function onOutcome(outcome: ContactCallOutcome) {
+  if (!detail.value || !canWrite.value || outcomeBusy.value) return
+  outcomeBusy.value = true
+  error.value = ''
+  try {
+    detail.value = await setContactOutcomeRequest(detail.value.id, { outcome })
+    fieldsDraft.value = { ...detail.value.clientValues }
+    awaitingOutcome.value = false
+    if (outcome === 'agreed') openSend()
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить исход'
+  } finally {
+    outcomeBusy.value = false
+  }
+}
+
+async function onAddComment() {
+  if (!detail.value || !canWrite.value || commentBusy.value) return
+  const text = commentText.value.trim()
+  if (!text) return
+  commentBusy.value = true
+  error.value = ''
+  try {
+    const c = await addContactCommentRequest(detail.value.id, text)
+    detail.value = {
+      ...detail.value,
+      comments: [...detail.value.comments, c],
+    }
+    commentText.value = ''
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить комментарий'
+  } finally {
+    commentBusy.value = false
+  }
+}
+
+async function markDone() {
+  if (!detail.value || !canWrite.value) return
+  try {
+    detail.value = await updateContactRequest(detail.value.id, { status: 'done' })
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось обновить статус'
+  }
+}
+
+async function onNext() {
+  if (!canWrite.value || nextBusy.value) return
+  nextBusy.value = true
+  error.value = ''
+  try {
+    const c = await claimNextContactRequest()
+    await router.push({ name: 'contact-detail', params: { contactId: String(c.id) } })
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Нет свободных контактов'
+  } finally {
+    nextBusy.value = false
+  }
+}
+
+function openSend() {
+  if (!detail.value) return
+  sendOpen.value = true
+  if (!channels.channels.length) void channels.fetchChannels()
+}
+
+function onSent(dialogId: number) {
+  sendOpen.value = false
+  void router.push({ name: 'chats', query: { dialog: String(dialogId) } })
+}
+</script>
+
+<template>
+  <div class="flex h-full min-h-0 flex-col bg-surface md:flex-row">
+    <!-- Left: client card -->
+    <aside
+      class="flex w-full shrink-0 flex-col border-b border-line bg-[#1f2937] text-white md:h-full md:w-[340px] md:border-b-0 md:border-r md:border-line"
+    >
+      <div class="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+        <button
+          type="button"
+          class="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+          title="К списку"
+          @click="goBack"
+        >
+          <ArrowLeft class="size-4" />
+        </button>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-semibold">
+            {{ detail?.name || (loading ? '…' : 'Контакт') }}
+          </div>
+          <div class="text-[11px] text-white/50">#{{ contactId }}</div>
+        </div>
+      </div>
+
+      <div class="border-b border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white/60">
+        Карточка клиента
+      </div>
+
+      <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <p v-if="loading" class="text-sm text-white/60">Загрузка…</p>
+        <p v-else-if="error && !detail" class="text-sm text-red-300">{{ error }}</p>
+        <template v-else-if="detail">
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+              :class="statusBadge(detail.status)"
+            >
+              {{ contactStatusLabel[detail.status] || detail.status }}
+            </span>
+            <span v-if="detail.assigneeName" class="text-[11px] text-white/60">
+              {{ detail.assigneeName }}
+            </span>
+            <span v-else class="text-[11px] text-white/60">Свободный</span>
+          </div>
+
+          <div
+            v-for="f in detail.clientFields"
+            :key="f.key"
+            class="space-y-1"
+          >
+            <label class="text-[11px] font-semibold uppercase tracking-wide text-white/50">
+              {{ f.label }}
+            </label>
+            <textarea
+              v-if="f.fieldType === 'textarea'"
+              v-model="fieldsDraft[f.key]"
+              rows="3"
+              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+              :readonly="!canWrite"
+            />
+            <select
+              v-else-if="f.fieldType === 'select'"
+              v-model="fieldsDraft[f.key]"
+              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+              :disabled="!canWrite"
+            >
+              <option value="">—</option>
+              <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
+            </select>
+            <div v-else-if="f.fieldType === 'link'" class="space-y-1">
+              <input
+                v-model="fieldsDraft[f.key]"
+                type="url"
+                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+                :readonly="!canWrite"
+              />
+              <a
+                v-if="fieldsDraft[f.key]?.trim()"
+                :href="linkHref(fieldsDraft[f.key])"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-brand hover:underline"
+              >
+                Открыть
+              </a>
+            </div>
+            <label
+              v-else-if="f.fieldType === 'bool'"
+              class="flex items-center gap-2 text-sm text-white"
+            >
+              <input
+                type="checkbox"
+                :checked="fieldsDraft[f.key] === 'true' || fieldsDraft[f.key] === '1'"
+                :disabled="!canWrite"
+                @change="
+                  fieldsDraft[f.key] = ($event.target as HTMLInputElement).checked
+                    ? 'true'
+                    : 'false'
+                "
+              />
+              Да
+            </label>
+            <input
+              v-else
+              v-model="fieldsDraft[f.key]"
+              :type="fieldInputType(f)"
+              class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+              :readonly="!canWrite"
+            />
+          </div>
+
+          <button
+            v-if="canWrite"
+            type="button"
+            class="w-full rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            :disabled="fieldsSaving"
+            @click="saveFields"
+          >
+            {{ fieldsSaving ? 'Сохранение…' : 'Сохранить карточку' }}
+          </button>
+        </template>
+      </div>
+    </aside>
+
+    <!-- Right: activity -->
+    <section class="flex min-w-0 flex-1 flex-col bg-surface">
+      <header class="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-4 py-3 md:px-6">
+        <div class="text-sm font-semibold text-ink">Активность</div>
+        <div class="flex flex-wrap gap-2">
+          <a
+            v-if="detail"
+            :href="telHref(detail.phone)"
+            class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+            title="Откроет SIP / телефонное приложение"
+            @click="onCallClick"
+          >
+            <Phone class="size-4" />
+            Связаться
+          </a>
+          <button
+            v-if="canClaim && detail?.assigneeId == null"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            :disabled="claimBusy"
+            @click="onClaim"
+          >
+            <Hand class="size-4" />
+            Взять
+          </button>
+          <button
+            v-if="canWrite && isMineOrFree"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-sm text-ink hover:bg-surface"
+            @click="openSend"
+          >
+            <MessageSquare class="size-4" />
+            Мессенджер
+          </button>
+          <button
+            v-if="canWrite"
+            type="button"
+            class="rounded-xl border border-line px-3 py-2 text-sm text-muted hover:bg-surface disabled:opacity-50"
+            :disabled="nextBusy"
+            @click="onNext"
+          >
+            Следующий
+          </button>
+          <button
+            v-if="canWrite && detail && detail.status !== 'done' && isMineOrFree"
+            type="button"
+            class="rounded-xl border border-line px-3 py-2 text-sm text-muted hover:bg-surface"
+            @click="markDone"
+          >
+            Завершить
+          </button>
+        </div>
+      </header>
+
+      <p v-if="error && detail" class="border-b border-line px-4 py-2 text-sm text-red-600 md:px-6">
+        {{ error }}
+      </p>
+
+      <!-- Call outcome panel -->
+      <div
+        v-if="detail && canWrite && isMineOrFree"
+        class="border-b border-line bg-panel px-4 py-4 md:px-6"
+      >
+        <div class="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
+          <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
+            <Phone class="size-4 text-rose-500" />
+            <span class="font-semibold text-ink">Связаться</span>
+            <a :href="telHref(detail.phone)" class="font-medium text-brand hover:underline" @click="onCallClick">
+              {{ detail.phone }}
+            </a>
+            <span
+              v-if="detail.lastOutcome"
+              class="text-xs text-muted"
+            >
+              · последний:
+              {{ contactOutcomeLabel[detail.lastOutcome as ContactCallOutcome] || detail.lastOutcome }}
+            </span>
+          </div>
+          <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Добавить результат
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="btn in OUTCOME_BUTTONS"
+              :key="btn.id"
+              type="button"
+              class="rounded-xl border border-line bg-white px-3 py-1.5 text-xs font-medium text-ink hover:border-brand/40 disabled:opacity-50"
+              :class="awaitingOutcome || !detail.lastOutcome ? '' : ''"
+              :disabled="outcomeBusy"
+              @click="onOutcome(btn.id)"
+            >
+              {{ btn.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 md:px-6">
+        <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
+        <p v-else-if="!timeline.length" class="text-sm text-muted">Пока нет событий</p>
+        <ul v-else class="space-y-3">
+          <li
+            v-for="item in timeline"
+            :key="item.id"
+            class="rounded-xl border border-line bg-panel px-3 py-2.5"
+          >
+            <div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted">
+              <span class="font-medium text-ink">
+                <template v-if="item.kind === 'call'">
+                  Звонок ·
+                  {{ contactOutcomeLabel[item.outcome as ContactCallOutcome] || item.outcome }}
+                </template>
+                <template v-else>Примечание</template>
+              </span>
+              <span>{{ formatDate(item.at) }}</span>
+            </div>
+            <p v-if="item.kind === 'comment'" class="whitespace-pre-wrap text-sm text-ink">
+              {{ item.text }}
+            </p>
+            <p v-else-if="item.note" class="text-sm text-ink">{{ item.note }}</p>
+            <p class="mt-1 text-[11px] text-muted">{{ item.author || 'Менеджер' }}</p>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Note composer -->
+      <form
+        v-if="canWrite && detail"
+        class="border-t border-line bg-panel px-4 py-3 md:px-6"
+        @submit.prevent="onAddComment"
+      >
+        <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Примечание
+        </label>
+        <textarea
+          v-model="commentText"
+          rows="2"
+          class="mb-2 w-full resize-none rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+          placeholder="Введите текст"
+        />
+        <div class="flex justify-end">
+          <button
+            type="submit"
+            class="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            :disabled="commentBusy || !commentText.trim()"
+          >
+            Сохранить
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <ContactSendModal
+      :open="sendOpen"
+      :contact-id="detail?.id || 0"
+      :contact-name="detail?.name || ''"
+      :phone="detail?.phone || ''"
+      :channels="channels.channels"
+      :loading-channels="channels.loading"
+      @close="sendOpen = false"
+      @sent="onSent"
+    />
+  </div>
+</template>

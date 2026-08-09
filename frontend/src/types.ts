@@ -17,10 +17,20 @@ export type PermissionCode =
 
 export type ContactStatus = 'new' | 'in_work' | 'done'
 
+export type ContactCallOutcome = 'answered' | 'no_answer' | 'rejected' | 'agreed' | 'callback'
+
 export const contactStatusLabel: Record<ContactStatus, string> = {
   new: 'Новый',
   in_work: 'В работе',
   done: 'Завершён',
+}
+
+export const contactOutcomeLabel: Record<ContactCallOutcome, string> = {
+  answered: 'Дозвонился',
+  no_answer: 'Нет ответа',
+  rejected: 'Отказ',
+  agreed: 'Согласие',
+  callback: 'Перезвонить',
 }
 
 export type FieldType = 'text' | 'textarea' | 'number' | 'phone' | 'select' | 'date' | 'bool' | 'link'

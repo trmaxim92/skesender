@@ -694,6 +694,17 @@ class ContactCommentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ContactCallResultOut(BaseModel):
+    id: int
+    outcome: str
+    note: str = ""
+    author_id: int
+    author_name: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ContactOut(BaseModel):
     id: int
     name: str
@@ -702,9 +713,12 @@ class ContactOut(BaseModel):
     assignee_id: int | None = None
     assignee_name: str | None = None
     created_by_id: int | None = None
+    last_outcome: str | None = None
+    last_outcome_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     comments: list[ContactCommentOut] = []
+    call_results: list[ContactCallResultOut] = []
     # Same catalog as chat client card (settings → client fields).
     client_fields: list[FieldDefinitionOut] = []
     client_values: dict[str, str] = {}
@@ -717,6 +731,12 @@ class ContactsPageOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ContactsSummaryOut(BaseModel):
+    all: int = 0
+    mine: int = 0
+    callback: int = 0
 
 
 class ContactCreateRequest(BaseModel):
@@ -741,6 +761,11 @@ class ContactFieldsUpdateRequest(BaseModel):
 
 class ContactCommentCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+
+class ContactOutcomeRequest(BaseModel):
+    outcome: str = Field(pattern="^(answered|no_answer|rejected|agreed|callback)$")
+    note: str = Field(default="", max_length=2000)
 
 
 class ContactMessageRequest(BaseModel):

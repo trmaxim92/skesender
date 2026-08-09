@@ -42,6 +42,12 @@ const router = createRouter({
           meta: { permission: 'section.contacts' },
         },
         {
+          path: 'contacts/:contactId',
+          name: 'contact-detail',
+          component: () => import('@/views/contacts/ContactDetailView.vue'),
+          meta: { permission: 'section.contacts' },
+        },
+        {
           path: 'mailing',
           name: 'mailing',
           component: () => import('@/views/MailingView.vue'),

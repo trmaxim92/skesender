@@ -1,10 +1,19 @@
 import { api } from '@/api/client'
 import { mapFieldDefinition, type ApiFieldDefinition } from '@/api/settings'
-import type { ContactStatus, FieldDefinition } from '@/types'
+import type { ContactCallOutcome, ContactStatus, FieldDefinition } from '@/types'
 
 export interface ApiContactComment {
   id: number
   text: string
+  author_id: number
+  author_name?: string | null
+  created_at: string
+}
+
+export interface ApiContactCallResult {
+  id: number
+  outcome: string
+  note?: string
   author_id: number
   author_name?: string | null
   created_at: string
@@ -18,9 +27,12 @@ export interface ApiContact {
   assignee_id?: number | null
   assignee_name?: string | null
   created_by_id?: number | null
+  last_outcome?: string | null
+  last_outcome_at?: string | null
   created_at: string
   updated_at: string
   comments?: ApiContactComment[]
+  call_results?: ApiContactCallResult[]
   client_fields?: ApiFieldDefinition[]
   client_values?: Record<string, string>
 }
@@ -32,6 +44,15 @@ export interface ApiContactsPage {
   offset: number
 }
 
+export interface ContactCallResult {
+  id: number
+  outcome: ContactCallOutcome | string
+  note: string
+  authorId: number
+  authorName: string | null
+  createdAt: string
+}
+
 export interface Contact {
   id: number
   name: string
@@ -40,9 +61,12 @@ export interface Contact {
   assigneeId: number | null
   assigneeName: string | null
   createdById: number | null
+  lastOutcome: ContactCallOutcome | string | null
+  lastOutcomeAt: string | null
   createdAt: string
   updatedAt: string
   comments: ContactComment[]
+  callResults: ContactCallResult[]
   clientFields: FieldDefinition[]
   clientValues: Record<string, string>
 }
@@ -65,6 +89,17 @@ export function mapComment(c: ApiContactComment): ContactComment {
   }
 }
 
+function mapCallResult(r: ApiContactCallResult): ContactCallResult {
+  return {
+    id: r.id,
+    outcome: r.outcome,
+    note: r.note || '',
+    authorId: r.author_id,
+    authorName: r.author_name ?? null,
+    createdAt: r.created_at,
+  }
+}
+
 export function mapContact(c: ApiContact): Contact {
   return {
     id: c.id,
@@ -74,15 +109,18 @@ export function mapContact(c: ApiContact): Contact {
     assigneeId: c.assignee_id ?? null,
     assigneeName: c.assignee_name ?? null,
     createdById: c.created_by_id ?? null,
+    lastOutcome: c.last_outcome ?? null,
+    lastOutcomeAt: c.last_outcome_at ?? null,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
     comments: (c.comments || []).map(mapComment),
+    callResults: (c.call_results || []).map(mapCallResult),
     clientFields: (c.client_fields || []).map(mapFieldDefinition),
     clientValues: { ...(c.client_values || {}) },
   }
 }
 
-export type ContactFilter = 'all' | 'mine' | 'others'
+export type ContactFilter = 'all' | 'mine' | 'callback' | 'others'
 
 export async function listContactsRequest(params: {
   q?: string
@@ -103,6 +141,15 @@ export async function listContactsRequest(params: {
     limit: page.limit,
     offset: page.offset,
   }
+}
+
+export async function contactsSummaryRequest() {
+  return api<{ all: number; mine: number; callback: number }>('/api/contacts/summary')
+}
+
+export async function claimNextContactRequest() {
+  const c = await api<ApiContact>('/api/contacts/next', { method: 'POST' })
+  return mapContact(c)
 }
 
 export async function getContactRequest(id: number) {
@@ -144,6 +191,17 @@ export async function claimContactRequest(id: number) {
   return mapContact(c)
 }
 
+export async function setContactOutcomeRequest(
+  id: number,
+  payload: { outcome: ContactCallOutcome; note?: string },
+) {
+  const c = await api<ApiContact>(`/api/contacts/${id}/outcome`, {
+    method: 'POST',
+    json: payload,
+  })
+  return mapContact(c)
+}
+
 export async function addContactCommentRequest(id: number, text: string) {
   const c = await api<ApiContactComment>(`/api/contacts/${id}/comments`, {
     method: 'POST',
@@ -171,6 +229,7 @@ export async function sendContactMessageRequest(
   })
 }
 
+/** Opens the OS/SIP dialer via tel: (softphones usually intercept this). */
 export function telHref(phone: string): string {
   const digits = phone.replace(/[^\d+]/g, '')
   return `tel:${digits}`

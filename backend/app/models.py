@@ -135,6 +135,14 @@ class ContactStatus(StrEnum):
     DONE = "done"
 
 
+class ContactCallOutcome(StrEnum):
+    ANSWERED = "answered"
+    NO_ANSWER = "no_answer"
+    REJECTED = "rejected"
+    AGREED = "agreed"
+    CALLBACK = "callback"
+
+
 class PresenceStatus(Base):
     """Operator presence mode — runtime overlay that can only tighten role rights."""
 
@@ -721,6 +729,8 @@ class Contact(Base):
     status: Mapped[str] = mapped_column(String(16), default=ContactStatus.NEW.value, index=True)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    last_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    last_outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -733,6 +743,11 @@ class Contact(Base):
         back_populates="contact",
         cascade="all, delete-orphan",
         order_by="ContactComment.created_at",
+    )
+    call_results: Mapped[list["ContactCallResult"]] = relationship(
+        back_populates="contact",
+        cascade="all, delete-orphan",
+        order_by="ContactCallResult.id",
     )
 
 
@@ -750,3 +765,20 @@ class ContactComment(Base):
     contact: Mapped[Contact] = relationship(back_populates="comments")
     author: Mapped[User] = relationship()
 
+
+class ContactCallResult(Base):
+    """Outcome of a SIP/phone call attempt on a contact."""
+
+    __tablename__ = "contact_call_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contact_id: Mapped[int] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    outcome: Mapped[str] = mapped_column(String(32), index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    contact: Mapped[Contact] = relationship(back_populates="call_results")
+    author: Mapped[User] = relationship()
