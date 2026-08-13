@@ -3,8 +3,8 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-const email = ref('admin@order-elite.local')
-const password = ref('demo')
+const email = ref('')
+const password = ref('')
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
@@ -71,11 +71,6 @@ async function submit() {
       >
         {{ auth.loading ? 'Входим…' : 'Войти' }}
       </button>
-
-      <p class="mt-4 text-center text-xs text-muted">
-        Демо: <span class="font-mono">admin@order-elite.local</span> /
-        <span class="font-mono">demo</span>
-      </p>
     </form>
   </div>
 </template>
