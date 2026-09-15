@@ -42,7 +42,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
 SECTION_LABELS: dict[str, str] = {
     SECTION_CHATS: "Чаты",
     SECTION_APPEALS: "Обращения",
-    SECTION_CONTACTS: "Контакты",
+    SECTION_CONTACTS: "Клиенты",
     SECTION_MAILING: "Рассылки",
     SECTION_CHANNELS: "Раздел «Каналы» (настройки)",
     SECTION_EMPLOYEES: "Сотрудники",

@@ -10,7 +10,7 @@ from app.appeal_statuses import ensure_unique_appeal_status_slug
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import Appeal, AppealStatusDef, AppealStatusSlug, User
-from app.rbac import SECTION_CHATS, SECTION_CONTACTS, SECTION_SETTINGS, require_permission, user_can
+from app.rbac import SECTION_CHATS, SECTION_CONTACTS, SECTION_SETTINGS, user_can
 from app.schemas import (
     AppealStatusDefCreateRequest,
     AppealStatusDefOut,
@@ -18,6 +18,12 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/appeal-statuses", tags=["appeal-statuses"])
+
+
+def _require_stages_admin(user: User = Depends(get_current_user)) -> User:
+    if not (user_can(user, SECTION_CONTACTS) or user_can(user, SECTION_SETTINGS)):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    return user
 
 
 def _to_out(row: AppealStatusDef) -> AppealStatusDefOut:
@@ -28,7 +34,7 @@ def _to_out(row: AppealStatusDef) -> AppealStatusDefOut:
 async def list_statuses(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(SECTION_SETTINGS)),
+    user: User = Depends(_require_stages_admin),
 ) -> list[AppealStatusDefOut]:
     _ = user
     stmt = select(AppealStatusDef).order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
@@ -41,7 +47,7 @@ async def list_statuses(
 @router.get("/manage", response_model=list[AppealStatusDefOut])
 async def list_statuses_manage(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(SECTION_SETTINGS)),
+    user: User = Depends(_require_stages_admin),
 ) -> list[AppealStatusDefOut]:
     _ = user
     rows = (
@@ -73,7 +79,7 @@ async def list_active_statuses(
 async def create_status(
     body: AppealStatusDefCreateRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(SECTION_SETTINGS)),
+    user: User = Depends(_require_stages_admin),
 ) -> AppealStatusDefOut:
     _ = user
     name = body.name.strip()
@@ -108,7 +114,7 @@ async def update_status(
     status_id: int,
     body: AppealStatusDefUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(SECTION_SETTINGS)),
+    user: User = Depends(_require_stages_admin),
 ) -> AppealStatusDefOut:
     _ = user
     row = await db.get(AppealStatusDef, status_id)
@@ -146,14 +152,14 @@ async def update_status(
 async def delete_status(
     status_id: int,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(SECTION_SETTINGS)),
+    user: User = Depends(_require_stages_admin),
 ) -> Response:
     _ = user
     row = await db.get(AppealStatusDef, status_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Статус не найден")
-    if row.is_system:
-        raise HTTPException(status_code=400, detail="Системный статус нельзя удалить")
+    if row.slug == AppealStatusSlug.NEW.value:
+        raise HTTPException(status_code=400, detail="Базовый статус «Новое» нельзя удалить")
     fallback = (
         await db.execute(
             select(AppealStatusDef).where(AppealStatusDef.slug == AppealStatusSlug.NEW.value)

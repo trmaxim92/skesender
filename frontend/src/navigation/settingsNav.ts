@@ -5,7 +5,6 @@ import {
   IdCard,
   Radio,
   CircleDot,
-  Tags,
   Webhook,
   Newspaper,
 } from 'lucide-vue-next'
@@ -50,9 +49,9 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     ],
   },
   {
-    id: 'crm',
-    title: 'Обращения и клиенты',
-    description: 'Поля карточек и шаблон закрытия',
+    id: 'cards',
+    title: 'Карточки',
+    description: 'Поля клиента, обращения и шаблон закрытия',
     items: [
       {
         to: '/settings/appeal-fields',
@@ -62,16 +61,9 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         permission: 'section.settings',
       },
       {
-        to: '/settings/appeal-statuses',
-        label: 'Статусы обращений',
-        description: 'Этапы работы и очередь «Перезвонить»',
-        icon: Tags,
-        permission: 'section.settings',
-      },
-      {
         to: '/settings/client-fields',
-        label: 'Карточка клиента',
-        description: 'Поля профиля клиента',
+        label: 'Поля клиента',
+        description: 'Поля профиля в карточке клиента',
         icon: IdCard,
         permission: 'section.settings',
       },
@@ -82,13 +74,27 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: FileText,
         permission: 'section.settings',
       },
+    ],
+  },
+  {
+    id: 'employees',
+    title: 'Сотрудники',
+    description: 'Присутствие и права на смене',
+    items: [
       {
         to: '/settings/presence-statuses',
-        label: 'Статусы сотрудников',
-        description: 'Присутствие, автораспределение и право писать',
+        label: 'Статусы присутствия',
+        description: 'Автораспределение и право писать',
         icon: CircleDot,
         permission: 'section.settings',
       },
+    ],
+  },
+  {
+    id: 'system',
+    title: 'Система',
+    description: 'Внутренние объявления кабинета',
+    items: [
       {
         to: '/settings/system-news',
         label: 'Новости системы',

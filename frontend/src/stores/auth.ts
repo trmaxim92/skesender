@@ -60,6 +60,9 @@ export const useAuthStore = defineStore('auth', () => {
     if (path === '/employees' || path.startsWith('/employees/')) {
       return can('section.chats') || can('section.employees')
     }
+    if (path === '/clients/stages' || path.startsWith('/clients/stages')) {
+      return can('section.contacts') || can('section.settings')
+    }
     const code = SECTION_BY_PATH[path]
     return code ? can(code) : true
   }

@@ -13,7 +13,11 @@ from sqlalchemy.orm import selectinload
 
 from app.api.chats import execute_start_chat
 from app.appeals import ensure_contact_appeal
-from app.appeal_statuses import apply_status_def_to_appeal
+from app.appeal_statuses import (
+    apply_status_def_to_appeal,
+    promote_contact_on_claim,
+    sync_contact_status_from_stage,
+)
 from app.db import get_db
 from app.departments import ensure_default_department
 from app.fields import field_def_to_out, list_field_definitions, load_field_values, upsert_field_value
@@ -506,7 +510,7 @@ async def claim_next_contact(
     claimed = await db.execute(
         update(Contact)
         .where(Contact.id == contact.id, Contact.assignee_id.is_(None))
-        .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+        .values(assignee_id=user.id)
     )
     if claimed.rowcount == 0:
         raise HTTPException(
@@ -514,7 +518,7 @@ async def claim_next_contact(
             detail="Контакт уже забрали — попробуйте ещё раз",
         )
     contact = await _get_contact(db, contact.id)
-    await ensure_contact_appeal(db, contact)
+    await promote_contact_on_claim(db, contact)
     await db.commit()
     contact = await _get_contact(db, contact.id)
     return await _contact_out(db, contact, with_comments=True, with_fields=True)
@@ -557,7 +561,7 @@ async def claim_contacts_batch(
         upd = await db.execute(
             update(Contact)
             .where(Contact.id == cid, Contact.assignee_id.is_(None))
-            .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+            .values(assignee_id=user.id)
         )
         if upd.rowcount == 0:
             skipped.append(ContactClaimSkipped(id=cid, reason="уже забрали"))
@@ -569,7 +573,7 @@ async def claim_contacts_batch(
     claimed_out: list[ContactOut] = []
     for cid in claimed_ids:
         contact = await _get_contact(db, cid)
-        await ensure_contact_appeal(db, contact)
+        await promote_contact_on_claim(db, contact)
         await db.commit()
         contact = await _get_contact(db, cid)
         claimed_out.append(await _contact_out(db, contact))
@@ -785,18 +789,16 @@ async def claim_contact(
         result = await db.execute(
             update(Contact)
             .where(Contact.id == contact_id, Contact.assignee_id.is_(None))
-            .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+            .values(assignee_id=user.id)
         )
         if result.rowcount == 0:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Контакт уже забрали — обновите список",
             )
-    elif contact.status == ContactStatus.NEW.value:
-        contact.status = ContactStatus.IN_WORK.value
 
     contact = await _get_contact(db, contact_id)
-    await ensure_contact_appeal(db, contact)
+    await promote_contact_on_claim(db, contact)
     await db.commit()
     contact = await _get_contact(db, contact_id)
     return await _contact_out(db, contact, with_comments=True, with_fields=True)
@@ -818,8 +820,7 @@ async def open_contact_appeal(
         )
     if contact.assignee_id is None:
         contact.assignee_id = user.id
-        contact.status = ContactStatus.IN_WORK.value
-    await ensure_contact_appeal(db, contact)
+    await promote_contact_on_claim(db, contact)
     await db.commit()
     contact = await _get_contact(db, contact_id)
     return await _contact_out(db, contact, with_comments=True, with_fields=True)
@@ -842,7 +843,6 @@ async def set_contact_appeal_status(
         )
     if contact.assignee_id is None:
         contact.assignee_id = user.id
-        contact.status = ContactStatus.IN_WORK.value
 
     status_def = await db.get(AppealStatusDef, body.status_id)
     if status_def is None or not status_def.is_active:
@@ -850,12 +850,7 @@ async def set_contact_appeal_status(
 
     appeal = await ensure_contact_appeal(db, contact)
     apply_status_def_to_appeal(appeal, status_def, closed_by_id=user.id)
-    if status_def.is_terminal:
-        contact.status = ContactStatus.DONE.value
-    elif contact.status == ContactStatus.DONE.value:
-        contact.status = ContactStatus.IN_WORK.value
-    elif contact.status == ContactStatus.NEW.value:
-        contact.status = ContactStatus.IN_WORK.value
+    sync_contact_status_from_stage(contact, status_def)
 
     await db.commit()
     contact = await _get_contact(db, contact_id)
@@ -906,7 +901,6 @@ async def set_call_outcome(
         )
     if contact.assignee_id is None:
         contact.assignee_id = user.id
-        contact.status = ContactStatus.IN_WORK.value
 
     note = (body.note or "").strip()
     row = ContactCallResult(
@@ -918,14 +912,14 @@ async def set_call_outcome(
     db.add(row)
     contact.last_outcome = body.outcome
     contact.last_outcome_at = utcnow()
-
+    # Prefer workflow stages in UI; keep legacy outcome → contact.status mapping for API callers.
     if body.outcome in {
         ContactCallOutcome.AGREED.value,
         ContactCallOutcome.REJECTED.value,
     }:
         contact.status = ContactStatus.DONE.value
-    elif contact.status == ContactStatus.NEW.value:
-        contact.status = ContactStatus.IN_WORK.value
+    else:
+        await promote_contact_on_claim(db, contact)
 
     await db.commit()
     contact = await _get_contact(db, contact_id)
@@ -953,10 +947,11 @@ async def send_contact_message(
         await db.execute(
             update(Contact)
             .where(Contact.id == contact_id, Contact.assignee_id.is_(None))
-            .values(assignee_id=user.id, status=ContactStatus.IN_WORK.value)
+            .values(assignee_id=user.id)
         )
         await db.flush()
         contact = await _get_contact(db, contact_id)
+        await promote_contact_on_claim(db, contact)
 
     appeal = await ensure_contact_appeal(db, contact)
     return await execute_start_chat(

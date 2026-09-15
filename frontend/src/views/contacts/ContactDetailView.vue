@@ -10,18 +10,13 @@ import {
   setContactAppealStatusRequest,
   telHref,
   updateContactFieldsRequest,
-  updateContactRequest,
   type Contact,
 } from '@/api/contacts'
 import { ApiError } from '@/api/client'
 import ContactSendModal from '@/views/contacts/ContactSendModal.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
-import {
-  contactStatusLabel,
-  type ContactStatus,
-  type FieldDefinition,
-} from '@/types'
+import type { FieldDefinition } from '@/types'
 
 const auth = useAuthStore()
 const channels = useChannelsStore()
@@ -133,11 +128,10 @@ function linkHref(value: string | undefined) {
   return `https://${raw}`
 }
 
-function statusBadge(status: ContactStatus | string) {
-  if (status === 'in_work') return 'bg-amber-100 text-amber-800'
-  if (status === 'done') return 'bg-emerald-100 text-emerald-800'
-  return 'bg-slate-100 text-slate-700'
-}
+const isTerminalStage = computed(() => {
+  const st = detail.value?.currentAppeal?.statusDef
+  return Boolean(st?.isTerminal || (st && !st.countsAsOpen))
+})
 
 function goBack() {
   void router.push({ name: 'contacts' })
@@ -223,12 +217,13 @@ async function onAddComment() {
 }
 
 async function markDone() {
-  if (!detail.value || !canWrite.value) return
-  try {
-    detail.value = await updateContactRequest(detail.value.id, { status: 'done' })
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.detail : 'Не удалось обновить статус'
+  if (!detail.value || !canWrite.value || statusBusy.value) return
+  const terminal = detail.value.appealStatuses.find((s) => s.isTerminal || !s.countsAsOpen)
+  if (!terminal) {
+    error.value = 'Нет завершающего этапа — добавьте в «Клиенты → Этапы обзвона»'
+    return
   }
+  await onAppealStatus(terminal.id)
 }
 
 async function onNext() {
@@ -286,10 +281,18 @@ function onSent(dialogId: number) {
         <template v-else-if="detail">
           <div class="flex flex-wrap items-center gap-2">
             <span
-              class="rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-              :class="statusBadge(detail.status)"
+              v-if="detail.currentAppeal?.statusDef"
+              class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+              :style="{
+                background: detail.currentAppeal.statusDef.color + '22',
+                color: detail.currentAppeal.statusDef.color,
+              }"
             >
-              {{ contactStatusLabel[detail.status] || detail.status }}
+              <span
+                class="size-1.5 rounded-full"
+                :style="{ background: detail.currentAppeal.statusDef.color }"
+              />
+              {{ detail.currentAppeal.statusDef.name }}
             </span>
             <span v-if="detail.assigneeName" class="text-[11px] text-muted">
               {{ detail.assigneeName }}
@@ -481,9 +484,10 @@ function onSent(dialogId: number) {
             Следующий
           </button>
           <button
-            v-if="canWrite && detail && detail.status !== 'done' && isMineOrFree"
+            v-if="canWrite && detail && !isTerminalStage && isMineOrFree"
             type="button"
-            class="rounded-xl border border-line px-3 py-2 text-sm text-muted hover:bg-surface"
+            class="rounded-xl border border-line px-3 py-2 text-sm text-muted hover:bg-surface disabled:opacity-50"
+            :disabled="statusBusy"
             @click="markDone"
           >
             Завершить
@@ -524,7 +528,7 @@ function onSent(dialogId: number) {
               {{ detail.phone }}
             </a>
           </div>
-          <p class="mb-2 text-xs text-muted">Статус обращения</p>
+          <p class="mb-2 text-xs text-muted">Этап обзвона</p>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="st in detail.appealStatuses"
@@ -544,7 +548,7 @@ function onSent(dialogId: number) {
             </button>
           </div>
           <p v-if="!detail.appealStatuses.length" class="text-xs text-muted">
-            Статусы ещё не настроены. Добавьте их в Настройки → Статусы обращений.
+            Этапы ещё не настроены. Добавьте в «Клиенты → Этапы обзвона».
           </p>
         </div>
       </div>

@@ -48,6 +48,15 @@ const router = createRouter({
           meta: { permission: 'section.contacts' },
         },
         {
+          path: 'clients/stages',
+          name: 'client-stages',
+          component: () => import('@/views/settings/AppealStatusesView.vue'),
+        },
+        {
+          path: 'settings/appeal-statuses',
+          redirect: '/clients/stages',
+        },
+        {
           path: 'mailing',
           name: 'mailing',
           component: () => import('@/views/MailingView.vue'),
@@ -123,12 +132,6 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
-          path: 'settings/appeal-statuses',
-          name: 'appeal-statuses',
-          component: () => import('@/views/settings/AppealStatusesView.vue'),
-          meta: { permission: 'section.settings' },
-        },
-        {
           path: 'settings/system-news',
           name: 'system-news',
           component: () => import('@/views/settings/SystemNewsView.vue'),
@@ -183,6 +186,10 @@ router.beforeEach(async (to) => {
     }
     if (to.name === 'employees') {
       if (!auth.can('section.chats') && !auth.can('section.employees')) {
+        return auth.firstAllowedPath()
+      }
+    } else if (to.name === 'client-stages') {
+      if (!auth.can('section.contacts') && !auth.can('section.settings')) {
         return auth.firstAllowedPath()
       }
     } else {

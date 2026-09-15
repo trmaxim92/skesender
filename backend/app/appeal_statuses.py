@@ -15,7 +15,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.NEW.value,
         "color": "#1a6dff",
         "sort_order": 10,
-        "is_system": True,
+        "is_system": True,  # sole undeletable anchor / fallback
         "is_terminal": False,
         "needs_callback": False,
         "counts_as_open": True,
@@ -25,7 +25,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.IN_WORK.value,
         "color": "#f79009",
         "sort_order": 20,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": False,
         "needs_callback": False,
         "counts_as_open": True,
@@ -35,7 +35,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.NO_ANSWER.value,
         "color": "#667085",
         "sort_order": 30,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": False,
         "needs_callback": True,
         "counts_as_open": True,
@@ -45,7 +45,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.CALLBACK.value,
         "color": "#f97316",
         "sort_order": 40,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": False,
         "needs_callback": True,
         "counts_as_open": True,
@@ -55,7 +55,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.REJECTED.value,
         "color": "#f04438",
         "sort_order": 50,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": True,
         "needs_callback": False,
         "counts_as_open": False,
@@ -65,7 +65,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.AGREED.value,
         "color": "#12b76a",
         "sort_order": 60,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": False,
         "needs_callback": False,
         "counts_as_open": True,
@@ -75,7 +75,7 @@ DEFAULT_APPEAL_STATUSES: tuple[dict, ...] = (
         "slug": AppealStatusSlug.CLOSED.value,
         "color": "#9ca3af",
         "sort_order": 70,
-        "is_system": True,
+        "is_system": False,
         "is_terminal": True,
         "needs_callback": False,
         "counts_as_open": False,
@@ -96,8 +96,11 @@ async def seed_appeal_statuses(session: AsyncSession) -> dict[str, AppealStatusD
             await session.flush()
             by_slug[row.slug] = row
         else:
-            if not existing.is_system:
+            # Keep only «new» protected; unlock previously seeded system rows.
+            if existing.slug == AppealStatusSlug.NEW.value:
                 existing.is_system = True
+            elif existing.is_system:
+                existing.is_system = False
     await session.flush()
     return by_slug
 
@@ -123,12 +126,80 @@ async def get_default_open_status(session: AsyncSession) -> AppealStatusDef:
 
 async def get_default_closed_status(session: AsyncSession) -> AppealStatusDef:
     row = await get_appeal_status_by_slug(session, AppealStatusSlug.CLOSED.value)
-    if row is None:
-        by_slug = await seed_appeal_statuses(session)
-        row = by_slug.get(AppealStatusSlug.CLOSED.value)
+    if row is not None and row.is_active:
+        return row
+    terminal = (
+        await session.execute(
+            select(AppealStatusDef)
+            .where(
+                AppealStatusDef.is_active.is_(True),
+                AppealStatusDef.is_terminal.is_(True),
+            )
+            .order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if terminal is not None:
+        return terminal
+    by_slug = await seed_appeal_statuses(session)
+    row = by_slug.get(AppealStatusSlug.CLOSED.value)
     if row is None:
         raise RuntimeError("Appeal status «closed» is missing")
     return row
+
+
+async def get_claim_status(session: AsyncSession) -> AppealStatusDef:
+    """Stage to apply when an operator claims a client (prefer «В работе»)."""
+    row = await get_appeal_status_by_slug(session, AppealStatusSlug.IN_WORK.value)
+    if row is not None and row.is_active and not row.is_terminal:
+        return row
+    open_active = (
+        await session.execute(
+            select(AppealStatusDef)
+            .where(
+                AppealStatusDef.is_active.is_(True),
+                AppealStatusDef.is_terminal.is_(False),
+                AppealStatusDef.counts_as_open.is_(True),
+            )
+            .order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if open_active is not None:
+        return open_active
+    return await get_default_open_status(session)
+
+
+def sync_contact_status_from_stage(contact, status_def: AppealStatusDef | None) -> None:
+    """Keep legacy Contact.status in sync with the configurable appeal stage."""
+    from app.models import ContactStatus
+
+    if status_def is None:
+        return
+    if status_def.is_terminal or not status_def.counts_as_open:
+        contact.status = ContactStatus.DONE.value
+    elif getattr(contact, "assignee_id", None) is not None:
+        contact.status = ContactStatus.IN_WORK.value
+    else:
+        contact.status = ContactStatus.NEW.value
+
+
+async def promote_contact_on_claim(session: AsyncSession, contact) -> None:
+    """Ensure open appeal and move off «Новое» when claimed."""
+    from app.appeals import ensure_contact_appeal
+
+    appeal = await ensure_contact_appeal(session, contact)
+    current = appeal.status_def
+    if current is not None and (
+        current.is_terminal
+        or current.needs_callback
+        or current.slug != AppealStatusSlug.NEW.value
+    ):
+        sync_contact_status_from_stage(contact, current)
+        return
+    target = await get_claim_status(session)
+    apply_status_def_to_appeal(appeal, target)
+    sync_contact_status_from_stage(contact, target)
 
 
 async def ensure_unique_appeal_status_slug(

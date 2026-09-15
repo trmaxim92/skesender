@@ -16,10 +16,6 @@ import {
 import { ApiError } from '@/api/client'
 import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
-import {
-  contactStatusLabel,
-  type ContactStatus,
-} from '@/types'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -166,12 +162,6 @@ function openContact(id: number) {
   void router.push({ name: 'contact-detail', params: { contactId: String(id) } })
 }
 
-function statusBadge(status: ContactStatus | string) {
-  if (status === 'in_work') return 'bg-amber-100 text-amber-800'
-  if (status === 'done') return 'bg-emerald-100 text-emerald-800'
-  return 'bg-slate-100 text-slate-600'
-}
-
 function openCreate() {
   createName.value = ''
   createPhone.value = ''
@@ -270,13 +260,13 @@ function clearFilters() {
 }
 
 const title = computed(() => {
-  if (filter.value === 'mine') return 'Мои контакты'
+  if (filter.value === 'mine') return 'Мои клиенты'
   if (filter.value === 'callback') return 'Перезвонить'
-  return 'Контакты'
+  return 'Клиенты'
 })
 
 const subtitle = computed(() => {
-  if (filter.value === 'mine') return 'Контакты, которые вы уже взяли в работу'
+  if (filter.value === 'mine') return 'Клиенты, которые вы уже взяли в работу'
   if (filter.value === 'callback') return 'Нужно перезвонить клиенту'
   return 'Свободные лиды — отметьте и заберите пачкой или по одному'
 })
@@ -393,7 +383,7 @@ const subtitle = computed(() => {
 
       <template v-else>
         <p v-if="!items.length" class="rounded-2xl border border-dashed border-line bg-panel px-6 py-12 text-center text-sm text-muted">
-          Контактов с такими условиями нет.
+          Клиентов с такими условиями нет.
           <button type="button" class="ml-1 font-semibold text-brand hover:underline" @click="clearFilters">
             Показать свободные
           </button>
@@ -416,9 +406,8 @@ const subtitle = computed(() => {
                 <th class="px-4 py-3">Клиент</th>
                 <th class="px-4 py-3">Компания</th>
                 <th class="px-4 py-3">Телефон</th>
-                <th class="px-4 py-3">Статус</th>
+                <th class="px-4 py-3">Этап</th>
                 <th class="px-4 py-3">Менеджер</th>
-                <th class="px-4 py-3">Статус обращения</th>
               </tr>
             </thead>
             <tbody>
@@ -471,17 +460,6 @@ const subtitle = computed(() => {
                     {{ c.phone }}
                   </a>
                 </td>
-                <td class="px-4 py-3">
-                  <span
-                    class="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                    :class="statusBadge(c.status)"
-                  >
-                    {{ contactStatusLabel[c.status as ContactStatus] || c.status }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 text-xs text-muted">
-                  {{ c.assigneeName || 'Свободный' }}
-                </td>
                 <td class="px-4 py-3 text-xs">
                   <span
                     v-if="c.currentAppeal?.statusDef"
@@ -494,6 +472,9 @@ const subtitle = computed(() => {
                     {{ c.currentAppeal.statusDef.name }}
                   </span>
                   <span v-else class="text-muted">—</span>
+                </td>
+                <td class="px-4 py-3 text-xs text-muted">
+                  {{ c.assigneeName || 'Свободный' }}
                 </td>
               </tr>
             </tbody>
@@ -537,7 +518,7 @@ const subtitle = computed(() => {
       </div>
     </div>
 
-    <Modal v-if="createOpen" title="Новый контакт" @close="createOpen = false">
+    <Modal v-if="createOpen" title="Новый клиент" @close="createOpen = false">
       <form class="space-y-3" @submit.prevent="submitCreate">
         <label class="block">
           <span class="mb-1 block text-xs font-semibold text-muted">ФИО</span>

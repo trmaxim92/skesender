@@ -107,7 +107,7 @@ async function saveEdit() {
 }
 
 async function remove(s: AppealStatusDef) {
-  if (s.isSystem) return
+  if (s.slug === 'new') return
   if (!confirm(`Удалить статус «${s.name}»? Обращения перейдут в «Новое».`)) return
   try {
     await deleteAppealStatusRequest(s.id)
@@ -122,8 +122,8 @@ async function remove(s: AppealStatusDef) {
   <div class="h-full overflow-auto p-6">
     <div class="mb-4 max-w-2xl space-y-1 text-sm text-muted">
       <p>
-        Статусы обращения задают этап работы с клиентом (в том числе обзвон из раздела
-        «Контакты»). Флаги управляют очередью «Перезвонить» и закрытием.
+        Статусы — этапы обзвона в разделе «Клиенты». Можно переименовывать, отключать и
+        удалять (кроме базового «Новое»). Флаги: завершает кейс / очередь «Перезвонить».
       </p>
     </div>
     <p v-if="error" class="mb-3 text-sm text-danger">{{ error }}</p>
@@ -222,9 +222,9 @@ async function remove(s: AppealStatusDef) {
                 <span class="size-2.5 shrink-0 rounded-full" :style="{ background: s.color }" />
                 <h3 class="truncate font-semibold text-ink">{{ s.name }}</h3>
                 <span
-                  v-if="s.isSystem"
+                  v-if="s.slug === 'new'"
                   class="rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted"
-                >системный</span>
+                >базовый</span>
               </div>
               <p class="mt-2 flex flex-wrap gap-2 text-xs text-muted">
                 <span>{{ s.isTerminal ? 'завершает' : 'в работе' }}</span>
@@ -244,7 +244,7 @@ async function remove(s: AppealStatusDef) {
                 Изменить
               </button>
               <button
-                v-if="!s.isSystem"
+                v-if="s.slug !== 'new'"
                 type="button"
                 class="rounded-lg px-2 py-1 text-xs text-danger hover:bg-danger/10"
                 @click="remove(s)"

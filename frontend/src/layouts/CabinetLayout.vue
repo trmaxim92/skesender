@@ -21,6 +21,8 @@ import {
   Share,
   ContactRound,
   Bell,
+  Tags,
+  List,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
@@ -49,6 +51,7 @@ import {
 
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
 const USERS_GROUP_KEY = 'oe_nav_users_open'
+const CLIENTS_GROUP_KEY = 'oe_nav_clients_open'
 const SETTINGS_GROUP_KEY = 'oe_nav_settings_open'
 const BASE_TITLE = 'СкайСкел'
 
@@ -61,12 +64,19 @@ const router = useRouter()
 
 type NavLeaf = { to: string; label: string; icon: typeof MessageSquare }
 
-const navFlat: NavLeaf[] = [
+const navWorkStart: NavLeaf[] = [
   { to: '/chats', label: 'Чаты', icon: MessageSquare },
   { to: '/appeals', label: 'Обращения', icon: Inbox },
-  { to: '/contacts', label: 'Контакты', icon: ContactRound },
+]
+
+const navWorkEnd: NavLeaf[] = [
   { to: '/employees', label: 'На смене', icon: CircleUserRound },
   { to: '/mailing', label: 'Рассылки', icon: Megaphone },
+]
+
+const clientsChildren: NavLeaf[] = [
+  { to: '/contacts', label: 'Список', icon: List },
+  { to: '/clients/stages', label: 'Этапы обзвона', icon: Tags },
 ]
 
 const usersChildren: NavLeaf[] = [
@@ -78,6 +88,11 @@ const usersChildren: NavLeaf[] = [
 const collapsed = ref(localStorage.getItem(SIDEBAR_KEY) === '1')
 const mobileNavOpen = ref(false)
 const isMdUp = ref(typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : true)
+const clientsGroupExpanded = ref(
+  localStorage.getItem(CLIENTS_GROUP_KEY) === '1' ||
+    route.path.startsWith('/contacts') ||
+    route.path.startsWith('/clients/'),
+)
 const usersGroupExpanded = ref(
   localStorage.getItem(USERS_GROUP_KEY) === '1' ||
     route.path.startsWith('/users') ||
@@ -162,10 +177,26 @@ const settingsFlatLeaves = computed(() =>
   settingsGroupsVisible.value.flatMap((group) => group.items),
 )
 
+const showClientsGroup = computed(
+  () => auth.can('section.contacts') || auth.can('section.settings'),
+)
+const clientsChildrenVisible = computed(() =>
+  clientsChildren.filter((child) => {
+    if (child.to === '/contacts') return auth.can('section.contacts')
+    if (child.to === '/clients/stages') {
+      return auth.can('section.contacts') || auth.can('section.settings')
+    }
+    return true
+  }),
+)
 const showUsersGroup = computed(() => auth.canSection('/users'))
 const showSettingsGroup = computed(() => settingsGroupsVisible.value.length > 0)
-const navBefore = computed(() => navFlat.filter((item) => auth.canSection(item.to)))
+const navStartVisible = computed(() => navWorkStart.filter((item) => auth.canSection(item.to)))
+const navEndVisible = computed(() => navWorkEnd.filter((item) => auth.canSection(item.to)))
 
+const onClientsSection = computed(
+  () => route.path.startsWith('/contacts') || route.path.startsWith('/clients/'),
+)
 const onUsersSection = computed(
   () =>
     route.path.startsWith('/users') ||
@@ -184,9 +215,11 @@ const title = computed(() => {
   if (route.path.startsWith('/users')) return 'Пользователи'
   if (route.path.startsWith('/roles')) return 'Роли'
   if (route.path.startsWith('/departments')) return 'Отделы'
+  if (route.path.startsWith('/clients/stages')) return 'Этапы обзвона'
+  if (route.path.startsWith('/contacts')) return 'Клиенты'
   const settingsTitle = settingsLeafTitle(route.path)
   if (settingsTitle) return settingsTitle
-  const all = [...navFlat, ...usersChildren]
+  const all = [...navWorkStart, ...navWorkEnd, ...clientsChildren, ...usersChildren]
   return all.find((n) => route.path.startsWith(n.to))?.label ?? 'Кабинет'
 })
 
@@ -215,6 +248,7 @@ if (isPushEnabled() && notificationPermission() !== 'granted') {
 }
 
 watch(collapsed, (v) => localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0'))
+watch(clientsGroupExpanded, (v) => localStorage.setItem(CLIENTS_GROUP_KEY, v ? '1' : '0'))
 watch(usersGroupExpanded, (v) => localStorage.setItem(USERS_GROUP_KEY, v ? '1' : '0'))
 watch(settingsGroupExpanded, (v) => localStorage.setItem(SETTINGS_GROUP_KEY, v ? '1' : '0'))
 
@@ -224,6 +258,7 @@ watch(
     profileOpen.value = false
     bellOpen.value = false
     mobileNavOpen.value = false
+    if (onClientsSection.value) clientsGroupExpanded.value = true
     if (onUsersSection.value) usersGroupExpanded.value = true
     if (onSettingsSection.value) settingsGroupExpanded.value = true
   },
@@ -361,6 +396,10 @@ function onMdMqChange() {
   if (!mdMq) return
   isMdUp.value = mdMq.matches
   if (mdMq.matches) mobileNavOpen.value = false
+}
+
+function toggleClientsGroup() {
+  clientsGroupExpanded.value = !clientsGroupExpanded.value
 }
 
 function toggleUsersGroup() {
@@ -613,7 +652,7 @@ onUnmounted(() => {
 
       <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         <RouterLink
-          v-for="item in navBefore"
+          v-for="item in navStartVisible"
           :key="item.to"
           :to="item.to"
           class="group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-mute transition hover:bg-surface hover:text-ink"
@@ -637,6 +676,68 @@ onUnmounted(() => {
           >
             {{ chatsUnread > 99 ? '99+' : chatsUnread }}
           </span>
+        </RouterLink>
+
+        <div v-if="showClientsGroup && clientsChildrenVisible.length" class="mt-0.5">
+          <button
+            v-if="expandedNav"
+            type="button"
+            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
+            :class="onClientsSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            @click="toggleClientsGroup"
+          >
+            <ContactRound class="size-[18px] shrink-0 opacity-90" />
+            <span class="min-w-0 flex-1 truncate text-left">Клиенты</span>
+            <ChevronDown
+              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              :class="clientsGroupExpanded ? 'rotate-180' : ''"
+            />
+          </button>
+          <div
+            v-if="expandedNav && clientsGroupExpanded"
+            class="mt-0.5 space-y-0.5 border-l border-line ml-4 pl-2"
+          >
+            <RouterLink
+              v-for="child in clientsChildrenVisible"
+              :key="child.to"
+              :to="child.to"
+              class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
+              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+              :title="child.label"
+              @click="closeMobileNav"
+            >
+              <component :is="child.icon" class="size-4 shrink-0 opacity-90" />
+              <span class="truncate">{{ child.label }}</span>
+            </RouterLink>
+          </div>
+          <template v-if="!expandedNav">
+            <RouterLink
+              v-for="child in clientsChildrenVisible"
+              :key="'rail-clients-' + child.to"
+              :to="child.to"
+              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
+              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              :title="child.label"
+            >
+              <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
+            </RouterLink>
+          </template>
+        </div>
+
+        <RouterLink
+          v-for="item in navEndVisible"
+          :key="item.to"
+          :to="item.to"
+          class="group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-mute transition hover:bg-surface hover:text-ink"
+          :class="route.path.startsWith(item.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+          :title="item.label"
+          @click="closeMobileNav"
+        >
+          <component :is="item.icon" class="size-[18px] shrink-0 opacity-90" />
+          <span
+            class="min-w-0 flex-1 truncate transition-opacity duration-200"
+            :class="expandedNav ? 'opacity-100' : 'w-0 overflow-hidden opacity-0'"
+          >{{ item.label }}</span>
         </RouterLink>
 
         <div v-if="showUsersGroup" class="mt-0.5">

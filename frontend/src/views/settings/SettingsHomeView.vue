@@ -20,7 +20,7 @@ const groups = computed(() =>
     <div>
       <h2 class="text-lg font-semibold tracking-tight">Настройки</h2>
       <p class="mt-1 text-sm text-muted">
-        Разделы кабинета: интеграции и параметры обращений.
+        Интеграции, поля карточек, сотрудники и системные параметры.
       </p>
     </div>
 
