@@ -330,6 +330,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/settings/close-template': 'section.settings',
   '/settings/presence-statuses': 'section.settings',
   '/settings/appeal-statuses': 'section.settings',
+  '/settings/system-news': 'section.settings',
 }
 
 export const FIRST_SECTION_PATHS = [

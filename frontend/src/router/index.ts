@@ -124,6 +124,12 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
+          path: 'settings/system-news',
+          name: 'system-news',
+          component: () => import('@/views/settings/SystemNewsView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'webhooks',
           name: 'webhooks',
           component: () => import('@/views/WebhooksView.vue'),

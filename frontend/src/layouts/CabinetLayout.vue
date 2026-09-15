@@ -20,12 +20,14 @@ import {
   Download,
   Share,
   ContactRound,
+  Bell,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
 import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
 import { useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
+import { useNotificationsStore } from '@/stores/notifications'
 import type { PresenceStatus } from '@/types'
 import {
   isPushEnabled,
@@ -53,6 +55,7 @@ const BASE_TITLE = 'SkySender'
 const auth = useAuthStore()
 const { user: authUser } = storeToRefs(auth)
 const chats = useChatsStore()
+const notifications = useNotificationsStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -91,6 +94,12 @@ const presenceStatuses = ref<PresenceStatus[]>([])
 const presenceBusy = ref(false)
 const presenceLoadError = ref('')
 const profileMenuStyle = ref<Record<string, string>>({})
+const bellOpen = ref(false)
+const bellRoot = ref<HTMLElement | null>(null)
+const bellPanel = ref<HTMLElement | null>(null)
+const bellPanelStyle = ref<Record<string, string>>({})
+const expandedNewsId = ref<string | null>(null)
+let notificationsPollTimer: number | undefined
 
 const currentPresence = computed(() => authUser.value?.presenceStatus ?? null)
 const currentPresenceId = computed(() => authUser.value?.presenceStatusId ?? null)
@@ -105,6 +114,20 @@ function placeProfileMenu() {
   profileMenuStyle.value = {
     top: `${Math.round(rect.bottom + 8)}px`,
     left: `${Math.round(left)}px`,
+  }
+}
+
+function placeBellPanel() {
+  if (!bellOpen.value) return
+  const el = bellRoot.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const width = Math.min(360, window.innerWidth - 16)
+  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8)
+  bellPanelStyle.value = {
+    top: `${Math.round(rect.bottom + 8)}px`,
+    left: `${Math.round(left)}px`,
+    width: `${width}px`,
   }
 }
 
@@ -181,6 +204,7 @@ watch(
   () => route.path,
   () => {
     profileOpen.value = false
+    bellOpen.value = false
     mobileNavOpen.value = false
     if (onUsersSection.value) usersGroupExpanded.value = true
     if (onSettingsSection.value) settingsGroupExpanded.value = true
@@ -269,9 +293,28 @@ function openToastDialog() {
 }
 
 function onSwMessage(ev: MessageEvent) {
-  const data = ev.data as { type?: string; dialogId?: string } | null
-  if (!data || data.type !== 'oe:open-dialog' || !data.dialogId) return
-  window.dispatchEvent(new CustomEvent('oe:open-dialog', { detail: { dialogId: data.dialogId } }))
+  const data = ev.data as { type?: string; dialogId?: string; newsId?: string } | null
+  if (!data || typeof data !== 'object') return
+  if (data.type === 'oe:open-dialog' && data.dialogId) {
+    window.dispatchEvent(new CustomEvent('oe:open-dialog', { detail: { dialogId: data.dialogId } }))
+    return
+  }
+  if (data.type === 'oe:open-notifications') {
+    void (async () => {
+      profileOpen.value = false
+      bellOpen.value = true
+      placeBellPanel()
+      await notifications.fetchList()
+      if (data.newsId) {
+        expandedNewsId.value = `news:${data.newsId}`
+        try {
+          await notifications.markRead([`news:${data.newsId}`])
+        } catch {
+          // ignore
+        }
+      }
+    })()
+  }
 }
 
 function onOpenDialogFromNotify(ev: Event) {
@@ -297,6 +340,7 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     mobileNavOpen.value = false
     profileOpen.value = false
+    bellOpen.value = false
   }
 }
 
@@ -317,6 +361,7 @@ function toggleSettingsGroup() {
 
 function logout() {
   profileOpen.value = false
+  bellOpen.value = false
   chats.disconnectRealtime()
   void (async () => {
     await auth.logoutWithOffline()
@@ -343,10 +388,61 @@ async function loadPresenceStatuses() {
 }
 
 function toggleProfileMenu() {
+  bellOpen.value = false
   profileOpen.value = !profileOpen.value
   if (profileOpen.value) {
     placeProfileMenu()
     void loadPresenceStatuses()
+  }
+}
+
+async function toggleBell() {
+  profileOpen.value = false
+  bellOpen.value = !bellOpen.value
+  if (bellOpen.value) {
+    placeBellPanel()
+    await notifications.fetchList()
+  }
+}
+
+function formatNewsAt(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
+async function openNotification(id: string) {
+  expandedNewsId.value = expandedNewsId.value === id ? null : id
+  const item = notifications.items.find((n) => n.id === id)
+  if (item && !item.read) {
+    try {
+      await notifications.markRead([id])
+    } catch {
+      // keep UI usable
+    }
+  }
+}
+
+async function markAllNotificationsRead() {
+  try {
+    await notifications.markAllRead()
+  } catch (e) {
+    window.dispatchEvent(
+      new CustomEvent('oe:in-app-toast', {
+        detail: {
+          kind: 'err',
+          title: 'Оповещения',
+          text: e instanceof ApiError ? e.detail : 'Не удалось отметить прочитанным',
+        },
+      }),
+    )
   }
 }
 
@@ -385,10 +481,17 @@ function onAuthExpired() {
 
 function onDocClick(e: MouseEvent) {
   unlockNotifyAudio()
-  if (!profileOpen.value) return
   const t = e.target as Node
-  if (profileRoot.value?.contains(t) || profileMenu.value?.contains(t)) return
-  profileOpen.value = false
+  if (profileOpen.value) {
+    if (!(profileRoot.value?.contains(t) || profileMenu.value?.contains(t))) {
+      profileOpen.value = false
+    }
+  }
+  if (bellOpen.value) {
+    if (!(bellRoot.value?.contains(t) || bellPanel.value?.contains(t))) {
+      bellOpen.value = false
+    }
+  }
 }
 
 onMounted(() => {
@@ -399,6 +502,8 @@ onMounted(() => {
   window.addEventListener('oe:in-app-toast', onInAppToast)
   window.addEventListener('resize', placeProfileMenu)
   window.addEventListener('scroll', placeProfileMenu, true)
+  window.addEventListener('resize', placeBellPanel)
+  window.addEventListener('scroll', placeBellPanel, true)
   mdMq = window.matchMedia('(min-width: 768px)')
   onMdMqChange()
   mdMq.addEventListener('change', onMdMqChange)
@@ -418,6 +523,10 @@ onMounted(() => {
     void chats.fetchUnreadSummary()
   }
   void loadPresenceStatuses()
+  void notifications.fetchUnreadCount()
+  notificationsPollTimer = window.setInterval(() => {
+    void notifications.fetchUnreadCount()
+  }, 60_000)
 })
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
@@ -427,11 +536,14 @@ onUnmounted(() => {
   window.removeEventListener('oe:in-app-toast', onInAppToast)
   window.removeEventListener('resize', placeProfileMenu)
   window.removeEventListener('scroll', placeProfileMenu, true)
+  window.removeEventListener('resize', placeBellPanel)
+  window.removeEventListener('scroll', placeBellPanel, true)
   mdMq?.removeEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
   }
   if (inAppToastTimer != null) window.clearTimeout(inAppToastTimer)
+  if (notificationsPollTimer) window.clearInterval(notificationsPollTimer)
   stopInstallWatch?.()
   chats.disconnectRealtime()
   document.title = BASE_TITLE
@@ -621,7 +733,101 @@ onUnmounted(() => {
           </button>
           <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
-        <div ref="profileRoot" class="relative shrink-0">
+        <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <div ref="bellRoot" class="relative">
+            <button
+              type="button"
+              class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
+              title="Оповещения"
+              :aria-expanded="bellOpen"
+              aria-haspopup="dialog"
+              @click.stop="toggleBell"
+            >
+              <Bell class="size-4" />
+              <span
+                v-if="notifications.unreadCount > 0"
+                class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
+              >
+                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
+              </span>
+            </button>
+
+            <Teleport to="body">
+              <div
+                v-if="bellOpen"
+                ref="bellPanel"
+                class="fixed z-[200] overflow-hidden rounded-xl border border-line bg-panel shadow-lg"
+                role="dialog"
+                aria-label="Оповещения"
+                :style="bellPanelStyle"
+                @click.stop
+              >
+                <div class="flex items-center justify-between gap-2 border-b border-line px-3 py-2.5">
+                  <div>
+                    <p class="text-sm font-semibold text-ink">Оповещения</p>
+                    <p class="text-[11px] text-mute">Новости системы и служебные уведомления</p>
+                  </div>
+                  <button
+                    v-if="notifications.hasUnread"
+                    type="button"
+                    class="shrink-0 text-xs font-medium text-brand hover:underline"
+                    @click="markAllNotificationsRead"
+                  >
+                    Прочитать все
+                  </button>
+                </div>
+                <div class="max-h-[min(70vh,28rem)] overflow-y-auto">
+                  <p v-if="notifications.loading" class="px-3 py-6 text-center text-sm text-mute">
+                    Загрузка…
+                  </p>
+                  <p
+                    v-else-if="notifications.error"
+                    class="px-3 py-4 text-center text-sm text-red-600"
+                  >
+                    {{ notifications.error }}
+                  </p>
+                  <p
+                    v-else-if="!notifications.items.length"
+                    class="px-3 py-6 text-center text-sm text-mute"
+                  >
+                    Пока нет оповещений
+                  </p>
+                  <button
+                    v-for="n in notifications.items"
+                    :key="n.id"
+                    type="button"
+                    class="block w-full border-b border-line px-3 py-3 text-left transition last:border-b-0 hover:bg-surface"
+                    :class="!n.read ? 'bg-brand-soft/30' : ''"
+                    @click="openNotification(n.id)"
+                  >
+                    <div class="flex items-start gap-2">
+                      <span
+                        class="mt-1.5 size-2 shrink-0 rounded-full"
+                        :class="n.read ? 'bg-transparent' : 'bg-brand'"
+                      />
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-baseline justify-between gap-2">
+                          <p class="truncate text-sm font-medium text-ink">{{ n.title }}</p>
+                          <span class="shrink-0 text-[10px] text-mute">{{ formatNewsAt(n.createdAt) }}</span>
+                        </div>
+                        <p
+                          class="mt-0.5 text-xs text-mute"
+                          :class="expandedNewsId === n.id ? 'whitespace-pre-wrap' : 'line-clamp-2'"
+                        >
+                          {{ n.body }}
+                        </p>
+                        <p class="mt-1 text-[10px] font-medium uppercase tracking-wide text-mute">
+                          Новости системы
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </Teleport>
+          </div>
+
+          <div ref="profileRoot" class="relative shrink-0">
           <button
             type="button"
             class="flex max-w-[min(100%,18rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
@@ -724,6 +930,7 @@ onUnmounted(() => {
               </RouterLink>
             </div>
           </Teleport>
+        </div>
         </div>
       </header>
 

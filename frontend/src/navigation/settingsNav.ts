@@ -7,6 +7,7 @@ import {
   CircleDot,
   Tags,
   Webhook,
+  Newspaper,
 } from 'lucide-vue-next'
 import type { PermissionCode } from '@/types'
 
@@ -86,6 +87,13 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         label: 'Статусы сотрудников',
         description: 'Присутствие, автораспределение и право писать',
         icon: CircleDot,
+        permission: 'section.settings',
+      },
+      {
+        to: '/settings/system-news',
+        label: 'Новости системы',
+        description: 'Объявления в колокольчике сотрудников',
+        icon: Newspaper,
         permission: 'section.settings',
       },
     ],

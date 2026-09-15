@@ -10,6 +10,7 @@ from app.api import (
     departments,
     mailing,
     me_templates,
+    notifications,
     presence,
     push,
     roles,
@@ -38,5 +39,6 @@ api_router.include_router(settings_fields.router)
 api_router.include_router(templates.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(push.router)
+api_router.include_router(notifications.router)
 api_router.include_router(ws.router)
 api_router.include_router(widget_api.router)

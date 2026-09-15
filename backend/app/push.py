@@ -257,6 +257,32 @@ async def send_push_to_users(
     return await _deliver_rows(session, rows, payload)
 
 
+async def notify_system_news(*, news_id: int, title: str, body: str) -> None:
+    """Fan-out Web Push for a published system news item (all subscribed devices)."""
+    try:
+        async with SessionLocal() as session:
+            result = await session.execute(select(PushSubscription.user_id).distinct())
+            user_ids = list(result.scalars().all())
+            if not user_ids:
+                return
+            preview = (body or "").strip()
+            if len(preview) > 140:
+                preview = preview[:139] + "…"
+            payload = {
+                "title": (title or "Новости системы").strip() or "Новости системы",
+                "body": preview or "Открыто новое объявление в SkySender",
+                "tag": f"oe-news-{news_id}",
+                "kind": "news",
+                "newsId": str(news_id),
+                "requireInteraction": False,
+            }
+            n = await send_push_to_users(session, user_ids, payload)
+            await session.commit()
+            logger.info("Web Push system news id=%s sent=%s recipients=%s", news_id, n, len(user_ids))
+    except Exception:
+        logger.exception("Web Push system news failed id=%s", news_id)
+
+
 async def notify_inbound_message(
     *,
     dialog_id: int,

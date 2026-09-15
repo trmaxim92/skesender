@@ -18,6 +18,28 @@ function sameOrigin(url) {
   }
 }
 
+async function openOrFocusTarget(path) {
+  const absolute = new URL(path, self.location.origin).href
+  const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  for (const client of all) {
+    if (!sameOrigin(client.url)) continue
+    if ('focus' in client) {
+      await client.focus()
+      try {
+        if ('navigate' in client && typeof client.navigate === 'function') {
+          await client.navigate(absolute)
+        }
+      } catch {
+        // navigate unsupported
+      }
+      return
+    }
+  }
+  if (self.clients.openWindow) {
+    await self.clients.openWindow(absolute)
+  }
+}
+
 async function openOrFocusChat(dialogId) {
   const targetPath = dialogId
     ? `/chats?dialog=${encodeURIComponent(String(dialogId))}`
@@ -59,17 +81,19 @@ self.addEventListener('push', (event) => {
 
   const title = data.title || 'SkySender'
   const dialogId = data.dialogId != null ? String(data.dialogId) : null
+  const newsId = data.newsId != null ? String(data.newsId) : null
+  const kind = data.kind || 'message'
   const options = {
     body: data.body || 'Новое сообщение',
     icon: ICON,
     badge: BADGE,
-    tag: data.tag || (dialogId ? `oe-chat-${dialogId}` : 'oe-chat'),
+    tag: data.tag || (dialogId ? `oe-chat-${dialogId}` : newsId ? `oe-news-${newsId}` : 'oe-chat'),
     renotify: true,
     requireInteraction: data.requireInteraction !== false,
     silent: false,
     vibrate: [160, 80, 160],
     lang: 'ru',
-    data: { dialogId, kind: data.kind || 'message' },
+    data: { dialogId, newsId, kind },
     actions: [
       { action: 'open', title: 'Открыть' },
       { action: 'dismiss', title: 'Скрыть' },
@@ -104,11 +128,26 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const dialogId = event.notification?.data?.dialogId
+  const data = event.notification?.data || {}
   const action = event.action
   if (action === 'dismiss') return
 
-  event.waitUntil(openOrFocusChat(dialogId))
+  if (data.kind === 'news') {
+    event.waitUntil(
+      (async () => {
+        await openOrFocusTarget('/')
+        const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        for (const client of all) {
+          if (!sameOrigin(client.url)) continue
+          client.postMessage({ type: 'oe:open-notifications', newsId: data.newsId || null })
+          return
+        }
+      })(),
+    )
+    return
+  }
+
+  event.waitUntil(openOrFocusChat(data.dialogId))
 })
 
 self.addEventListener('notificationclose', () => {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -19,6 +19,7 @@ from app.models import (
     MessageTemplate,
     Role,
     RoleChannel,
+    SystemNews,
     TemplateKind,
     User,
     UserChannel,
@@ -189,6 +190,22 @@ async def seed_database(session: AsyncSession) -> None:
     )
     for row in stale.scalars().all():
         await session.delete(row)
+
+    news_count = await session.scalar(select(func.count()).select_from(SystemNews))
+    if not news_count:
+        session.add(
+            SystemNews(
+                title="Обновления SkySender",
+                body=(
+                    "• Чаты и каналы стали стабильнее при отправке.\n"
+                    "• MAX · аккаунт чаще переподключается сам — реже нужен QR.\n"
+                    "• В обращениях и «Новых» чатах доступно массовое закрытие.\n"
+                    "• Здесь, в колокольчике, будут появляться новости системы."
+                ),
+                created_by_id=admin.id,
+            )
+        )
+        logger.info("Seeded initial system news")
 
     token = settings.seed_max_bot_token.strip()
     if not token:

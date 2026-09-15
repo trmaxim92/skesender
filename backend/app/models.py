@@ -766,6 +766,45 @@ class PushSubscription(Base):
     user: Mapped[User] = relationship()
 
 
+class SystemNews(Base):
+    """Company-wide announcement shown in the notification bell."""
+
+    __tablename__ = "system_news"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+    reads: Mapped[list["SystemNewsRead"]] = relationship(
+        back_populates="news", cascade="all, delete-orphan"
+    )
+
+
+class SystemNewsRead(Base):
+    """Per-user read receipt for system news."""
+
+    __tablename__ = "system_news_reads"
+    __table_args__ = (
+        UniqueConstraint("user_id", "news_id", name="uq_system_news_read_user_news"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    news_id: Mapped[int] = mapped_column(
+        ForeignKey("system_news.id", ondelete="CASCADE"), index=True
+    )
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship()
+    news: Mapped[SystemNews] = relationship(back_populates="reads")
+
+
 class Contact(Base):
     """Phone-centric CRM contact for outbound calls / messenger start."""
 

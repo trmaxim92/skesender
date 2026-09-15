@@ -1,4 +1,5 @@
 ﻿from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -869,3 +870,46 @@ class ContactClaimSkipped(BaseModel):
 class ContactClaimBatchResult(BaseModel):
     claimed: list[ContactOut] = []
     skipped: list[ContactClaimSkipped] = []
+
+
+# --- In-app notification bell (system news + future kinds) ---
+
+
+class NotificationOut(BaseModel):
+    """Unified bell item. id is stable string e.g. news:12 for future mixed kinds."""
+
+    id: str
+    kind: Literal["system_news"] = "system_news"
+    title: str
+    body: str
+    created_at: datetime
+    read: bool = False
+    link: str | None = None
+
+
+class NotificationsPageOut(BaseModel):
+    items: list[NotificationOut]
+    unread_count: int
+
+
+class NotificationsReadRequest(BaseModel):
+    """Mark specific ids, or all when ids is null/empty."""
+
+    ids: list[str] | None = None
+
+
+class SystemNewsCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1, max_length=8000)
+    send_push: bool = True
+
+
+class SystemNewsOut(BaseModel):
+    id: int
+    title: str
+    body: str
+    created_at: datetime
+    published_at: datetime
+    created_by_id: int | None = None
+    created_by_name: str | None = None
+    read_count: int = 0

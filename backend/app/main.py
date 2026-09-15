@@ -582,6 +582,57 @@ async def ensure_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_dialogs_assignee_id ON dialogs (assignee_id)"
             )
         )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS system_news (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    body TEXT NOT NULL,
+                    created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_system_news_published_at "
+                "ON system_news (published_at)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_system_news_created_by_id "
+                "ON system_news (created_by_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS system_news_reads (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    news_id INTEGER NOT NULL REFERENCES system_news(id) ON DELETE CASCADE,
+                    read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_system_news_read_user_news UNIQUE (user_id, news_id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_system_news_reads_user_id "
+                "ON system_news_reads (user_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_system_news_reads_news_id "
+                "ON system_news_reads (news_id)"
+            )
+        )
 
 
 @asynccontextmanager
