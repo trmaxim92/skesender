@@ -94,6 +94,39 @@ def _avatar_from_obj(obj: Any) -> str | None:
     return None
 
 
+def _avatar_key(url: str | None) -> str | None:
+    """Compare avatar URLs ignoring query/signature noise."""
+    if not url:
+        return None
+    return url.split("?", 1)[0].rstrip("/")
+
+
+def _my_contact(client: Any | None) -> Any | None:
+    if client is None:
+        return None
+    me = getattr(client, "me", None)
+    return getattr(me, "contact", None) if me is not None else None
+
+
+def _my_user_id(client: Any | None) -> int | None:
+    contact = _my_contact(client)
+    raw = getattr(contact, "id", None) if contact is not None else None
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _my_avatar_url(client: Any | None) -> str | None:
+    return _avatar_from_obj(_my_contact(client))
+
+
+def _is_self_avatar(url: str | None, my_avatar: str | None) -> bool:
+    a = _avatar_key(url)
+    b = _avatar_key(my_avatar)
+    return bool(a and b and a == b)
+
+
 async def _resolve_contact_profile(
     client: Any | None, sender_id: int | None, chat_id: int
 ) -> tuple[str, str | None, str | None, str | None]:
@@ -139,38 +172,69 @@ async def _resolve_contact_profile(
 
 
 async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, client: Any) -> int:
-    """Replace placeholder User/Chat names using live PyMax profiles."""
+    """Replace placeholder User/Chat names and heal self-avatars on dialogs."""
+    my_id = _my_user_id(client)
+    my_avatar = _my_avatar_url(client)
     result = await session.execute(select(Dialog).where(Dialog.channel_id == channel.id))
     dialogs = list(result.scalars().all())
     updated = 0
     for dialog in dialogs:
         name = (dialog.contact_name or "").strip()
         chat_id = int(dialog.external_chat_id) if dialog.external_chat_id.lstrip("-").isdigit() else 0
+        has_self_avatar = _is_self_avatar(dialog.contact_avatar_url, my_avatar)
+        has_self_contact_id = bool(
+            my_id is not None and dialog.contact_external_id and dialog.contact_external_id == str(my_id)
+        )
         if not (
             _is_group_chat(chat_id)
             or name.startswith("User ")
             or name.startswith("Chat ")
             or not dialog.contact_avatar_url
+            or has_self_avatar
+            or has_self_contact_id
         ):
             continue
+
         candidates: list[int | None] = []
         if _is_group_chat(chat_id):
             candidates.append(None)
-        if dialog.contact_external_id and dialog.contact_external_id.lstrip("-").isdigit():
+        if (
+            dialog.contact_external_id
+            and dialog.contact_external_id.lstrip("-").isdigit()
+            and not (my_id is not None and dialog.contact_external_id == str(my_id))
+        ):
             candidates.append(int(dialog.contact_external_id))
-        if chat_id > 0:
+        if chat_id > 0 and not (my_id is not None and chat_id == my_id):
             candidates.append(chat_id)
-        candidates.append(None)
+        if _is_group_chat(chat_id):
+            candidates.append(None)
+
+        # Deduplicate while preserving order
+        seen: set[int | None] = set()
+        ordered: list[int | None] = []
+        for cid in candidates:
+            if cid in seen:
+                continue
+            seen.add(cid)
+            ordered.append(cid)
 
         resolved = name
         username = dialog.contact_username
-        avatar = dialog.contact_avatar_url
+        avatar = None if has_self_avatar else dialog.contact_avatar_url
         phone = dialog.contact_phone
-        changed = False
-        for sender_id in candidates:
+        contact_ext = dialog.contact_external_id
+        if has_self_contact_id and chat_id:
+            contact_ext = str(chat_id)
+        changed = has_self_avatar or has_self_contact_id
+
+        for sender_id in ordered:
+            if my_id is not None and sender_id is not None and int(sender_id) == int(my_id):
+                continue
             candidate, cand_username, cand_avatar, cand_phone = await _resolve_contact_profile(
                 client, sender_id, chat_id or 0
             )
+            if _is_self_avatar(cand_avatar, my_avatar):
+                cand_avatar = None
             if cand_avatar and not avatar:
                 avatar = cand_avatar
                 changed = True
@@ -192,12 +256,23 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
                 if cand_phone and not dialog.contact_phone:
                     phone = cand_phone
                     changed = True
+                if (
+                    sender_id is not None
+                    and not _is_group_chat(chat_id)
+                    and contact_ext != str(sender_id)
+                ):
+                    contact_ext = str(sender_id)
+                    changed = True
                 break
+
+        if has_self_avatar and not avatar:
+            changed = True
 
         if changed:
             dialog.contact_name = resolved
             dialog.contact_username = username
             dialog.contact_avatar_url = avatar
+            dialog.contact_external_id = contact_ext
             if phone and not dialog.contact_phone:
                 dialog.contact_phone = phone
             updated += 1
@@ -314,15 +389,33 @@ async def ingest_pymax_message(
     client: Any | None = None,
     reply_to_external_id: str | None = None,
 ) -> ChatMessage | None:
-    direction = (
-        MessageDirection.OUT.value
-        if my_user_id is not None and sender_id == my_user_id
-        else MessageDirection.IN.value
-    )
-    contact_id = str(sender_id) if sender_id is not None else str(chat_id)
-    contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
-        client, sender_id, chat_id
-    )
+    is_out = my_user_id is not None and sender_id is not None and int(sender_id) == int(my_user_id)
+    direction = MessageDirection.OUT.value if is_out else MessageDirection.IN.value
+    my_avatar = _my_avatar_url(client)
+
+    # Contact profile must be the peer / chat — never our own outbound sender.
+    if is_out:
+        if _is_group_chat(chat_id):
+            contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
+                client, None, chat_id
+            )
+            contact_id = str(chat_id)
+        else:
+            peer_id = int(chat_id) if chat_id > 0 else None
+            if my_user_id is not None and peer_id is not None and peer_id == int(my_user_id):
+                peer_id = None
+            contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
+                client, peer_id, chat_id
+            )
+            contact_id = str(peer_id if peer_id is not None else chat_id)
+    else:
+        contact_id = str(sender_id) if sender_id is not None else str(chat_id)
+        contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
+            client, sender_id, chat_id
+        )
+
+    if _is_self_avatar(contact_avatar_url, my_avatar):
+        contact_avatar_url = None
 
     dialog = await get_or_create_dialog(
         session,
@@ -334,6 +427,16 @@ async def ingest_pymax_message(
         contact_avatar_url=contact_avatar_url,
         contact_phone=contact_phone,
     )
+
+    # Heal dialogs that previously stored our channel avatar / self id.
+    if _is_self_avatar(dialog.contact_avatar_url, my_avatar):
+        dialog.contact_avatar_url = contact_avatar_url
+    if (
+        my_user_id is not None
+        and dialog.contact_external_id == str(my_user_id)
+        and contact_id != str(my_user_id)
+    ):
+        dialog.contact_external_id = contact_id
 
     if message_id is not None:
         exists = await session.execute(
@@ -439,6 +542,8 @@ async def ingest_pymax_message(
             dialog.contact_username = contact_username
             if contact_avatar_url:
                 dialog.contact_avatar_url = contact_avatar_url
+            elif _is_self_avatar(dialog.contact_avatar_url, my_avatar):
+                dialog.contact_avatar_url = None
             if sender_id is not None:
                 dialog.contact_external_id = str(sender_id)
             if contact_phone and not dialog.contact_phone:
