@@ -94,13 +94,6 @@ def _avatar_from_obj(obj: Any) -> str | None:
     return None
 
 
-def _avatar_key(url: str | None) -> str | None:
-    """Compare avatar URLs ignoring query/signature noise."""
-    if not url:
-        return None
-    return url.split("?", 1)[0].rstrip("/")
-
-
 def _my_contact(client: Any | None) -> Any | None:
     if client is None:
         return None
@@ -115,16 +108,6 @@ def _my_user_id(client: Any | None) -> int | None:
         return int(raw) if raw is not None else None
     except (TypeError, ValueError):
         return None
-
-
-def _my_avatar_url(client: Any | None) -> str | None:
-    return _avatar_from_obj(_my_contact(client))
-
-
-def _is_self_avatar(url: str | None, my_avatar: str | None) -> bool:
-    a = _avatar_key(url)
-    b = _avatar_key(my_avatar)
-    return bool(a and b and a == b)
 
 
 async def _resolve_contact_profile(
@@ -172,16 +155,19 @@ async def _resolve_contact_profile(
 
 
 async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, client: Any) -> int:
-    """Replace placeholder User/Chat names and heal self-avatars on dialogs."""
+    """Replace placeholder User/Chat names and heal self-id / missing avatars on dialogs.
+
+    Self-detection is by user id only. MAX CDN URLs share the same path
+    (``https://i.oneme.ru/i?r=...``), so comparing avatars without the query
+    token falsely matches every profile to the channel owner.
+    """
     my_id = _my_user_id(client)
-    my_avatar = _my_avatar_url(client)
     result = await session.execute(select(Dialog).where(Dialog.channel_id == channel.id))
     dialogs = list(result.scalars().all())
     updated = 0
     for dialog in dialogs:
         name = (dialog.contact_name or "").strip()
         chat_id = int(dialog.external_chat_id) if dialog.external_chat_id.lstrip("-").isdigit() else 0
-        has_self_avatar = _is_self_avatar(dialog.contact_avatar_url, my_avatar)
         has_self_contact_id = bool(
             my_id is not None and dialog.contact_external_id and dialog.contact_external_id == str(my_id)
         )
@@ -190,7 +176,6 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             or name.startswith("User ")
             or name.startswith("Chat ")
             or not dialog.contact_avatar_url
-            or has_self_avatar
             or has_self_contact_id
         ):
             continue
@@ -220,12 +205,13 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
 
         resolved = name
         username = dialog.contact_username
-        avatar = None if has_self_avatar else dialog.contact_avatar_url
+        # Wrong self-id means stored avatar is untrusted — re-resolve from peer.
+        avatar = None if has_self_contact_id else dialog.contact_avatar_url
         phone = dialog.contact_phone
         contact_ext = dialog.contact_external_id
         if has_self_contact_id and chat_id:
             contact_ext = str(chat_id)
-        changed = has_self_avatar or has_self_contact_id
+        changed = has_self_contact_id
 
         for sender_id in ordered:
             if my_id is not None and sender_id is not None and int(sender_id) == int(my_id):
@@ -233,8 +219,6 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             candidate, cand_username, cand_avatar, cand_phone = await _resolve_contact_profile(
                 client, sender_id, chat_id or 0
             )
-            if _is_self_avatar(cand_avatar, my_avatar):
-                cand_avatar = None
             if cand_avatar and not avatar:
                 avatar = cand_avatar
                 changed = True
@@ -264,9 +248,6 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
                     contact_ext = str(sender_id)
                     changed = True
                 break
-
-        if has_self_avatar and not avatar:
-            changed = True
 
         if changed:
             dialog.contact_name = resolved
@@ -391,7 +372,6 @@ async def ingest_pymax_message(
 ) -> ChatMessage | None:
     is_out = my_user_id is not None and sender_id is not None and int(sender_id) == int(my_user_id)
     direction = MessageDirection.OUT.value if is_out else MessageDirection.IN.value
-    my_avatar = _my_avatar_url(client)
 
     # Contact profile must be the peer / chat — never our own outbound sender.
     if is_out:
@@ -414,9 +394,6 @@ async def ingest_pymax_message(
             client, sender_id, chat_id
         )
 
-    if _is_self_avatar(contact_avatar_url, my_avatar):
-        contact_avatar_url = None
-
     dialog = await get_or_create_dialog(
         session,
         channel=channel,
@@ -428,15 +405,19 @@ async def ingest_pymax_message(
         contact_phone=contact_phone,
     )
 
-    # Heal dialogs that previously stored our channel avatar / self id.
-    if _is_self_avatar(dialog.contact_avatar_url, my_avatar):
-        dialog.contact_avatar_url = contact_avatar_url
+    # Heal dialogs that previously stored our own user id as the contact.
     if (
         my_user_id is not None
         and dialog.contact_external_id == str(my_user_id)
         and contact_id != str(my_user_id)
     ):
         dialog.contact_external_id = contact_id
+        if contact_avatar_url:
+            dialog.contact_avatar_url = contact_avatar_url
+        if contact_name and not (
+            contact_name.startswith("User ") or contact_name.startswith("Chat ")
+        ):
+            dialog.contact_name = contact_name
 
     if message_id is not None:
         exists = await session.execute(
@@ -542,8 +523,6 @@ async def ingest_pymax_message(
             dialog.contact_username = contact_username
             if contact_avatar_url:
                 dialog.contact_avatar_url = contact_avatar_url
-            elif _is_self_avatar(dialog.contact_avatar_url, my_avatar):
-                dialog.contact_avatar_url = None
             if sender_id is not None:
                 dialog.contact_external_id = str(sender_id)
             if contact_phone and not dialog.contact_phone:
