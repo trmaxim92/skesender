@@ -4,22 +4,27 @@ import asyncio
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.db import SessionLocal
+from app.integrations.credentials_cache import decrypt_cached
+from app.integrations.media_jobs import schedule_media_job
 from app.integrations.maxbot.client import MaxApiError, get_updates
-from app.integrations.maxbot.inbox import process_update
+from app.integrations.maxbot.inbox import backfill_maxbot_attachments, process_update
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog
 from app.realtime.publish import emit_event, message_created_event
 from app.security import decrypt_secret
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
+
+_POLL_CONCURRENCY = 8
 
 
 class MaxBotPoller:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self._sem = asyncio.Semaphore(_POLL_CONCURRENCY)
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -52,57 +57,85 @@ class MaxBotPoller:
     async def _poll_all_channels(self) -> None:
         async with SessionLocal() as session:
             result = await session.execute(
-                select(Channel).where(
+                select(Channel.id).where(
                     Channel.transport == ChannelTransport.MAXBOT.value,
                     Channel.status == ChannelStatus.ONLINE.value,
                     Channel.credentials_enc.is_not(None),
                 )
             )
-            channels = list(result.scalars().all())
+            channel_ids = list(result.scalars().all())
 
-        if not channels:
+        if not channel_ids:
             await asyncio.sleep(5)
             return
 
-        await asyncio.gather(*(self._poll_channel(ch.id) for ch in channels))
+        await asyncio.gather(*(self._poll_channel(cid) for cid in channel_ids))
 
     async def _poll_channel(self, channel_id: int) -> None:
+        async with self._sem:
+            await self._poll_channel_unlocked(channel_id)
+
+    async def _poll_channel_unlocked(self, channel_id: int) -> None:
         try:
+            token: str | None = None
+            marker: int | None = None
             async with SessionLocal() as session:
                 channel = await session.get(Channel, channel_id)
                 if channel is None or not channel.credentials_enc:
                     return
                 try:
-                    token = decrypt_secret(channel.credentials_enc)
+                    token = decrypt_cached(
+                        channel_id, channel.credentials_enc, decrypt=decrypt_secret
+                    )
                 except ValueError as exc:
                     channel.status = ChannelStatus.ERROR.value
                     channel.last_error = str(exc)
                     await session.commit()
                     return
-
                 marker = channel.poll_marker
-                try:
-                    payload = await get_updates(
-                        token,
-                        marker=marker,
-                        timeout=25,
-                        limit=100,
-                        types=["message_created", "bot_started", "message_callback"],
-                    )
-                except MaxApiError as exc:
-                    channel.last_error = str(exc)
-                    await session.commit()
-                    logger.warning("Channel %s updates failed: %s", channel_id, exc)
-                    await asyncio.sleep(2)
-                    return
 
-                updates = payload.get("updates") or []
-                new_marker = payload.get("marker")
-                events = []
+            assert token is not None
+            try:
+                payload = await get_updates(
+                    token,
+                    marker=marker,
+                    timeout=25,
+                    limit=100,
+                    types=["message_created", "bot_started", "message_callback"],
+                )
+            except MaxApiError as exc:
+                async with SessionLocal() as session:
+                    channel = await session.get(Channel, channel_id)
+                    if channel is not None:
+                        channel.last_error = str(exc)
+                        await session.commit()
+                logger.warning("Channel %s updates failed: %s", channel_id, exc)
+                await asyncio.sleep(2)
+                return
+
+            updates = payload.get("updates") or []
+            new_marker = payload.get("marker")
+            if not updates and new_marker is None:
+                return
+
+            events = []
+            media_ids: list[int] = []
+            async with SessionLocal() as session:
+                channel = await session.get(Channel, channel_id)
+                if channel is None:
+                    return
                 for update in updates:
                     if isinstance(update, dict):
-                        msg = await process_update(session, channel, update)
+                        msg = await process_update(
+                            session, channel, update, download_media=False
+                        )
                         if msg is not None:
+                            if any(
+                                not att.storage_path
+                                for att in (msg.attachments or [])
+                                if att.remote_url or att.provider_file_id
+                            ):
+                                media_ids.append(msg.id)
                             result = await session.execute(
                                 select(Dialog)
                                 .options(
@@ -114,7 +147,9 @@ class MaxBotPoller:
                             dialog = result.scalar_one_or_none()
                             await session.refresh(msg, attribute_names=["attachments"])
                             if dialog is not None:
-                                events.append(message_created_event(dialog, msg, channel.transport))
+                                events.append(
+                                    message_created_event(dialog, msg, channel.transport)
+                                )
 
                 if new_marker is not None:
                     channel.poll_marker = int(new_marker)
@@ -123,6 +158,12 @@ class MaxBotPoller:
 
             for event in events:
                 await emit_event(event)
+
+            for msg_id in media_ids:
+                schedule_media_job(
+                    backfill_maxbot_attachments(msg_id),
+                    name=f"maxbot-media-{channel_id}-{msg_id}",
+                )
         except Exception:
             logger.exception("Channel %s poll failed", channel_id)
             await asyncio.sleep(2)

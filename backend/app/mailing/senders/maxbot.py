@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.integrations.credentials_cache import decrypt_cached
 from app.integrations.maxbot import client as max_client
 from app.mailing.types import MailingSendResult
 from app.models import AttachmentKind, Channel, MailingTemplate
@@ -28,7 +29,7 @@ class MaxBotMailingSender:
                 error="MAX-бот принимает числовой user_id",
             )
 
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         user_id = int(user_raw)
         body = (template.body or "").strip()
         try:

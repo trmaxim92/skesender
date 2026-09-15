@@ -22,6 +22,7 @@ from app.models import (
     MessageStatus,
     utcnow,
 )
+from app.realtime.publish import emit_event, message_updated_event
 from app.serializers import message_preview_text
 from app.storage.attachments import guess_kind, save_bytes
 
@@ -88,11 +89,17 @@ def _user_name(user: dict[str, Any] | None) -> str:
 
 
 async def process_update(
-    session: AsyncSession, channel: Channel, update: dict[str, Any]
+    session: AsyncSession,
+    channel: Channel,
+    update: dict[str, Any],
+    *,
+    download_media: bool = True,
 ) -> ChatMessage | None:
     update_type = update.get("update_type") or update.get("updateType")
     if update_type == "message_created":
-        return await _handle_message_created(session, channel, update)
+        return await _handle_message_created(
+            session, channel, update, download_media=download_media
+        )
     if update_type in {"bot_started", "message_callback"}:
         await _handle_bot_started(session, channel, update)
         return None
@@ -119,7 +126,11 @@ async def _handle_bot_started(session: AsyncSession, channel: Channel, update: d
 
 
 async def _handle_message_created(
-    session: AsyncSession, channel: Channel, update: dict[str, Any]
+    session: AsyncSession,
+    channel: Channel,
+    update: dict[str, Any],
+    *,
+    download_media: bool = True,
 ) -> ChatMessage | None:
     message = update.get("message")
     if not isinstance(message, dict):
@@ -191,7 +202,12 @@ async def _handle_message_created(
     if await try_insert_message(session, msg) is None:
         return None
 
-    stored = await _persist_bot_attachments(session, msg, raw_attachments if isinstance(raw_attachments, list) else [])
+    stored = await _persist_bot_attachments(
+        session,
+        msg,
+        raw_attachments if isinstance(raw_attachments, list) else [],
+        download=download_media,
+    )
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
@@ -214,10 +230,88 @@ async def _handle_message_created(
     return msg
 
 
+async def backfill_maxbot_attachments(message_id: int) -> None:
+    """Download stub attachments after ingest commit (C2)."""
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChatMessage)
+            .options(
+                selectinload(ChatMessage.attachments),
+                selectinload(ChatMessage.reply_to).selectinload(ChatMessage.attachments),
+            )
+            .where(ChatMessage.id == message_id)
+        )
+        msg = result.scalar_one_or_none()
+        if msg is None:
+            return
+        changed = False
+        for att in list(msg.attachments or []):
+            if att.storage_path or not att.remote_url:
+                continue
+            try:
+                data = await max_client.download_url(att.remote_url)
+                relative, safe_name, resolved_mime, size = save_bytes(
+                    data=data,
+                    file_name=att.file_name or "file",
+                    message_id=msg.id,
+                    mime_type=att.mime_type,
+                )
+                att.storage_path = relative
+                att.file_name = safe_name
+                att.mime_type = resolved_mime
+                att.size_bytes = size
+                changed = True
+            except Exception:
+                logger.exception(
+                    "Backfill maxbot attachment failed message=%s url=%s",
+                    message_id,
+                    att.remote_url,
+                )
+        if not changed:
+            return
+        if not (msg.text or "").strip() or msg.text == "[медиа]":
+            msg.text = message_preview_text("", list(msg.attachments or [])) or "[медиа]"
+        dialog = await session.get(Dialog, msg.dialog_id)
+        channel = await session.get(Channel, msg.channel_id)
+        event = None
+        if dialog is not None and channel is not None:
+            latest_id = await session.scalar(
+                select(ChatMessage.id)
+                .where(
+                    ChatMessage.dialog_id == dialog.id,
+                    ChatMessage.deleted_at.is_(None),
+                    ChatMessage.is_internal.is_(False),
+                )
+                .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+                .limit(1)
+            )
+            if latest_id == msg.id:
+                dialog.last_message = message_preview_text(
+                    msg.text, list(msg.attachments or [])
+                )
+            result = await session.execute(
+                select(Dialog)
+                .options(
+                    selectinload(Dialog.channel),
+                    selectinload(Dialog.current_appeal),
+                )
+                .where(Dialog.id == dialog.id)
+            )
+            dialog_loaded = result.scalar_one()
+            event = message_updated_event(dialog_loaded, msg, channel.transport)
+        await session.commit()
+        if event is not None:
+            await emit_event(event)
+
+
 async def _persist_bot_attachments(
     session: AsyncSession,
     msg: ChatMessage,
     raw_attachments: list[Any],
+    *,
+    download: bool = True,
 ) -> list[MessageAttachment]:
     stored: list[MessageAttachment] = []
     for item in raw_attachments:
@@ -243,7 +337,7 @@ async def _persist_bot_attachments(
         size = payload.get("size")
         remote_url = str(url) if url else None
 
-        if remote_url:
+        if download and remote_url:
             try:
                 data = await max_client.download_url(remote_url)
                 relative, safe_name, resolved_mime, size = save_bytes(

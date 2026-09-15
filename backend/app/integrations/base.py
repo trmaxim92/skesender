@@ -12,6 +12,14 @@ class IntegrationError(Exception):
     """Base error for channel integrations."""
 
 
+class ChannelNotReadyError(IntegrationError):
+    """Personal channel client is reconnecting — caller should fail-fast (HTTP 503)."""
+
+    def __init__(self, message: str, *, retry_after: int = 3) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass
 class SendResult:
     """Universal outbound send result — adapters map provider payloads here."""

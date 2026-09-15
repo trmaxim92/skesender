@@ -23,6 +23,7 @@ from app.models import (
     MessageStatus,
     utcnow,
 )
+from app.realtime.publish import emit_event, message_updated_event
 from app.serializers import message_preview_text
 from app.storage.attachments import guess_kind, save_bytes
 from app.security import decrypt_secret
@@ -75,11 +76,17 @@ def _chat_title(chat: dict[str, Any] | None) -> str | None:
 
 
 async def process_update(
-    session: AsyncSession, channel: Channel, update: dict[str, Any]
+    session: AsyncSession,
+    channel: Channel,
+    update: dict[str, Any],
+    *,
+    download_media: bool = True,
 ) -> ChatMessage | None:
     message = update.get("message") or update.get("edited_message")
     if isinstance(message, dict):
-        return await _handle_message(session, channel, update, message)
+        return await _handle_message(
+            session, channel, update, message, download_media=download_media
+        )
 
     # Start / deep-link without text still opens a dialog via message above.
     # Callback queries ignored for v1.
@@ -92,6 +99,8 @@ async def _handle_message(
     channel: Channel,
     update: dict[str, Any],
     message: dict[str, Any],
+    *,
+    download_media: bool = True,
 ) -> ChatMessage | None:
     chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
     sender = message.get("from") if isinstance(message.get("from"), dict) else None
@@ -199,7 +208,9 @@ async def _handle_message(
         return None
 
     token = decrypt_secret(channel.credentials_enc) if channel.credentials_enc else None
-    stored = await _persist_attachments(session, msg, message, token)
+    stored = await _persist_attachments(
+        session, msg, message, token if download_media else None, download=download_media
+    )
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
@@ -221,11 +232,96 @@ async def _handle_message(
     return msg
 
 
+async def backfill_telegram_attachments(
+    channel_id: int, message_id: int, token: str
+) -> None:
+    """Download stub attachments after ingest commit (C2)."""
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChatMessage)
+            .options(
+                selectinload(ChatMessage.attachments),
+                selectinload(ChatMessage.reply_to).selectinload(ChatMessage.attachments),
+            )
+            .where(ChatMessage.id == message_id, ChatMessage.channel_id == channel_id)
+        )
+        msg = result.scalar_one_or_none()
+        if msg is None:
+            return
+        changed = False
+        for att in list(msg.attachments or []):
+            if att.storage_path or not att.provider_file_id:
+                continue
+            try:
+                file_info = await tg_client.get_file(token, str(att.provider_file_id))
+                file_path = file_info.get("file_path")
+                if not file_path:
+                    continue
+                data = await tg_client.download_file(token, str(file_path))
+                relative, safe_name, resolved_mime, size = save_bytes(
+                    data=data,
+                    file_name=att.file_name or "file",
+                    message_id=msg.id,
+                    mime_type=att.mime_type,
+                )
+                att.storage_path = relative
+                att.file_name = safe_name
+                att.mime_type = resolved_mime
+                att.size_bytes = size
+                att.remote_url = f"{tg_client.TELEGRAM_API_BASE}/file/bot***/{file_path}"
+                changed = True
+            except Exception:
+                logger.exception(
+                    "Backfill telegram attachment failed message=%s file_id=%s",
+                    message_id,
+                    att.provider_file_id,
+                )
+        if not changed:
+            return
+        if not (msg.text or "").strip() or msg.text == "[медиа]":
+            msg.text = message_preview_text("", list(msg.attachments or [])) or "[медиа]"
+        dialog = await session.get(Dialog, msg.dialog_id)
+        channel = await session.get(Channel, channel_id)
+        event = None
+        if dialog is not None and channel is not None:
+            latest_id = await session.scalar(
+                select(ChatMessage.id)
+                .where(
+                    ChatMessage.dialog_id == dialog.id,
+                    ChatMessage.deleted_at.is_(None),
+                    ChatMessage.is_internal.is_(False),
+                )
+                .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+                .limit(1)
+            )
+            if latest_id == msg.id:
+                dialog.last_message = message_preview_text(
+                    msg.text, list(msg.attachments or [])
+                )
+            result = await session.execute(
+                select(Dialog)
+                .options(
+                    selectinload(Dialog.channel),
+                    selectinload(Dialog.current_appeal),
+                )
+                .where(Dialog.id == dialog.id)
+            )
+            dialog_loaded = result.scalar_one()
+            event = message_updated_event(dialog_loaded, msg, channel.transport)
+        await session.commit()
+        if event is not None:
+            await emit_event(event)
+
+
 async def _persist_attachments(
     session: AsyncSession,
     msg: ChatMessage,
     message: dict[str, Any],
     token: str | None,
+    *,
+    download: bool = True,
 ) -> list[MessageAttachment]:
     stored: list[MessageAttachment] = []
     candidates: list[tuple[str, dict[str, Any]]] = []
@@ -267,7 +363,7 @@ async def _persist_attachments(
         size = payload.get("file_size")
         remote_url = None
 
-        if token:
+        if download and token:
             try:
                 file_info = await tg_client.get_file(token, str(file_id))
                 file_path = file_info.get("file_path")

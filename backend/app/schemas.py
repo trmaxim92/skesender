@@ -289,6 +289,21 @@ class DialogsPageOut(BaseModel):
     offset: int
 
 
+class DialogCloseBatchRequest(BaseModel):
+    dialog_ids: list[int] = Field(min_length=1, max_length=200)
+    with_reply: bool = False
+
+
+class DialogCloseBatchSkipped(BaseModel):
+    id: int
+    reason: str
+
+
+class DialogCloseBatchResult(BaseModel):
+    closed: int = 0
+    skipped: list[DialogCloseBatchSkipped] = []
+
+
 class UnreadSummaryOut(BaseModel):
     new: int = 0
     mine: int = 0
@@ -338,6 +353,20 @@ class AppealListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AppealBatchRequest(BaseModel):
+    appeal_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class AppealBatchSkipped(BaseModel):
+    id: int
+    reason: str
+
+
+class AppealBatchResult(BaseModel):
+    processed: int = 0
+    skipped: list[AppealBatchSkipped] = []
 
 
 class AppealDetailOut(AppealListItemOut):

@@ -264,6 +264,16 @@ export async function closeDialogRequest(
   return { dialog: data as ApiDialog, warning }
 }
 
+export async function closeDialogsBatchRequest(dialogIds: number[], withReply = false) {
+  return api<{ closed: number; skipped: { id: number; reason: string }[] }>(
+    '/api/chats/dialogs/close-batch',
+    {
+      method: 'POST',
+      json: { dialog_ids: dialogIds, with_reply: withReply },
+    },
+  )
+}
+
 export async function fetchSidebarRequest(dialogId: number) {
   return api<ApiDialogSidebar>(`/api/chats/dialogs/${dialogId}/sidebar`)
 }

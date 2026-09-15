@@ -359,6 +359,8 @@ class Dialog(Base):
     __tablename__ = "dialogs"
     __table_args__ = (
         UniqueConstraint("channel_id", "external_chat_id", name="uq_dialog_channel_chat"),
+        Index("ix_dialogs_assignee_last_at", "assignee_id", "last_at"),
+        Index("ix_dialogs_department_last_at", "department_id", "last_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

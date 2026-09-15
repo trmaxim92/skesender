@@ -7,19 +7,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db import SessionLocal
+from app.integrations.credentials_cache import decrypt_cached
+from app.integrations.media_jobs import schedule_media_job
 from app.integrations.telegram_bot.client import TelegramApiError, get_updates
-from app.integrations.telegram_bot.inbox import process_update
+from app.integrations.telegram_bot.inbox import backfill_telegram_attachments, process_update
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog
 from app.realtime.publish import emit_event, message_created_event, message_updated_event
 from app.security import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
+# Cap concurrent long-polls so DB pool / event-loop stay responsive (C1).
+_POLL_CONCURRENCY = 8
+
 
 class TelegramBotPoller:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self._sem = asyncio.Semaphore(_POLL_CONCURRENCY)
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -52,58 +58,90 @@ class TelegramBotPoller:
     async def _poll_all_channels(self) -> None:
         async with SessionLocal() as session:
             result = await session.execute(
-                select(Channel).where(
+                select(Channel.id).where(
                     Channel.transport == ChannelTransport.TELEGRAM.value,
                     Channel.status == ChannelStatus.ONLINE.value,
                     Channel.credentials_enc.is_not(None),
                 )
             )
-            channels = list(result.scalars().all())
+            channel_ids = list(result.scalars().all())
 
-        if not channels:
+        if not channel_ids:
             await asyncio.sleep(5)
             return
 
-        await asyncio.gather(*(self._poll_channel(ch.id) for ch in channels))
+        await asyncio.gather(*(self._poll_channel(cid) for cid in channel_ids))
 
     async def _poll_channel(self, channel_id: int) -> None:
+        async with self._sem:
+            await self._poll_channel_unlocked(channel_id)
+
+    async def _poll_channel_unlocked(self, channel_id: int) -> None:
         try:
+            # C1: load credentials + marker, then release the DB session before long-poll.
+            token: str | None = None
+            offset: int | None = None
             async with SessionLocal() as session:
                 channel = await session.get(Channel, channel_id)
                 if channel is None or not channel.credentials_enc:
                     return
                 try:
-                    token = decrypt_secret(channel.credentials_enc)
+                    token = decrypt_cached(
+                        channel_id, channel.credentials_enc, decrypt=decrypt_secret
+                    )
                 except ValueError as exc:
                     channel.status = ChannelStatus.ERROR.value
                     channel.last_error = str(exc)
                     await session.commit()
                     return
-
                 offset = channel.poll_marker
-                try:
-                    updates = await get_updates(
-                        token,
-                        offset=offset,
-                        timeout=25,
-                        limit=100,
-                        allowed_updates=["message", "edited_message"],
-                    )
-                except TelegramApiError as exc:
-                    channel.last_error = str(exc)
-                    await session.commit()
-                    logger.warning("Telegram channel %s updates failed: %s", channel_id, exc)
-                    await asyncio.sleep(2)
-                    return
 
-                events = []
-                max_update_id: int | None = None
+            assert token is not None
+            try:
+                updates = await get_updates(
+                    token,
+                    offset=offset,
+                    timeout=25,
+                    limit=100,
+                    allowed_updates=["message", "edited_message"],
+                )
+            except TelegramApiError as exc:
+                async with SessionLocal() as session:
+                    channel = await session.get(Channel, channel_id)
+                    if channel is not None:
+                        channel.last_error = str(exc)
+                        await session.commit()
+                logger.warning("Telegram channel %s updates failed: %s", channel_id, exc)
+                await asyncio.sleep(2)
+                return
+
+            if not updates:
+                return
+
+            events = []
+            media_ids: list[int] = []
+            max_update_id: int | None = None
+            async with SessionLocal() as session:
+                channel = await session.get(Channel, channel_id)
+                if channel is None:
+                    return
                 for update in updates:
                     update_id = update.get("update_id")
                     if isinstance(update_id, int):
-                        max_update_id = update_id if max_update_id is None else max(max_update_id, update_id)
-                    msg = await process_update(session, channel, update)
+                        max_update_id = (
+                            update_id if max_update_id is None else max(max_update_id, update_id)
+                        )
+                    # C2: ingest without blocking on file download.
+                    msg = await process_update(
+                        session, channel, update, download_media=False
+                    )
                     if msg is not None:
+                        if any(
+                            not att.storage_path
+                            for att in (msg.attachments or [])
+                            if att.provider_file_id
+                        ):
+                            media_ids.append(msg.id)
                         result = await session.execute(
                             select(Dialog)
                             .options(
@@ -131,6 +169,12 @@ class TelegramBotPoller:
 
             for event in events:
                 await emit_event(event)
+
+            for msg_id in media_ids:
+                schedule_media_job(
+                    backfill_telegram_attachments(channel_id, msg_id, token),
+                    name=f"tg-media-{channel_id}-{msg_id}",
+                )
         except Exception:
             logger.exception("Telegram channel %s poll failed", channel_id)
             await asyncio.sleep(2)

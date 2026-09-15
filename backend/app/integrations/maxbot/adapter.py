@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import SendResult
+from app.integrations.credentials_cache import decrypt_cached
 from app.integrations.maxbot import client as max_client
 from app.integrations.maxbot.client import MaxApiError
 from app.integrations.maxbot.connector import connect_by_token
@@ -50,7 +51,7 @@ class MaxBotAdapter:
     ) -> SendResult:
         if not channel.credentials_enc:
             raise MaxApiError("Channel has no credentials")
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         user_id, chat_id = self._destination(dialog)
         if user_id is not None:
             payload = await max_client.send_message(
@@ -78,7 +79,7 @@ class MaxBotAdapter:
     ) -> SendResult:
         if not channel.credentials_enc:
             raise MaxApiError("Channel has no credentials")
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         upload_type = kind if kind in {"image", "video", "audio", "file"} else "file"
         media_token = await max_client.upload_and_get_token(
             token,
@@ -118,7 +119,7 @@ class MaxBotAdapter:
     ) -> None:
         if not channel.credentials_enc:
             raise MaxApiError("Channel has no credentials")
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         await max_client.edit_message(token, message_id=external_id, text=text)
 
     async def delete_message(
@@ -130,7 +131,7 @@ class MaxBotAdapter:
     ) -> None:
         if not channel.credentials_enc:
             raise MaxApiError("Channel has no credentials")
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         await max_client.delete_message(token, message_id=external_id)
 
     def _destination(self, dialog: Dialog) -> tuple[int | None, int | None]:

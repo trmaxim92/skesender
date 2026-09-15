@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listAppealsRequest, deleteAppealRequest, type ApiAppealListItem } from '@/api/appeals'
+import {
+  listAppealsRequest,
+  deleteAppealRequest,
+  closeAppealsBatchRequest,
+  deleteAppealsBatchRequest,
+  type ApiAppealListItem,
+} from '@/api/appeals'
 import { ApiError } from '@/api/client'
 import type { AppealStatus, ChannelTransport } from '@/types'
 
@@ -57,7 +63,7 @@ export const useAppealsStore = defineStore('appeals', () => {
   const error = ref('')
 
   const q = ref('')
-  const status = ref<'all' | 'open' | 'closed'>('all')
+  const status = ref<'all' | 'open' | 'closed'>('open')
   const dateFrom = ref('')
   const dateTo = ref('')
   const assignee = ref<'all' | 'unassigned' | 'mine'>('all')
@@ -122,6 +128,30 @@ export const useAppealsStore = defineStore('appeals', () => {
     }
   }
 
+  async function closeBatch(appealIds: number[]) {
+    error.value = ''
+    try {
+      const res = await closeAppealsBatchRequest(appealIds)
+      await fetchAppeals()
+      return res
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось закрыть обращения'
+      return null
+    }
+  }
+
+  async function deleteBatch(appealIds: number[]) {
+    error.value = ''
+    try {
+      const res = await deleteAppealsBatchRequest(appealIds)
+      await fetchAppeals()
+      return res
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось удалить обращения'
+      return null
+    }
+  }
+
   return {
     items,
     total,
@@ -139,5 +169,7 @@ export const useAppealsStore = defineStore('appeals', () => {
     nextPage,
     prevPage,
     removeAppeal,
+    closeBatch,
+    deleteBatch,
   }
 })

@@ -7,8 +7,10 @@ from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.appeals import close_appeal_with_status
 from app.db import get_db
 from app.departments import accessible_department_ids, ensure_department_access
+from app.dialogs import clear_unread
 from app.models import (
     Appeal,
     AppealStatus,
@@ -21,13 +23,22 @@ from app.models import (
 )
 from app.rbac import (
     ACTION_DELETE_APPEALS,
+    ACTION_WRITE,
     SECTION_APPEALS,
     accessible_channel_ids,
     ensure_channel_access,
     require_permission,
+    user_can,
 )
 from app.realtime.publish import dialog_updated_event, emit_event
-from app.schemas import AppealDetailOut, AppealListItemOut, AppealListOut
+from app.schemas import (
+    AppealBatchRequest,
+    AppealBatchResult,
+    AppealBatchSkipped,
+    AppealDetailOut,
+    AppealListItemOut,
+    AppealListOut,
+)
 from app.serializers import message_preview_text
 
 router = APIRouter(prefix="/appeals", tags=["appeals"])
@@ -226,30 +237,29 @@ async def _refresh_dialog_preview(db: AsyncSession, dialog: Dialog) -> None:
         dialog.last_status = None
 
 
-@router.delete("/{appeal_id}")
-async def delete_appeal(
-    appeal_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(ACTION_DELETE_APPEALS)),
-) -> Response:
-    """Hard-delete an appeal with its messages and appeal field values."""
+async def _load_appeal_for_mutation(db: AsyncSession, appeal_id: int) -> Appeal | None:
     result = await db.execute(
         select(Appeal)
         .options(selectinload(Appeal.dialog).selectinload(Dialog.channel))
         .where(Appeal.id == appeal_id)
     )
-    appeal = result.scalar_one_or_none()
-    if appeal is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appeal not found")
+    return result.scalar_one_or_none()
 
+
+async def _ensure_appeal_access(user: User, appeal: Appeal, db: AsyncSession) -> Dialog | None:
     dialog = appeal.dialog
     if dialog is None and appeal.dialog_id is not None:
         dialog = await db.get(Dialog, appeal.dialog_id)
-
     if dialog is not None:
         await ensure_channel_access(user, dialog.channel_id, db)
         await ensure_department_access(user, dialog.department_id, db)
+    return dialog
 
+
+async def _hard_delete_appeal(
+    db: AsyncSession, appeal: Appeal, dialog: Dialog | None
+) -> object | None:
+    """Delete appeal + messages. Returns dialog_updated event payload or None."""
     msg_ids = select(ChatMessage.id).where(ChatMessage.appeal_id == appeal.id)
     await db.execute(delete(MessageAttachment).where(MessageAttachment.message_id.in_(msg_ids)))
     await db.execute(delete(ChatMessage).where(ChatMessage.appeal_id == appeal.id))
@@ -262,34 +272,141 @@ async def delete_appeal(
 
     was_current = bool(dialog and dialog.current_appeal_id == appeal.id)
     dialog_id = dialog.id if dialog else None
-
     await db.delete(appeal)
     await db.flush()
 
-    if dialog is not None and was_current and dialog_id is not None:
-        remaining = await db.execute(
-            select(Appeal)
-            .where(Appeal.dialog_id == dialog_id)
-            .order_by(Appeal.number.desc(), Appeal.id.desc())
-            .limit(1)
-        )
-        next_appeal = remaining.scalar_one_or_none()
-        dialog.current_appeal_id = next_appeal.id if next_appeal else None
-        await _refresh_dialog_preview(db, dialog)
-        loaded = await db.execute(
-            select(Dialog)
-            .options(
-                selectinload(Dialog.channel),
-                selectinload(Dialog.assignee),
-                selectinload(Dialog.current_appeal).selectinload(Appeal.closed_by),
-            )
-            .where(Dialog.id == dialog_id)
-        )
-        dialog_loaded = loaded.scalar_one()
-        event = dialog_updated_event(dialog_loaded)
-        await db.commit()
-        await emit_event(event)
-    else:
-        await db.commit()
+    if dialog is None or not was_current or dialog_id is None:
+        return None
 
+    remaining = await db.execute(
+        select(Appeal)
+        .where(Appeal.dialog_id == dialog_id)
+        .order_by(Appeal.number.desc(), Appeal.id.desc())
+        .limit(1)
+    )
+    next_appeal = remaining.scalar_one_or_none()
+    dialog.current_appeal_id = next_appeal.id if next_appeal else None
+    await _refresh_dialog_preview(db, dialog)
+    loaded = await db.execute(
+        select(Dialog)
+        .options(
+            selectinload(Dialog.channel),
+            selectinload(Dialog.assignee),
+            selectinload(Dialog.current_appeal).selectinload(Appeal.closed_by),
+        )
+        .where(Dialog.id == dialog_id)
+    )
+    dialog_loaded = loaded.scalar_one()
+    return dialog_updated_event(dialog_loaded)
+
+
+def _dedupe_ids(ids: list[int]) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for i in ids:
+        if i in seen:
+            continue
+        seen.add(i)
+        out.append(i)
+    return out
+
+
+@router.post("/close-batch", response_model=AppealBatchResult)
+async def close_appeals_batch(
+    body: AppealBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_APPEALS)),
+) -> AppealBatchResult:
+    """Close several open appeals without sending closing templates."""
+    if not user_can(user, ACTION_WRITE):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+
+    processed = 0
+    skipped: list[AppealBatchSkipped] = []
+    events: list[object] = []
+
+    for aid in _dedupe_ids(body.appeal_ids):
+        appeal = await _load_appeal_for_mutation(db, aid)
+        if appeal is None:
+            skipped.append(AppealBatchSkipped(id=aid, reason="не найдено"))
+            continue
+        try:
+            dialog = await _ensure_appeal_access(user, appeal, db)
+        except HTTPException as exc:
+            skipped.append(AppealBatchSkipped(id=aid, reason=str(exc.detail)))
+            continue
+        if appeal.status != AppealStatus.OPEN.value:
+            skipped.append(AppealBatchSkipped(id=aid, reason="уже закрыто"))
+            continue
+        await close_appeal_with_status(db, appeal, closed_by_id=user.id)
+        if dialog is not None:
+            await clear_unread(db, dialog)
+            loaded = await db.execute(
+                select(Dialog)
+                .options(
+                    selectinload(Dialog.channel),
+                    selectinload(Dialog.assignee),
+                    selectinload(Dialog.current_appeal).selectinload(Appeal.closed_by),
+                )
+                .where(Dialog.id == dialog.id)
+            )
+            dialog_loaded = loaded.scalar_one_or_none()
+            if dialog_loaded is not None:
+                events.append(dialog_updated_event(dialog_loaded))
+        processed += 1
+
+    await db.commit()
+    for event in events:
+        await emit_event(event)
+    return AppealBatchResult(processed=processed, skipped=skipped)
+
+
+@router.post("/delete-batch", response_model=AppealBatchResult)
+async def delete_appeals_batch(
+    body: AppealBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(ACTION_DELETE_APPEALS)),
+) -> AppealBatchResult:
+    """Hard-delete several appeals with their messages."""
+    processed = 0
+    skipped: list[AppealBatchSkipped] = []
+    events: list[object] = []
+
+    for aid in _dedupe_ids(body.appeal_ids):
+        appeal = await _load_appeal_for_mutation(db, aid)
+        if appeal is None:
+            skipped.append(AppealBatchSkipped(id=aid, reason="не найдено"))
+            continue
+        try:
+            dialog = await _ensure_appeal_access(user, appeal, db)
+        except HTTPException as exc:
+            skipped.append(AppealBatchSkipped(id=aid, reason=str(exc.detail)))
+            continue
+        event = await _hard_delete_appeal(db, appeal, dialog)
+        if event is not None:
+            events.append(event)
+        processed += 1
+
+    await db.commit()
+    for event in events:
+        await emit_event(event)
+    return AppealBatchResult(processed=processed, skipped=skipped)
+
+
+@router.delete("/{appeal_id}")
+async def delete_appeal(
+    appeal_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(ACTION_DELETE_APPEALS)),
+) -> Response:
+    """Hard-delete an appeal with its messages and appeal field values."""
+    appeal = await _load_appeal_for_mutation(db, appeal_id)
+    if appeal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appeal not found")
+
+    dialog = await _ensure_appeal_access(user, appeal, db)
+    event = await _hard_delete_appeal(db, appeal, dialog)
+    await db.commit()
+    if event is not None:
+        await emit_event(event)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

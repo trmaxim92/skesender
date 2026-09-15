@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +21,14 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
     Opening a new appeal clears dialog assignee so the first manager who replies
     becomes responsible (chat goes to «Новые»).
     """
+    # C11: serialize open-appeal creation per dialog (Postgres advisory xact lock).
+    if dialog.id is not None:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :k)"),
+            {"ns": 0x41505045, "k": int(dialog.id)},  # 'APPE'
+        )
+        await session.refresh(dialog)
+
     current: Appeal | None = None
     if dialog.current_appeal_id is not None:
         current = await session.get(

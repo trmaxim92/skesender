@@ -13,8 +13,10 @@ from app.redisutil import get_redis, redis_enabled
 logger = logging.getLogger(__name__)
 
 LOCK_KEY = "skysender:bg_leader"
-LOCK_TTL_SEC = 12
-RENEW_EVERY_SEC = 4
+LOCK_TTL_SEC = 18
+RENEW_EVERY_SEC = 5
+# Tolerate brief Redis blips before relinquishing (C4).
+_REDIS_FAIL_BUDGET = 3
 
 
 class BackgroundLeader:
@@ -35,6 +37,7 @@ class BackgroundLeader:
         self._stop = asyncio.Event()
         self._instance_id = uuid.uuid4().hex
         self._is_leader = False
+        self._redis_fail_streak = 0
 
     @property
     def is_leader(self) -> bool:
@@ -74,6 +77,7 @@ class BackgroundLeader:
         while not self._stop.is_set():
             try:
                 held = await self._try_hold_lock()
+                self._redis_fail_streak = 0
                 if held and not self._is_leader:
                     await self._become_leader()
                 elif held and self._is_leader:
@@ -84,8 +88,16 @@ class BackgroundLeader:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Leader election loop error")
-                if self._is_leader:
+                self._redis_fail_streak += 1
+                logger.exception(
+                    "Leader election loop error (streak=%s)", self._redis_fail_streak
+                )
+                # C4: do not stop personal clients on a single Redis blip.
+                if self._is_leader and self._redis_fail_streak >= _REDIS_FAIL_BUDGET:
+                    logger.warning(
+                        "Relinquishing leadership after %s Redis failures",
+                        self._redis_fail_streak,
+                    )
                     try:
                         await self._relinquish()
                     except Exception:
@@ -110,6 +122,7 @@ class BackgroundLeader:
     async def _become_leader(self) -> None:
         logger.info("Acquired background leadership instance=%s", self._instance_id[:8])
         self._is_leader = True
+        self._redis_fail_streak = 0
         await self._on_start()
 
     async def _relinquish(self) -> None:

@@ -85,6 +85,7 @@ async def ingest_telethon_message(
     client: Any,
     message: TlMessage,
     my_user_id: int | None,
+    download_media: bool = True,
 ) -> ChatMessage | None:
     chat_id = message.chat_id
     if chat_id is None:
@@ -176,7 +177,7 @@ async def ingest_telethon_message(
     if await try_insert_message(session, msg) is None:
         return None
 
-    stored = await _persist_media(session, msg, message)
+    stored = await _persist_media(session, msg, message, download=download_media)
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
@@ -196,13 +197,154 @@ async def ingest_telethon_message(
     return msg
 
 
+async def backfill_telethon_attachments(
+    channel_id: int, message_id: int, client: Any, tl_message: TlMessage
+) -> None:
+    """Download media after ingest commit (C2)."""
+    from sqlalchemy.orm import selectinload
+
+    from app.db import SessionLocal
+    from app.realtime.publish import emit_event, message_updated_event
+
+    if not tl_message.media:
+        return
+    try:
+        data = await tl_message.download_media(file=bytes)
+    except Exception:
+        logger.exception("Failed to download telethon media message=%s", message_id)
+        return
+    if not data:
+        return
+
+    file_name = "file"
+    mime = None
+    kind = AttachmentKind.FILE
+    if tl_message.photo:
+        file_name = "photo.jpg"
+        mime = "image/jpeg"
+        kind = AttachmentKind.IMAGE
+    elif tl_message.video:
+        file_name = "video.mp4"
+        mime = getattr(tl_message.video, "mime_type", None) or "video/mp4"
+        kind = AttachmentKind.VIDEO
+    elif tl_message.voice:
+        file_name = "voice.ogg"
+        mime = getattr(tl_message.voice, "mime_type", None) or "audio/ogg"
+        kind = AttachmentKind.AUDIO
+    elif tl_message.audio:
+        file_name = getattr(tl_message.audio, "file_name", None) or "audio"
+        mime = getattr(tl_message.audio, "mime_type", None)
+        kind = AttachmentKind.AUDIO
+    elif tl_message.document:
+        file_name = getattr(tl_message.document, "file_name", None) or "document"
+        mime = getattr(tl_message.document, "mime_type", None)
+        kind = guess_kind(mime, str(file_name))
+        for attr in getattr(tl_message.document, "attributes", []) or []:
+            name = getattr(attr, "file_name", None)
+            if name:
+                file_name = name
+                break
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChatMessage)
+            .options(
+                selectinload(ChatMessage.attachments),
+                selectinload(ChatMessage.reply_to).selectinload(ChatMessage.attachments),
+            )
+            .where(ChatMessage.id == message_id, ChatMessage.channel_id == channel_id)
+        )
+        msg = result.scalar_one_or_none()
+        if msg is None:
+            return
+        if any(att.storage_path for att in (msg.attachments or [])):
+            return
+        relative, safe_name, resolved_mime, size = save_bytes(
+            data=data if isinstance(data, (bytes, bytearray)) else bytes(data),
+            file_name=str(file_name),
+            message_id=msg.id,
+            mime_type=mime,
+        )
+        att = MessageAttachment(
+            message_id=msg.id,
+            kind=kind.value,
+            file_name=safe_name,
+            mime_type=resolved_mime,
+            size_bytes=size,
+            storage_path=relative,
+            remote_url=None,
+            provider_file_id=None,
+        )
+        session.add(att)
+        await session.flush()
+        if not (msg.text or "").strip() or msg.text == "[медиа]":
+            msg.text = message_preview_text("", [att]) or "[медиа]"
+        dialog = await session.get(Dialog, msg.dialog_id)
+        channel = await session.get(Channel, channel_id)
+        event = None
+        if dialog is not None and channel is not None:
+            latest_id = await session.scalar(
+                select(ChatMessage.id)
+                .where(
+                    ChatMessage.dialog_id == dialog.id,
+                    ChatMessage.deleted_at.is_(None),
+                    ChatMessage.is_internal.is_(False),
+                )
+                .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+                .limit(1)
+            )
+            if latest_id == msg.id:
+                dialog.last_message = message_preview_text(msg.text, [att])
+            result = await session.execute(
+                select(Dialog)
+                .options(selectinload(Dialog.channel), selectinload(Dialog.current_appeal))
+                .where(Dialog.id == dialog.id)
+            )
+            dialog_loaded = result.scalar_one()
+            await session.refresh(msg, attribute_names=["attachments"])
+            event = message_updated_event(dialog_loaded, msg, channel.transport)
+        await session.commit()
+        if event is not None:
+            await emit_event(event)
+
+
 async def _persist_media(
     session: AsyncSession,
     msg: ChatMessage,
     message: TlMessage,
+    *,
+    download: bool = True,
 ) -> list[MessageAttachment]:
     if not message.media:
         return []
+    if not download:
+        # Stub so UI shows media pending; backfill fills storage_path.
+        kind = AttachmentKind.FILE
+        file_name = "file"
+        mime = None
+        if message.photo:
+            kind = AttachmentKind.IMAGE
+            file_name = "photo.jpg"
+            mime = "image/jpeg"
+        elif message.video:
+            kind = AttachmentKind.VIDEO
+            file_name = "video.mp4"
+        elif message.voice or message.audio:
+            kind = AttachmentKind.AUDIO
+            file_name = "voice.ogg" if message.voice else "audio"
+        att = MessageAttachment(
+            message_id=msg.id,
+            kind=kind.value,
+            file_name=file_name,
+            mime_type=mime,
+            size_bytes=None,
+            storage_path=None,
+            remote_url=None,
+            provider_file_id=str(message.id) if message.id is not None else None,
+        )
+        session.add(att)
+        await session.flush()
+        return [att]
     try:
         data = await message.download_media(file=bytes)
     except Exception:

@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.base import SendResult
+from app.integrations.credentials_cache import decrypt_cached
 from app.integrations.telegram_bot import client as tg_client
 from app.integrations.telegram_bot.client import TelegramApiError
 from app.integrations.telegram_bot.connector import connect_by_token
@@ -158,7 +159,7 @@ class TelegramBotAdapter:
     def _token(self, channel: Channel) -> str:
         if not channel.credentials_enc:
             raise TelegramApiError("Channel has no credentials")
-        return decrypt_secret(channel.credentials_enc)
+        return decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
 
     def _chat_id(self, dialog: Dialog) -> str:
         if not dialog.external_chat_id:

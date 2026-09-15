@@ -16,15 +16,18 @@ from telethon.tl.custom.message import Message as TlMessage
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.integrations.base import IntegrationError
+from app.integrations.base import ChannelNotReadyError, IntegrationError
 from app.integrations.max_personal.auth_qr import BridgePasswordProvider
 from app.integrations.telegram_proxy import redact_proxy_url, telethon_proxy
-from app.integrations.telegram_user.inbox import ingest_telethon_message
+from app.integrations.media_jobs import schedule_media_job
+from app.integrations.telegram_user.inbox import backfill_telethon_attachments, ingest_telethon_message
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
 from app.realtime.publish import emit_event, message_created_event
 from app.security import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
+
+_DISCONNECT_TIMEOUT_SEC = 8.0
 
 _MTPROTO_FAIL_HINT = (
     "Не удалось подключиться к серверам Telegram (MTProto). "
@@ -70,6 +73,7 @@ class RuntimeState:
     error: str | None = None
     identity: str | None = None
     proxy_url: str | None = None
+    my_id: int | None = None
     client: TelegramClient | None = None
     task: asyncio.Task | None = None
     password_bridge: BridgePasswordProvider = field(default_factory=BridgePasswordProvider)
@@ -190,30 +194,67 @@ class TelegramUserRuntime:
             except Exception:
                 logger.exception("Failed to restore telegram user channel %s", channel.id)
 
-    async def ensure_client(self, channel_id: int) -> TelegramClient:
+    async def ensure_client(
+        self, channel_id: int, *, wait: bool = True, timeout: float | None = None
+    ) -> TelegramClient:
+        """Return connected Telethon client; wait briefly for restore by default."""
         client = self.get_client(channel_id)
         if client and client.is_connected():
             return client
-        await self._restore_channel(channel_id)
-        for _ in range(50):
+
+        state = self._states.get(channel_id)
+        if state is None or state.task is None or state.task.done():
+            try:
+                await self._restore_channel(channel_id)
+            except Exception:
+                logger.exception("Failed to kick restore for telegram channel %s", channel_id)
+
+        if not wait:
+            client = self.get_client(channel_id)
+            if client and client.is_connected():
+                return client
+            raise ChannelNotReadyError(
+                "Канал Telegram · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал.",
+                retry_after=3,
+            )
+
+        wait_s = timeout if timeout is not None else 8.0
+        deadline = asyncio.get_running_loop().time() + wait_s
+        while asyncio.get_running_loop().time() < deadline:
             client = self.get_client(channel_id)
             if client and client.is_connected():
                 return client
             await asyncio.sleep(0.2)
-        raise IntegrationError(
-            "Канал Telegram · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал."
+
+        raise ChannelNotReadyError(
+            "Канал Telegram · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал.",
+            retry_after=5,
         )
+
+    async def _disconnect_client(self, client: TelegramClient | None) -> None:
+        if client is None:
+            return
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=_DISCONNECT_TIMEOUT_SEC)
+        except Exception:
+            logger.warning("Telegram disconnect timed out or failed", exc_info=True)
 
     async def stop_all(self) -> None:
         tasks = []
         for state in list(self._states.values()):
             if state.client:
-                tasks.append(asyncio.create_task(state.client.disconnect()))
+                tasks.append(asyncio.create_task(self._disconnect_client(state.client)))
             if state.task and not state.task.done():
                 state.task.cancel()
                 tasks.append(state.task)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=_DISCONNECT_TIMEOUT_SEC + 2,
+                )
+            except TimeoutError:
+                logger.warning("Telegram stop_all timed out")
         self._states.clear()
 
     async def stop_channel(self, channel_id: int) -> None:
@@ -223,12 +264,18 @@ class TelegramUserRuntime:
             return
         pending: list[Any] = []
         if state.client:
-            pending.append(asyncio.ensure_future(state.client.disconnect()))
+            pending.append(asyncio.ensure_future(self._disconnect_client(state.client)))
         if state.task and not state.task.done():
             state.task.cancel()
             pending.append(state.task)
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=_DISCONNECT_TIMEOUT_SEC + 2,
+                )
+            except TimeoutError:
+                logger.warning("Telegram stop_channel timed out channel=%s", channel_id)
         logger.info("Telegram user channel %s stopped", channel_id)
 
     async def _restore_channel(self, channel_id: int) -> None:
@@ -309,21 +356,31 @@ class TelegramUserRuntime:
             message: TlMessage = event.message
             if message is None:
                 return
+            state_ref = self._states.get(channel_id)
+            my_id = state_ref.my_id if state_ref else None
+            # C5: refresh cached id only if missing.
+            if my_id is None:
+                me = await client.get_me()
+                my_id = int(me.id) if me else None
+                if state_ref is not None and my_id is not None:
+                    state_ref.my_id = my_id
+            needs_media = bool(message.media)
             async with SessionLocal() as session:
                 channel = await session.get(Channel, channel_id)
                 if channel is None:
                     return
-                me = await client.get_me()
-                my_id = int(me.id) if me else None
                 created = await ingest_telethon_message(
                     session,
                     channel=channel,
                     client=client,
                     message=message,
                     my_user_id=my_id,
+                    download_media=False,
                 )
                 event_payload = None
+                created_id = None
                 if created is not None:
+                    created_id = created.id
                     result = await session.execute(
                         select(Dialog)
                         .options(selectinload(Dialog.current_appeal))
@@ -336,6 +393,11 @@ class TelegramUserRuntime:
                 await session.commit()
                 if event_payload is not None:
                     await emit_event(event_payload)
+            if needs_media and created_id is not None:
+                schedule_media_job(
+                    backfill_telethon_attachments(channel_id, created_id, client, message),
+                    name=f"tgapi-media-{channel_id}-{created_id}",
+                )
 
         try:
             await client.connect()
@@ -401,7 +463,7 @@ class TelegramUserRuntime:
         finally:
             try:
                 if client.is_connected():
-                    await client.disconnect()
+                    await self._disconnect_client(client)
             except Exception:
                 pass
 
@@ -691,6 +753,8 @@ class TelegramUserRuntime:
         state = self._states[channel_id]
         me = await client.get_me()
         external_id = str(me.id) if me else None
+        if me is not None:
+            state.my_id = int(me.id)
         username = getattr(me, "username", None) if me else None
         first = getattr(me, "first_name", None) if me else None
         phone = getattr(me, "phone", None) if me else None

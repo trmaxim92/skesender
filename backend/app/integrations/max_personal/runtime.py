@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.integrations.base import IntegrationError
+from app.integrations.base import ChannelNotReadyError, IntegrationError
 from app.integrations.max_personal.auth_qr import BridgePasswordProvider, BridgeQrHandler
 from app.integrations.max_personal.inbox import apply_read_mark, backfill_dialog_names, ingest_pymax_message
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
@@ -27,11 +27,16 @@ from app.security import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
 
+_DISCONNECT_TIMEOUT_SEC = 8.0
+# Brief wait on outbound so a soft reconnect can finish (receive may still work).
+_ENSURE_WAIT_SEC = 8.0
+_ENSURE_POLL_SEC = 0.2
+
 
 @dataclass
 class RuntimeState:
     channel_id: int
-    status: str = "connecting"  # connecting | qr_pending | need_2fa | online | error
+    status: str = "connecting"  # connecting | qr_pending | need_2fa | online | reconnecting | error
     qr_url: str | None = None
     hint: str | None = None
     error: str | None = None
@@ -40,6 +45,7 @@ class RuntimeState:
     task: asyncio.Task | None = None
     qr_bridge: BridgeQrHandler = field(default_factory=BridgeQrHandler)
     password_bridge: BridgePasswordProvider = field(default_factory=BridgePasswordProvider)
+    reconnect_generation: int = 0
 
 
 class MaxPersonalRuntime:
@@ -52,10 +58,13 @@ class MaxPersonalRuntime:
 
     def get_client(self, channel_id: int) -> WebClient | None:
         state = self._states.get(channel_id)
-        if not state or state.status != "online" or state.client is None:
+        if not state or state.client is None:
             return None
         # Task finished means the socket loop exited while status was left stale.
         if state.task is not None and state.task.done():
+            return None
+        # Ready for send only when fully online (not mid-QR / reconnecting).
+        if state.status != "online":
             return None
         return state.client
 
@@ -124,35 +133,73 @@ class MaxPersonalRuntime:
             except Exception:
                 logger.exception("Failed to restore max personal channel %s", channel.id)
 
-    async def ensure_client(self, channel_id: int) -> WebClient:
+    async def ensure_client(
+        self, channel_id: int, *, wait: bool = True, timeout: float | None = None
+    ) -> WebClient:
+        """Return live WebClient; wait briefly for soft reconnect by default.
+
+        Personal MAX lives in-process: a momentary socket drop must not force
+        QR reconnect. Default wait (~6s) covers auto-restore; pass wait=False
+        only for pure probes.
+        """
         client = self.get_client(channel_id)
         if client:
             return client
         state = self._states.get(channel_id)
         if state and state.status == "online" and (state.task is None or state.task.done()):
-            state.status = "error"
+            state.status = "reconnecting"
             state.client = None
-        await self._restore_channel(channel_id)
-        # Reconnect after socket drop often takes a few seconds; wait longer than 10s.
-        for _ in range(100):
+        if state is None or state.task is None or state.task.done():
+            try:
+                await self._restore_channel(channel_id)
+            except Exception:
+                logger.exception("Failed to kick restore for max channel %s", channel_id)
+
+        if not wait:
             client = self.get_client(channel_id)
             if client:
                 return client
-            await asyncio.sleep(0.3)
-        raise IntegrationError(
-            "Канал MAX · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал."
+            raise ChannelNotReadyError(
+                "Канал MAX · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал.",
+                retry_after=3,
+            )
+
+        deadline = asyncio.get_running_loop().time() + (timeout if timeout is not None else _ENSURE_WAIT_SEC)
+        while asyncio.get_running_loop().time() < deadline:
+            client = self.get_client(channel_id)
+            if client:
+                return client
+            await asyncio.sleep(_ENSURE_POLL_SEC)
+
+        raise ChannelNotReadyError(
+            "Канал MAX · аккаунт сейчас офлайн. Подождите пару секунд или переподключите канал.",
+            retry_after=5,
         )
+
+    async def _close_client(self, client: WebClient | None) -> None:
+        if client is None:
+            return
+        try:
+            await asyncio.wait_for(client.close(), timeout=_DISCONNECT_TIMEOUT_SEC)
+        except Exception:
+            logger.warning("MAX personal close timed out or failed", exc_info=True)
 
     async def stop_all(self) -> None:
         tasks = []
         for state in list(self._states.values()):
             if state.client:
-                tasks.append(asyncio.create_task(state.client.close()))
+                tasks.append(asyncio.create_task(self._close_client(state.client)))
             if state.task and not state.task.done():
                 state.task.cancel()
                 tasks.append(state.task)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=_DISCONNECT_TIMEOUT_SEC + 2,
+                )
+            except TimeoutError:
+                logger.warning("MAX personal stop_all timed out")
         self._states.clear()
 
     async def stop_channel(self, channel_id: int) -> None:
@@ -162,12 +209,18 @@ class MaxPersonalRuntime:
             return
         tasks = []
         if state.client:
-            tasks.append(asyncio.create_task(state.client.close()))
+            tasks.append(asyncio.create_task(self._close_client(state.client)))
         if state.task and not state.task.done():
             state.task.cancel()
             tasks.append(state.task)
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=_DISCONNECT_TIMEOUT_SEC + 2,
+                )
+            except TimeoutError:
+                logger.warning("MAX personal stop_channel timed out channel=%s", channel_id)
         logger.info("MAX personal channel %s stopped", channel_id)
 
     async def _restore_channel(self, channel_id: int) -> None:
@@ -179,7 +232,12 @@ class MaxPersonalRuntime:
             if not meta:
                 return
             work_dir = Path(meta["work_dir"])
-            state = RuntimeState(channel_id=channel_id, status="connecting")
+            prev_gen = existing.reconnect_generation if existing else 0
+            state = RuntimeState(
+                channel_id=channel_id,
+                status="connecting",
+                reconnect_generation=prev_gen,
+            )
             self._states[channel_id] = state
             state.task = asyncio.create_task(
                 self._run_client(
@@ -195,38 +253,61 @@ class MaxPersonalRuntime:
         state = self._states.get(channel_id)
         if state is None:
             return
-        if state.status in {"qr_pending", "need_2fa", "connecting"}:
+        if state.status in {"qr_pending", "need_2fa"}:
             return
-        state.status = "error"
+        # During initial QR connect (connecting + no prior online) skip soft restore.
+        if state.status == "connecting" and state.reconnect_generation == 0:
+            return
+        # Soft reconnect: keep DB ONLINE so UI does not force QR; auto-restore session.
+        state.status = "reconnecting"
         state.error = reason
         state.client = None
+        state.reconnect_generation += 1
+        generation = state.reconnect_generation
         await self._update_channel(
             channel_id,
-            status=ChannelStatus.ERROR.value,
-            last_error=reason,
+            # Stay online in CRM — only last_error explains the blip.
+            status=ChannelStatus.ONLINE.value,
+            last_error=f"Переподключение: {reason}",
         )
-        logger.warning("MAX personal channel %s disconnected: %s", channel_id, reason)
-        # Soft reconnect with backoff (session still on disk).
+        logger.warning("MAX personal channel %s soft-disconnect: %s", channel_id, reason)
         asyncio.create_task(
-            self._reconnect_later(channel_id),
+            self._reconnect_later(channel_id, generation),
             name=f"max-personal-reconnect-{channel_id}",
         )
 
-    async def _reconnect_later(self, channel_id: int) -> None:
-        for delay in (2, 5, 15, 30):
+    async def _reconnect_later(self, channel_id: int, generation: int) -> None:
+        for delay in (1, 2, 5, 10, 20, 40):
             await asyncio.sleep(delay)
-            if self._stop_requested(channel_id):
+            state = self._states.get(channel_id)
+            if state is None or state.reconnect_generation != generation:
                 return
             if self.get_client(channel_id):
                 return
             try:
                 await self._restore_channel(channel_id)
-                for _ in range(25):
+                for _ in range(40):
                     if self.get_client(channel_id):
+                        await self._update_channel(channel_id, last_error=None)
                         return
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.25)
             except Exception:
                 logger.exception("MAX personal reconnect failed channel=%s", channel_id)
+
+        # Exhausted backoff — only then mark ERROR (user may need QR).
+        state = self._states.get(channel_id)
+        if state is None or state.reconnect_generation != generation:
+            return
+        if self.get_client(channel_id):
+            return
+        state.status = "error"
+        state.error = "Не удалось автоматически переподключить MAX · аккаунт"
+        await self._update_channel(
+            channel_id,
+            status=ChannelStatus.ERROR.value,
+            last_error=state.error,
+        )
+        logger.error("MAX personal channel %s gave up reconnecting", channel_id)
 
     def _stop_requested(self, channel_id: int) -> bool:
         state = self._states.get(channel_id)
@@ -441,19 +522,21 @@ class MaxPersonalRuntime:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            state.status = "error"
-            state.error = str(exc)
-            state.client = None
-            await self._update_channel(
-                channel_id,
-                status=ChannelStatus.ERROR.value,
-                last_error=state.error,
-            )
             logger.exception("MAX personal client failed channel=%s", channel_id)
-            asyncio.create_task(
-                self._reconnect_later(channel_id),
-                name=f"max-personal-reconnect-{channel_id}",
-            )
+            if fresh:
+                state.status = "error"
+                state.error = str(exc)
+                state.client = None
+                await self._update_channel(
+                    channel_id,
+                    status=ChannelStatus.ERROR.value,
+                    last_error=state.error,
+                )
+            else:
+                # Soft path — keep ONLINE in DB; ERROR only after reconnect backoff.
+                await self._mark_disconnected(
+                    channel_id, f"MAX personal client failed: {exc}"
+                )
         finally:
             watch_task.cancel()
             await asyncio.gather(watch_task, return_exceptions=True)

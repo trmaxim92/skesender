@@ -35,6 +35,7 @@ async function submit() {
     />
     <form
       class="relative w-full max-w-md rounded-2xl border border-line bg-panel p-8 shadow-sm"
+      autocomplete="off"
       @submit.prevent="submit"
     >
       <div class="mb-6">
@@ -47,6 +48,8 @@ async function submit() {
         <input
           v-model="email"
           type="email"
+          name="email"
+          autocomplete="username"
           required
           class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 outline-none ring-brand focus:ring-2"
         />
@@ -57,6 +60,8 @@ async function submit() {
         <input
           v-model="password"
           type="password"
+          name="password"
+          autocomplete="current-password"
           required
           class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 outline-none ring-brand focus:ring-2"
         />

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   assignDialogRequest,
   closeDialogRequest,
+  closeDialogsBatchRequest,
   deleteMessageRequest,
   editMessageRequest,
   fetchSidebarRequest,
@@ -1032,6 +1033,31 @@ export const useChatsStore = defineStore('chats', () => {
     }
   }
 
+  async function closeDialogsBatch(dialogIds: string[]) {
+    if (!dialogIds.length || closing.value) return null
+    closing.value = true
+    error.value = ''
+    try {
+      const res = await closeDialogsBatchRequest(dialogIds.map(Number), false)
+      const skippedIds = new Set(res.skipped.map((s) => String(s.id)))
+      dialogs.value = dialogs.value.filter((d) => !dialogIds.includes(d.id) || skippedIds.has(d.id))
+      if (activeDialogId.value && dialogIds.includes(activeDialogId.value) && !skippedIds.has(activeDialogId.value)) {
+        activeDialogId.value = dialogs.value[0]?.id ?? null
+        if (activeDialogId.value) await fetchMessages(activeDialogId.value)
+        else messages.value = []
+        sidePanelOpen.value = false
+        sidebar.value = null
+      }
+      void fetchUnreadSummary()
+      return res
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось закрыть обращения'
+      return null
+    } finally {
+      closing.value = false
+    }
+  }
+
   async function loadSidebar(dialogId: string) {
     sidebarLoading.value = true
     try {
@@ -1174,6 +1200,7 @@ export const useChatsStore = defineStore('chats', () => {
     assignOperator,
     sendMessage,
     closeAppeal,
+    closeDialogsBatch,
     openSidePanel,
     closeSidePanel,
     saveClientFields,

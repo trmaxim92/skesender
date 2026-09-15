@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.integrations.credentials_cache import decrypt_cached
 from app.integrations.telegram_bot import client as tg_client
 from app.mailing.types import MailingSendResult
 from app.models import AttachmentKind, Channel, MailingTemplate
@@ -30,7 +31,7 @@ class TelegramBotMailingSender:
                 error="Telegram-бот требует числовой chat_id (не @username)",
             )
 
-        token = decrypt_secret(channel.credentials_enc)
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         body = (template.body or "").strip()
         try:
             if media_bytes and template.media_kind == AttachmentKind.IMAGE.value:

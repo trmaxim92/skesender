@@ -65,3 +65,22 @@ export async function getAppealRequest(appealId: number) {
 export async function deleteAppealRequest(appealId: number) {
   return api<void>(`/api/appeals/${appealId}`, { method: 'DELETE' })
 }
+
+export interface AppealBatchResult {
+  processed: number
+  skipped: { id: number; reason: string }[]
+}
+
+export async function closeAppealsBatchRequest(appealIds: number[]) {
+  return api<AppealBatchResult>('/api/appeals/close-batch', {
+    method: 'POST',
+    json: { appeal_ids: appealIds },
+  })
+}
+
+export async function deleteAppealsBatchRequest(appealIds: number[]) {
+  return api<AppealBatchResult>('/api/appeals/delete-batch', {
+    method: 'POST',
+    json: { appeal_ids: appealIds },
+  })
+}

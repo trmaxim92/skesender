@@ -565,6 +565,23 @@ async def ensure_schema() -> None:
             text("CREATE INDEX IF NOT EXISTS ix_appeals_status_id ON appeals (status_id)")
         )
         await conn.execute(text("ALTER TABLE appeals ALTER COLUMN dialog_id DROP NOT NULL"))
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dialogs_assignee_last_at "
+                "ON dialogs (assignee_id, last_at DESC)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dialogs_department_last_at "
+                "ON dialogs (department_id, last_at DESC)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dialogs_assignee_id ON dialogs (assignee_id)"
+            )
+        )
 
 
 @asynccontextmanager

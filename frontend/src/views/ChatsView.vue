@@ -61,9 +61,64 @@ const transferNotice = ref('')
 const closeOpen = ref(false)
 const stickToBottom = ref(true)
 const pendingBelow = ref(0)
+const selectedNew = ref<Set<string>>(new Set())
+const bulkCloseBusy = ref(false)
+const bulkCloseMsg = ref('')
 let pollTimer: number | undefined
 let noticeTimer: number | undefined
 let syncingUrl = false
+
+const canBulkCloseNew = computed(() => canWrite.value && chats.filter === 'new')
+const selectedNewCount = computed(() => selectedNew.value.size)
+const allNewSelected = computed(() => {
+  const list = chats.filteredDialogs
+  if (!list.length) return false
+  return list.every((d) => selectedNew.value.has(d.id))
+})
+
+function clearNewSelection() {
+  selectedNew.value = new Set()
+  bulkCloseMsg.value = ''
+}
+
+function toggleNewSelect(id: string) {
+  if (!canBulkCloseNew.value) return
+  const next = new Set(selectedNew.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedNew.value = next
+}
+
+function toggleSelectAllNew() {
+  if (!canBulkCloseNew.value) return
+  if (allNewSelected.value) {
+    clearNewSelection()
+    return
+  }
+  selectedNew.value = new Set(chats.filteredDialogs.map((d) => d.id))
+}
+
+async function onBulkCloseNew() {
+  if (!canBulkCloseNew.value || bulkCloseBusy.value || !selectedNewCount.value) return
+  const ids = [...selectedNew.value]
+  const ok = window.confirm(
+    `Закрыть ${ids.length} обращений из «Новые»?\nКлиентам шаблон закрытия отправляться не будет.`,
+  )
+  if (!ok) return
+  bulkCloseBusy.value = true
+  bulkCloseMsg.value = ''
+  try {
+    const res = await chats.closeDialogsBatch(ids)
+    if (!res) return
+    clearNewSelection()
+    bulkCloseMsg.value =
+      res.skipped.length > 0
+        ? `Закрыто: ${res.closed}, пропущено: ${res.skipped.length}`
+        : `Закрыто: ${res.closed}`
+  } finally {
+    bulkCloseBusy.value = false
+  }
+}
 
 const assigneeLabel = computed(() => {
   const id = chats.activeDialog?.assigneeId
@@ -393,6 +448,13 @@ watch(
   () => cancelEdit(),
 )
 
+watch(
+  () => chats.filter,
+  () => {
+    clearNewSelection()
+  },
+)
+
 onMounted(async () => {
   mdMq = window.matchMedia('(min-width: 768px)')
   onMdMqChange()
@@ -416,11 +478,9 @@ onMounted(async () => {
   stickToBottom.value = true
   await scrollThreadToBottom()
   pollTimer = window.setInterval(() => {
-    if (chats.wsStatus !== 'open') {
-      void chats.fetchDialogs({ reloadMessages: true })
-    } else {
-      void chats.fetchDialogs({ reloadMessages: false })
-    }
+    // C9: when WS is open, realtime covers list/unread; only poll as fallback.
+    if (chats.wsStatus === 'open') return
+    void chats.fetchDialogs({ reloadMessages: true })
     void chats.fetchUnreadSummary()
   }, 30000)
 })
@@ -510,6 +570,31 @@ onUnmounted(() => {
           <Plus class="size-4" />
         </button>
       </div>
+      <div
+        v-if="canBulkCloseNew && chats.filteredDialogs.length"
+        class="flex items-center justify-between gap-2 border-b border-line bg-surface/60 px-3 py-2"
+      >
+        <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
+          <input
+            type="checkbox"
+            class="size-3.5 rounded border-line accent-brand"
+            :checked="allNewSelected"
+            @change="toggleSelectAllNew"
+          />
+          Выбрать все
+        </label>
+        <button
+          type="button"
+          class="rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
+          :disabled="!selectedNewCount || bulkCloseBusy"
+          @click="onBulkCloseNew"
+        >
+          {{ bulkCloseBusy ? '…' : `Закрыть (${selectedNewCount})` }}
+        </button>
+      </div>
+      <p v-if="bulkCloseMsg" class="border-b border-line px-3 py-1.5 text-[11px] text-ok">
+        {{ bulkCloseMsg }}
+      </p>
       <div class="border-b border-line px-3 py-2.5">
         <div class="relative">
           <Search
@@ -550,10 +635,25 @@ onUnmounted(() => {
           v-for="d in chats.filteredDialogs"
           :key="d.id"
           type="button"
-          class="flex w-full gap-3 border-b border-line px-3 py-3 text-left transition hover:bg-[#eceff3]"
-          :class="chats.activeDialogId === d.id ? 'bg-[#e5e8ed]' : ''"
+          class="flex w-full gap-2 border-b border-line px-3 py-3 text-left transition hover:bg-[#eceff3]"
+          :class="[
+            chats.activeDialogId === d.id ? 'bg-[#e5e8ed]' : '',
+            selectedNew.has(d.id) ? 'bg-brand-soft/40' : '',
+          ]"
           @click="selectDialog(d.id)"
         >
+          <div
+            v-if="canBulkCloseNew"
+            class="flex shrink-0 items-start pt-2"
+            @click.stop
+          >
+            <input
+              type="checkbox"
+              class="size-3.5 rounded border-line accent-brand"
+              :checked="selectedNew.has(d.id)"
+              @change="toggleNewSelect(d.id)"
+            />
+          </div>
           <ContactAvatar :name="d.contactName" :url="d.contactAvatarUrl" size="md" />
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-2">
