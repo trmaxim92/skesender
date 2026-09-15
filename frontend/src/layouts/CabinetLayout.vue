@@ -94,6 +94,10 @@ const presenceStatuses = ref<PresenceStatus[]>([])
 const presenceBusy = ref(false)
 const presenceLoadError = ref('')
 const profileMenuStyle = ref<Record<string, string>>({})
+const bellOpen = ref(false)
+const bellRoot = ref<HTMLElement | null>(null)
+const bellPanel = ref<HTMLElement | null>(null)
+const bellPanelStyle = ref<Record<string, string>>({})
 let notificationsPollTimer: number | undefined
 
 const currentPresence = computed(() => authUser.value?.presenceStatus ?? null)
@@ -109,6 +113,38 @@ function placeProfileMenu() {
   profileMenuStyle.value = {
     top: `${Math.round(rect.bottom + 8)}px`,
     left: `${Math.round(left)}px`,
+  }
+}
+
+function placeBellPanel() {
+  if (!bellOpen.value) return
+  const el = bellRoot.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const width = Math.min(380, window.innerWidth - 16)
+  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8)
+  bellPanelStyle.value = {
+    top: `${Math.round(rect.bottom + 8)}px`,
+    left: `${Math.round(left)}px`,
+    width: `${width}px`,
+  }
+}
+
+function notificationKindLabel(kind: string) {
+  if (kind === 'system_news') return 'Новости системы'
+  return 'Оповещение'
+}
+
+function formatNotifyAt(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return iso
   }
 }
 
@@ -183,9 +219,10 @@ watch(usersGroupExpanded, (v) => localStorage.setItem(USERS_GROUP_KEY, v ? '1' :
 watch(settingsGroupExpanded, (v) => localStorage.setItem(SETTINGS_GROUP_KEY, v ? '1' : '0'))
 
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => {
     profileOpen.value = false
+    bellOpen.value = false
     mobileNavOpen.value = false
     if (onUsersSection.value) usersGroupExpanded.value = true
     if (onSettingsSection.value) settingsGroupExpanded.value = true
@@ -282,8 +319,13 @@ function onSwMessage(ev: MessageEvent) {
   }
   if (data.type === 'oe:open-notifications') {
     profileOpen.value = false
-    const q = data.newsId ? { id: String(data.newsId) } : undefined
-    void router.push({ name: 'news', query: q })
+    if (data.newsId) {
+      void router.push({ name: 'news', query: { id: String(data.newsId) } })
+      return
+    }
+    bellOpen.value = true
+    placeBellPanel()
+    void notifications.fetchList()
   }
 }
 
@@ -310,6 +352,7 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     mobileNavOpen.value = false
     profileOpen.value = false
+    bellOpen.value = false
   }
 }
 
@@ -330,6 +373,7 @@ function toggleSettingsGroup() {
 
 function logout() {
   profileOpen.value = false
+  bellOpen.value = false
   chats.disconnectRealtime()
   void (async () => {
     await auth.logoutWithOffline()
@@ -356,6 +400,7 @@ async function loadPresenceStatuses() {
 }
 
 function toggleProfileMenu() {
+  bellOpen.value = false
   profileOpen.value = !profileOpen.value
   if (profileOpen.value) {
     placeProfileMenu()
@@ -363,12 +408,55 @@ function toggleProfileMenu() {
   }
 }
 
-function openNewsPage() {
+async function toggleBell() {
   profileOpen.value = false
-  if (route.name === 'news') {
-    void notifications.fetchList()
+  bellOpen.value = !bellOpen.value
+  if (bellOpen.value) {
+    placeBellPanel()
+    await notifications.fetchList()
+  }
+}
+
+async function openNotificationItem(id: string) {
+  const item = notifications.items.find((n) => n.id === id)
+  bellOpen.value = false
+  if (item && !item.read) {
+    try {
+      await notifications.markRead([id])
+    } catch {
+      // keep navigation usable
+    }
+  }
+  if (item?.link) {
+    void router.push(item.link)
     return
   }
+  if (item?.kind === 'system_news') {
+    const newsId = id.replace(/^news:/, '')
+    void router.push({ name: 'news', query: { id: newsId } })
+    return
+  }
+  void router.push({ name: 'news' })
+}
+
+async function markAllNotificationsRead() {
+  try {
+    await notifications.markAllRead()
+  } catch (e) {
+    window.dispatchEvent(
+      new CustomEvent('oe:in-app-toast', {
+        detail: {
+          kind: 'err',
+          title: 'Оповещения',
+          text: e instanceof ApiError ? e.detail : 'Не удалось отметить прочитанным',
+        },
+      }),
+    )
+  }
+}
+
+function openAllNews() {
+  bellOpen.value = false
   void router.push({ name: 'news' })
 }
 
@@ -413,6 +501,11 @@ function onDocClick(e: MouseEvent) {
       profileOpen.value = false
     }
   }
+  if (bellOpen.value) {
+    if (!(bellRoot.value?.contains(t) || bellPanel.value?.contains(t))) {
+      bellOpen.value = false
+    }
+  }
 }
 
 onMounted(() => {
@@ -423,6 +516,8 @@ onMounted(() => {
   window.addEventListener('oe:in-app-toast', onInAppToast)
   window.addEventListener('resize', placeProfileMenu)
   window.addEventListener('scroll', placeProfileMenu, true)
+  window.addEventListener('resize', placeBellPanel)
+  window.addEventListener('scroll', placeBellPanel, true)
   mdMq = window.matchMedia('(min-width: 768px)')
   onMdMqChange()
   mdMq.addEventListener('change', onMdMqChange)
@@ -455,6 +550,8 @@ onUnmounted(() => {
   window.removeEventListener('oe:in-app-toast', onInAppToast)
   window.removeEventListener('resize', placeProfileMenu)
   window.removeEventListener('scroll', placeProfileMenu, true)
+  window.removeEventListener('resize', placeBellPanel)
+  window.removeEventListener('scroll', placeBellPanel, true)
   mdMq?.removeEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
@@ -657,21 +754,107 @@ onUnmounted(() => {
           <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <button
-            type="button"
-            class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
-            :class="route.path.startsWith('/news') ? 'border-brand/40 bg-brand-soft/40' : ''"
-            title="Новости системы"
-            @click="openNewsPage"
-          >
-            <Bell class="size-4" />
-            <span
-              v-if="notifications.unreadCount > 0"
-              class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
+          <div ref="bellRoot" class="relative">
+            <button
+              type="button"
+              class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
+              :class="bellOpen ? 'border-brand/40 bg-brand-soft/40' : ''"
+              title="Оповещения"
+              :aria-expanded="bellOpen"
+              aria-haspopup="dialog"
+              @click.stop="toggleBell"
             >
-              {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-            </span>
-          </button>
+              <Bell class="size-4" />
+              <span
+                v-if="notifications.unreadCount > 0"
+                class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
+              >
+                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
+              </span>
+            </button>
+
+            <Teleport to="body">
+              <div
+                v-if="bellOpen"
+                ref="bellPanel"
+                class="fixed z-[200] overflow-hidden rounded-xl border border-line bg-panel shadow-xl shadow-black/10"
+                role="dialog"
+                aria-label="Оповещения"
+                :style="bellPanelStyle"
+                @click.stop
+              >
+                <div class="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-ink">Оповещения</p>
+                    <p class="text-[11px] text-mute">Новости и служебные уведомления</p>
+                  </div>
+                  <button
+                    v-if="notifications.hasUnread"
+                    type="button"
+                    class="shrink-0 text-xs font-medium text-brand hover:underline"
+                    @click="markAllNotificationsRead"
+                  >
+                    Прочитать все
+                  </button>
+                </div>
+
+                <div class="max-h-[min(70vh,26rem)] overflow-y-auto">
+                  <p
+                    v-if="notifications.loading && !notifications.items.length"
+                    class="px-4 py-8 text-center text-sm text-mute"
+                  >
+                    Загрузка…
+                  </p>
+                  <p
+                    v-else-if="notifications.error"
+                    class="px-4 py-4 text-center text-sm text-red-600"
+                  >
+                    {{ notifications.error }}
+                  </p>
+                  <p
+                    v-else-if="!notifications.items.length"
+                    class="px-4 py-8 text-center text-sm text-mute"
+                  >
+                    Пока нет оповещений
+                  </p>
+                  <button
+                    v-for="n in notifications.items"
+                    :key="n.id"
+                    type="button"
+                    class="flex w-full gap-3 border-b border-line px-4 py-3 text-left transition last:border-b-0 hover:bg-surface"
+                    :class="!n.read ? 'bg-brand-soft/20' : ''"
+                    @click="openNotificationItem(n.id)"
+                  >
+                    <span
+                      class="mt-1.5 size-2 shrink-0 rounded-full"
+                      :class="n.read ? 'bg-transparent' : 'bg-brand'"
+                      aria-hidden="true"
+                    />
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-baseline justify-between gap-2">
+                        <p class="truncate text-sm font-semibold text-ink">{{ n.title }}</p>
+                        <time class="shrink-0 text-[10px] text-mute">{{ formatNotifyAt(n.createdAt) }}</time>
+                      </div>
+                      <p class="mt-1 line-clamp-2 text-xs leading-relaxed text-mute">{{ n.body }}</p>
+                      <p class="mt-1.5 text-[10px] font-medium uppercase tracking-wide text-mute">
+                        {{ notificationKindLabel(n.kind) }}
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                <div class="border-t border-line px-4 py-2.5">
+                  <button
+                    type="button"
+                    class="w-full text-center text-xs font-medium text-brand hover:underline"
+                    @click="openAllNews"
+                  >
+                    Все новости системы
+                  </button>
+                </div>
+              </div>
+            </Teleport>
+          </div>
 
           <div ref="profileRoot" class="relative shrink-0">
           <button

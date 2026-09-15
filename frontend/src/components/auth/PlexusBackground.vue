@@ -1,41 +1,43 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 
-type Node = {
-  x: number
-  y: number
-  z: number
-  vx: number
-  vy: number
-  vz: number
-}
+type Pt = { x: number; y: number; vx: number; vy: number }
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 let raf = 0
-let nodes: Node[] = []
+let pts: Pt[] = []
 let w = 0
 let h = 0
 let dpr = 1
 let reduceMotion = false
+let running = true
+let lastTs = 0
 let onResize: (() => void) | null = null
+let onVis: (() => void) | null = null
 
-const LINK_DIST = 140
-const NODE_COUNT_BASE = 70
+const LINK = 110
+const TARGET_FPS = 30
+const FRAME_MS = 1000 / TARGET_FPS
 
-function spawn(): Node {
+function countForViewport() {
+  const area = w * h
+  if (area < 500_000) return 28
+  if (area < 1_200_000) return 36
+  return 42
+}
+
+function spawn(): Pt {
   return {
     x: Math.random() * w,
     y: Math.random() * h,
-    z: 0.35 + Math.random() * 0.9,
-    vx: (Math.random() - 0.5) * 0.35,
-    vy: (Math.random() - 0.5) * 0.35,
-    vz: (Math.random() - 0.5) * 0.002,
+    vx: (Math.random() - 0.5) * 0.28,
+    vy: (Math.random() - 0.5) * 0.28,
   }
 }
 
 function resize(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
-  dpr = Math.min(window.devicePixelRatio || 1, 2)
+  dpr = Math.min(window.devicePixelRatio || 1, 1.5)
   w = window.innerWidth
   h = window.innerHeight
   canvas.width = Math.floor(w * dpr)
@@ -44,103 +46,80 @@ function resize(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
   canvas.style.height = `${h}px`
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const count = Math.round(
-    NODE_COUNT_BASE * Math.min(1.4, Math.max(0.7, (w * h) / (1280 * 720))),
-  )
-  if (nodes.length !== count) {
-    nodes = Array.from({ length: count }, () => spawn())
-  }
+  const n = countForViewport()
+  if (pts.length !== n) pts = Array.from({ length: n }, () => spawn())
 }
 
-function step(ctx: CanvasRenderingContext2D) {
+function step(ctx: CanvasRenderingContext2D, ts: number) {
+  raf = requestAnimationFrame((t) => step(ctx, t))
+  if (!running) return
+  if (ts - lastTs < FRAME_MS) return
+  lastTs = ts
+
   ctx.clearRect(0, 0, w, h)
 
-  const g = ctx.createRadialGradient(
-    w * 0.5,
-    h * 0.45,
-    0,
-    w * 0.5,
-    h * 0.5,
-    Math.max(w, h) * 0.7,
-  )
-  g.addColorStop(0, 'rgba(8, 40, 72, 0.35)')
-  g.addColorStop(1, 'rgba(1, 6, 18, 0)')
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, w, h)
-
   if (!reduceMotion) {
-    for (const n of nodes) {
-      n.x += n.vx * n.z
-      n.y += n.vy * n.z
-      n.z += n.vz
-      if (n.z < 0.3 || n.z > 1.35) n.vz *= -1
-      if (n.x < -40 || n.x > w + 40) n.vx *= -1
-      if (n.y < -40 || n.y > h + 40) n.vy *= -1
-      n.x = Math.min(w + 40, Math.max(-40, n.x))
-      n.y = Math.min(h + 40, Math.max(-40, n.y))
+    for (const p of pts) {
+      p.x += p.vx
+      p.y += p.vy
+      if (p.x < 0 || p.x > w) p.vx *= -1
+      if (p.y < 0 || p.y > h) p.vy *= -1
+      p.x = Math.min(w, Math.max(0, p.x))
+      p.y = Math.min(h, Math.max(0, p.y))
     }
   }
 
-  for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i]!
-    for (let j = i + 1; j < nodes.length; j++) {
-      const b = nodes[j]!
+  const link2 = LINK * LINK
+  ctx.lineWidth = 1
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!
+    for (let j = i + 1; j < pts.length; j++) {
+      const b = pts[j]!
       const dx = a.x - b.x
       const dy = a.y - b.y
-      const dist = Math.hypot(dx, dy)
-      const maxDist = LINK_DIST * ((a.z + b.z) * 0.55)
-      if (dist > maxDist) continue
-      const alpha = (1 - dist / maxDist) * Math.min(a.z, b.z) * 0.55
+      const d2 = dx * dx + dy * dy
+      if (d2 > link2) continue
+      const alpha = (1 - Math.sqrt(d2) / LINK) * 0.35
+      ctx.strokeStyle = `rgba(0, 110, 200, ${alpha})`
       ctx.beginPath()
       ctx.moveTo(a.x, a.y)
       ctx.lineTo(b.x, b.y)
-      ctx.strokeStyle = `rgba(80, 220, 255, ${alpha})`
-      ctx.lineWidth = 0.7 * Math.min(a.z, b.z)
       ctx.stroke()
     }
   }
 
-  const ordered = [...nodes].sort((a, b) => a.z - b.z)
-  for (const n of ordered) {
-    const r = 1.2 + n.z * 2.8
-    const blur = (1.2 - Math.min(n.z, 1.2)) * 6
-    const alpha = 0.25 + n.z * 0.65
-
-    ctx.save()
-    if (blur > 0.4) ctx.filter = `blur(${blur}px)`
+  for (const p of pts) {
     ctx.beginPath()
-    ctx.arc(n.x, n.y, r * 2.2, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(56, 200, 255, ${alpha * 0.18})`
+    ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(0, 120, 210, 0.55)'
     ctx.fill()
-
-    ctx.beginPath()
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(170, 245, 255, ${alpha})`
-    ctx.shadowColor = 'rgba(0, 210, 255, 0.9)'
-    ctx.shadowBlur = 12 * n.z
-    ctx.fill()
-    ctx.restore()
   }
-
-  raf = requestAnimationFrame(() => step(ctx))
 }
 
 onMounted(() => {
   const canvas = canvasRef.value
   if (!canvas) return
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { alpha: true })
   if (!ctx) return
 
   reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   onResize = () => resize(canvas, ctx)
   onResize()
-  window.addEventListener('resize', onResize)
-  raf = requestAnimationFrame(() => step(ctx))
+  window.addEventListener('resize', onResize, { passive: true })
+
+  onVis = () => {
+    running = document.visibilityState === 'visible'
+    if (running) lastTs = 0
+  }
+  document.addEventListener('visibilitychange', onVis)
+
+  raf = requestAnimationFrame((t) => step(ctx, t))
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(raf)
   if (onResize) window.removeEventListener('resize', onResize)
+  if (onVis) document.removeEventListener('visibilitychange', onVis)
 })
 </script>
 
