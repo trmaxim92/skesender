@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "SkySender",
-  "short_name": "SkySender",
-  "description": "Кабинет оператора SkySender — чаты, обращения и оповещения",
+  "name": "СкайСкел",
+  "short_name": "СкайСкел",
+  "description": "Кабинет оператора СкайСкел — чаты, обращения и оповещения",
   "lang": "ru",
   "dir": "ltr",
   "start_url": "/chats",

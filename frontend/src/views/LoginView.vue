@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import PlexusBackground from '@/components/auth/PlexusBackground.vue'
 
 const email = ref('')
 const password = ref('')
@@ -24,54 +25,69 @@ async function submit() {
 </script>
 
 <template>
-  <div class="relative flex min-h-full items-center justify-center overflow-hidden bg-surface px-4">
+  <div class="relative flex min-h-full items-center justify-center overflow-hidden px-4">
+    <!-- Deep navy base matching reference -->
+    <div class="absolute inset-0 bg-[#020b1a]" />
     <div
-      class="pointer-events-none absolute inset-0 opacity-70"
+      class="pointer-events-none absolute inset-0"
       style="
         background:
-          radial-gradient(ellipse 60% 50% at 20% 20%, #dbe7ff 0%, transparent 55%),
-          radial-gradient(ellipse 50% 40% at 80% 80%, #e8eef8 0%, transparent 50%);
+          radial-gradient(ellipse 70% 55% at 50% 40%, rgba(12, 55, 95, 0.55) 0%, transparent 60%),
+          radial-gradient(ellipse 40% 35% at 15% 85%, rgba(0, 90, 120, 0.25) 0%, transparent 55%),
+          radial-gradient(ellipse 35% 30% at 90% 15%, rgba(20, 70, 110, 0.3) 0%, transparent 50%);
       "
     />
+    <PlexusBackground />
+
     <form
-      class="relative w-full max-w-md rounded-2xl border border-line bg-panel p-8 shadow-sm"
+      class="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#071526]/78 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-md"
       autocomplete="off"
       @submit.prevent="submit"
     >
-      <div class="mb-6">
-        <div class="mb-1 text-2xl font-bold tracking-tight">SkySender</div>
-        <p class="text-sm text-muted">Вход в кабинет операторов</p>
+      <div class="mb-6 flex flex-col items-center text-center">
+        <img
+          src="/logo-skayskel.png"
+          alt="СкайСкел"
+          class="mb-4 h-auto w-48 max-w-full rounded-2xl bg-white p-3 shadow-[0_8px_28px_rgba(0,0,0,0.35)]"
+          width="192"
+          height="192"
+        />
+        <p class="text-sm text-cyan-100/70">Вход в кабинет операторов</p>
       </div>
 
       <label class="mb-4 block">
-        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">Email</span>
+        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-cyan-100/55">
+          Email
+        </span>
         <input
           v-model="email"
           type="email"
           name="email"
           autocomplete="username"
           required
-          class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 outline-none ring-brand focus:ring-2"
+          class="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-white outline-none placeholder:text-white/30 ring-cyan-400/40 focus:border-cyan-300/40 focus:ring-2"
         />
       </label>
 
       <label class="mb-4 block">
-        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">Пароль</span>
+        <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-cyan-100/55">
+          Пароль
+        </span>
         <input
           v-model="password"
           type="password"
           name="password"
           autocomplete="current-password"
           required
-          class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 outline-none ring-brand focus:ring-2"
+          class="w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-white outline-none placeholder:text-white/30 ring-cyan-400/40 focus:border-cyan-300/40 focus:ring-2"
         />
       </label>
 
-      <p v-if="auth.error" class="mb-4 text-sm text-danger">{{ auth.error }}</p>
+      <p v-if="auth.error" class="mb-4 text-sm text-red-300">{{ auth.error }}</p>
 
       <button
         type="submit"
-        class="w-full rounded-xl bg-brand py-2.5 text-sm font-semibold text-white transition hover:brightness-105 disabled:opacity-60"
+        class="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(14,165,233,0.35)] transition hover:brightness-110 disabled:opacity-60"
         :disabled="auth.loading"
       >
         {{ auth.loading ? 'Входим…' : 'Войти' }}

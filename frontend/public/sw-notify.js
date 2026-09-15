@@ -133,17 +133,10 @@ self.addEventListener('notificationclick', (event) => {
   if (action === 'dismiss') return
 
   if (data.kind === 'news') {
-    event.waitUntil(
-      (async () => {
-        await openOrFocusTarget('/')
-        const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-        for (const client of all) {
-          if (!sameOrigin(client.url)) continue
-          client.postMessage({ type: 'oe:open-notifications', newsId: data.newsId || null })
-          return
-        }
-      })(),
-    )
+    const newsPath = data.newsId
+      ? `/news?id=${encodeURIComponent(String(data.newsId))}`
+      : '/news'
+    event.waitUntil(openOrFocusTarget(newsPath))
     return
   }
 

@@ -87,6 +87,11 @@ const router = createRouter({
           redirect: '/departments',
         },
         {
+          path: 'news',
+          name: 'news',
+          component: () => import('@/views/NewsView.vue'),
+        },
+        {
           path: 'profile',
           name: 'profile',
           component: () => import('@/views/profile/ProfileView.vue'),

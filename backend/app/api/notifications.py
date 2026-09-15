@@ -47,7 +47,7 @@ def _to_notification(news: SystemNews, *, read: bool) -> NotificationOut:
         body=news.body,
         created_at=news.published_at or news.created_at,
         read=read,
-        link=None,
+        link=f"/news?id={news.id}",
     )
 
 

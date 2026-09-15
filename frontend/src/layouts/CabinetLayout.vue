@@ -50,7 +50,7 @@ import {
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
 const USERS_GROUP_KEY = 'oe_nav_users_open'
 const SETTINGS_GROUP_KEY = 'oe_nav_settings_open'
-const BASE_TITLE = 'SkySender'
+const BASE_TITLE = 'СкайСкел'
 
 const auth = useAuthStore()
 const { user: authUser } = storeToRefs(auth)
@@ -94,11 +94,6 @@ const presenceStatuses = ref<PresenceStatus[]>([])
 const presenceBusy = ref(false)
 const presenceLoadError = ref('')
 const profileMenuStyle = ref<Record<string, string>>({})
-const bellOpen = ref(false)
-const bellRoot = ref<HTMLElement | null>(null)
-const bellPanel = ref<HTMLElement | null>(null)
-const bellPanelStyle = ref<Record<string, string>>({})
-const expandedNewsId = ref<string | null>(null)
 let notificationsPollTimer: number | undefined
 
 const currentPresence = computed(() => authUser.value?.presenceStatus ?? null)
@@ -114,20 +109,6 @@ function placeProfileMenu() {
   profileMenuStyle.value = {
     top: `${Math.round(rect.bottom + 8)}px`,
     left: `${Math.round(left)}px`,
-  }
-}
-
-function placeBellPanel() {
-  if (!bellOpen.value) return
-  const el = bellRoot.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  const width = Math.min(360, window.innerWidth - 16)
-  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8)
-  bellPanelStyle.value = {
-    top: `${Math.round(rect.bottom + 8)}px`,
-    left: `${Math.round(left)}px`,
-    width: `${width}px`,
   }
 }
 
@@ -163,6 +144,7 @@ const title = computed(() => {
   if (route.path.startsWith('/profile/templates')) return 'Мои шаблоны'
   if (route.name === 'appeal-detail') return 'Обращение'
   if (route.path.startsWith('/employees')) return 'На смене'
+  if (route.path.startsWith('/news')) return 'Новости'
   if (route.path.startsWith('/users')) return 'Пользователи'
   if (route.path.startsWith('/roles')) return 'Роли'
   if (route.path.startsWith('/departments')) return 'Отделы'
@@ -204,7 +186,6 @@ watch(
   () => route.path,
   () => {
     profileOpen.value = false
-    bellOpen.value = false
     mobileNavOpen.value = false
     if (onUsersSection.value) usersGroupExpanded.value = true
     if (onSettingsSection.value) settingsGroupExpanded.value = true
@@ -300,20 +281,9 @@ function onSwMessage(ev: MessageEvent) {
     return
   }
   if (data.type === 'oe:open-notifications') {
-    void (async () => {
-      profileOpen.value = false
-      bellOpen.value = true
-      placeBellPanel()
-      await notifications.fetchList()
-      if (data.newsId) {
-        expandedNewsId.value = `news:${data.newsId}`
-        try {
-          await notifications.markRead([`news:${data.newsId}`])
-        } catch {
-          // ignore
-        }
-      }
-    })()
+    profileOpen.value = false
+    const q = data.newsId ? { id: String(data.newsId) } : undefined
+    void router.push({ name: 'news', query: q })
   }
 }
 
@@ -340,7 +310,6 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     mobileNavOpen.value = false
     profileOpen.value = false
-    bellOpen.value = false
   }
 }
 
@@ -361,7 +330,6 @@ function toggleSettingsGroup() {
 
 function logout() {
   profileOpen.value = false
-  bellOpen.value = false
   chats.disconnectRealtime()
   void (async () => {
     await auth.logoutWithOffline()
@@ -388,7 +356,6 @@ async function loadPresenceStatuses() {
 }
 
 function toggleProfileMenu() {
-  bellOpen.value = false
   profileOpen.value = !profileOpen.value
   if (profileOpen.value) {
     placeProfileMenu()
@@ -396,54 +363,13 @@ function toggleProfileMenu() {
   }
 }
 
-async function toggleBell() {
+function openNewsPage() {
   profileOpen.value = false
-  bellOpen.value = !bellOpen.value
-  if (bellOpen.value) {
-    placeBellPanel()
-    await notifications.fetchList()
+  if (route.name === 'news') {
+    void notifications.fetchList()
+    return
   }
-}
-
-function formatNewsAt(iso: string) {
-  try {
-    return new Date(iso).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
-
-async function openNotification(id: string) {
-  expandedNewsId.value = expandedNewsId.value === id ? null : id
-  const item = notifications.items.find((n) => n.id === id)
-  if (item && !item.read) {
-    try {
-      await notifications.markRead([id])
-    } catch {
-      // keep UI usable
-    }
-  }
-}
-
-async function markAllNotificationsRead() {
-  try {
-    await notifications.markAllRead()
-  } catch (e) {
-    window.dispatchEvent(
-      new CustomEvent('oe:in-app-toast', {
-        detail: {
-          kind: 'err',
-          title: 'Оповещения',
-          text: e instanceof ApiError ? e.detail : 'Не удалось отметить прочитанным',
-        },
-      }),
-    )
-  }
+  void router.push({ name: 'news' })
 }
 
 async function choosePresence(statusId: number) {
@@ -487,11 +413,6 @@ function onDocClick(e: MouseEvent) {
       profileOpen.value = false
     }
   }
-  if (bellOpen.value) {
-    if (!(bellRoot.value?.contains(t) || bellPanel.value?.contains(t))) {
-      bellOpen.value = false
-    }
-  }
 }
 
 onMounted(() => {
@@ -502,8 +423,6 @@ onMounted(() => {
   window.addEventListener('oe:in-app-toast', onInAppToast)
   window.addEventListener('resize', placeProfileMenu)
   window.addEventListener('scroll', placeProfileMenu, true)
-  window.addEventListener('resize', placeBellPanel)
-  window.addEventListener('scroll', placeBellPanel, true)
   mdMq = window.matchMedia('(min-width: 768px)')
   onMdMqChange()
   mdMq.addEventListener('change', onMdMqChange)
@@ -536,8 +455,6 @@ onUnmounted(() => {
   window.removeEventListener('oe:in-app-toast', onInAppToast)
   window.removeEventListener('resize', placeProfileMenu)
   window.removeEventListener('scroll', placeProfileMenu, true)
-  window.removeEventListener('resize', placeBellPanel)
-  window.removeEventListener('scroll', placeBellPanel, true)
   mdMq?.removeEventListener('change', onMdMqChange)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onSwMessage)
@@ -570,8 +487,8 @@ onUnmounted(() => {
       ]"
     >
       <div
-        class="flex h-14 shrink-0 items-center gap-2 border-b border-line"
-        :class="expandedNav ? 'px-3' : 'justify-center px-2'"
+        class="flex shrink-0 items-center gap-2 border-b border-line"
+        :class="expandedNav ? 'h-[4.25rem] px-3' : 'h-14 justify-center px-2'"
       >
         <button
           type="button"
@@ -586,8 +503,14 @@ onUnmounted(() => {
           class="min-w-0 overflow-hidden transition-opacity duration-200"
           :class="expandedNav ? 'flex-1 opacity-100' : 'pointer-events-none w-0 opacity-0'"
         >
-          <p class="truncate text-sm font-semibold tracking-tight text-ink">SkySender</p>
-          <p class="truncate text-[11px] text-mute">Кабинет оператора</p>
+          <img
+            src="/logo-skayskel.png"
+            alt="СкайСкел"
+            class="h-9 w-auto max-w-full object-contain object-left"
+            width="140"
+            height="36"
+          />
+          <p class="mt-0.5 truncate text-[11px] text-mute">Кабинет оператора</p>
         </div>
       </div>
 
@@ -734,98 +657,21 @@ onUnmounted(() => {
           <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <div ref="bellRoot" class="relative">
-            <button
-              type="button"
-              class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
-              title="Оповещения"
-              :aria-expanded="bellOpen"
-              aria-haspopup="dialog"
-              @click.stop="toggleBell"
+          <button
+            type="button"
+            class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
+            :class="route.path.startsWith('/news') ? 'border-brand/40 bg-brand-soft/40' : ''"
+            title="Новости системы"
+            @click="openNewsPage"
+          >
+            <Bell class="size-4" />
+            <span
+              v-if="notifications.unreadCount > 0"
+              class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
             >
-              <Bell class="size-4" />
-              <span
-                v-if="notifications.unreadCount > 0"
-                class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
-              >
-                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-              </span>
-            </button>
-
-            <Teleport to="body">
-              <div
-                v-if="bellOpen"
-                ref="bellPanel"
-                class="fixed z-[200] overflow-hidden rounded-xl border border-line bg-panel shadow-lg"
-                role="dialog"
-                aria-label="Оповещения"
-                :style="bellPanelStyle"
-                @click.stop
-              >
-                <div class="flex items-center justify-between gap-2 border-b border-line px-3 py-2.5">
-                  <div>
-                    <p class="text-sm font-semibold text-ink">Оповещения</p>
-                    <p class="text-[11px] text-mute">Новости системы и служебные уведомления</p>
-                  </div>
-                  <button
-                    v-if="notifications.hasUnread"
-                    type="button"
-                    class="shrink-0 text-xs font-medium text-brand hover:underline"
-                    @click="markAllNotificationsRead"
-                  >
-                    Прочитать все
-                  </button>
-                </div>
-                <div class="max-h-[min(70vh,28rem)] overflow-y-auto">
-                  <p v-if="notifications.loading" class="px-3 py-6 text-center text-sm text-mute">
-                    Загрузка…
-                  </p>
-                  <p
-                    v-else-if="notifications.error"
-                    class="px-3 py-4 text-center text-sm text-red-600"
-                  >
-                    {{ notifications.error }}
-                  </p>
-                  <p
-                    v-else-if="!notifications.items.length"
-                    class="px-3 py-6 text-center text-sm text-mute"
-                  >
-                    Пока нет оповещений
-                  </p>
-                  <button
-                    v-for="n in notifications.items"
-                    :key="n.id"
-                    type="button"
-                    class="block w-full border-b border-line px-3 py-3 text-left transition last:border-b-0 hover:bg-surface"
-                    :class="!n.read ? 'bg-brand-soft/30' : ''"
-                    @click="openNotification(n.id)"
-                  >
-                    <div class="flex items-start gap-2">
-                      <span
-                        class="mt-1.5 size-2 shrink-0 rounded-full"
-                        :class="n.read ? 'bg-transparent' : 'bg-brand'"
-                      />
-                      <div class="min-w-0 flex-1">
-                        <div class="flex items-baseline justify-between gap-2">
-                          <p class="truncate text-sm font-medium text-ink">{{ n.title }}</p>
-                          <span class="shrink-0 text-[10px] text-mute">{{ formatNewsAt(n.createdAt) }}</span>
-                        </div>
-                        <p
-                          class="mt-0.5 text-xs text-mute"
-                          :class="expandedNewsId === n.id ? 'whitespace-pre-wrap' : 'line-clamp-2'"
-                        >
-                          {{ n.body }}
-                        </p>
-                        <p class="mt-1 text-[10px] font-medium uppercase tracking-wide text-mute">
-                          Новости системы
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </Teleport>
-          </div>
+              {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
+            </span>
+          </button>
 
           <div ref="profileRoot" class="relative shrink-0">
           <button
