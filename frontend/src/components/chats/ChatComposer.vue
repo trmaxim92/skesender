@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
@@ -230,32 +230,35 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
 }
 
+const MAX_COMPOSER_HEIGHT = 280
+
 function resizeTextarea() {
   const el = textareaEl.value
   if (!el) return
-  el.style.height = 'auto'
-  if (!props.modelValue) {
-    el.style.height = ''
-    return
-  }
-  el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+  el.style.height = '0px'
+  const scroll = el.scrollHeight
+  const next = Math.min(Math.max(scroll, 28), MAX_COMPOSER_HEIGHT)
+  el.style.height = `${next}px`
+  el.style.overflowY = scroll > MAX_COMPOSER_HEIGHT ? 'auto' : 'hidden'
 }
 
 function onInput(event: Event) {
   const el = event.target as HTMLTextAreaElement
   emit('update:modelValue', el.value)
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+  resizeTextarea()
 }
 
 watch(
   () => props.modelValue,
-  async (value) => {
-    if (value) return
+  async () => {
     await nextTick()
     resizeTextarea()
   },
 )
+
+onMounted(() => {
+  resizeTextarea()
+})
 </script>
 
 <template>
@@ -412,7 +415,7 @@ watch(
           :value="modelValue"
           rows="1"
           :placeholder="noteMode ? 'Заметка для команды…' : 'Написать сообщение… или вставьте / перетащите файлы'"
-          class="max-h-32 min-h-[28px] w-full resize-none bg-transparent py-1 text-sm leading-6 outline-none"
+          class="composer-input max-h-[280px] min-h-[28px] w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-6 outline-none"
           :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/80'"
           @input="onInput"
           @paste="onPaste"
@@ -501,3 +504,9 @@ watch(
     </Modal>
   </div>
 </template>
+
+<style scoped>
+.composer-input {
+  field-sizing: content;
+}
+</style>
