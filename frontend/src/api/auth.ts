@@ -214,6 +214,10 @@ export async function maxQr2faRequest(channelId: number, password: string) {
   })
 }
 
+export async function reconnectChannelRequest(id: number) {
+  return api<ApiChannel>(`/api/channels/${id}/reconnect`, { method: 'POST' })
+}
+
 export async function deleteChannelRequest(id: number) {
   return api<void>(`/api/channels/${id}`, { method: 'DELETE' })
 }

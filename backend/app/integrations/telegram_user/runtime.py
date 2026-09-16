@@ -278,6 +278,47 @@ class TelegramUserRuntime:
                 logger.warning("Telegram stop_channel timed out channel=%s", channel_id)
         logger.info("Telegram user channel %s stopped", channel_id)
 
+    async def manual_reconnect(self, channel_id: int, *, timeout: float = 45.0) -> None:
+        """Force restore from saved Telethon session (no QR wipe)."""
+        meta = await self._load_session_meta(channel_id)
+        if not meta:
+            raise IntegrationError(
+                "Нет сохранённой сессии Telegram. Подключите канал заново через QR."
+            )
+        await self.stop_channel(channel_id)
+        await self._update_channel(
+            channel_id,
+            status=ChannelStatus.CONNECTING.value,
+            last_error="Ручное переподключение…",
+        )
+        await self._restore_channel(channel_id)
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            client = self.get_client(channel_id)
+            if client is not None and client.is_connected():
+                return
+            state = self._states.get(channel_id)
+            if state is not None and state.status == "error":
+                raise IntegrationError(
+                    state.error or "Не удалось переподключить Telegram · аккаунт"
+                )
+            await asyncio.sleep(0.25)
+
+        state = self._states.get(channel_id)
+        err = (
+            (state.error if state else None)
+            or "Таймаут ручного переподключения Telegram · аккаунт"
+        )
+        if state is not None:
+            state.status = "error"
+            state.error = err
+        await self._update_channel(
+            channel_id,
+            status=ChannelStatus.ERROR.value,
+            last_error=err,
+        )
+        raise IntegrationError(err)
+
     async def _restore_channel(self, channel_id: int) -> None:
         async with self._lock:
             existing = self._states.get(channel_id)

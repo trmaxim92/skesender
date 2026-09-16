@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Copy, Pencil, Plus, Power, Trash2 } from 'lucide-vue-next'
+import { Copy, Pencil, Plus, Power, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
 import { transportLabel, type Channel, type Department } from '@/types'
@@ -29,6 +29,8 @@ const snippetOpen = ref(false)
 const snippetChannel = ref<Channel | null>(null)
 const snippetCopied = ref(false)
 const toggleBusyId = ref<number | null>(null)
+const reconnectBusyId = ref<number | null>(null)
+const reconnectError = ref('')
 
 onMounted(async () => {
   void channels.fetchChannels()
@@ -96,6 +98,26 @@ async function toggleWebchat(ch: Channel) {
   toggleBusyId.value = ch.id
   await channels.updateChannel(ch.id, { status: next })
   toggleBusyId.value = null
+}
+
+function canReconnect(ch: Channel) {
+  return (
+    canManage.value &&
+    ch.hasCredentials &&
+    (ch.transport === 'max' || ch.transport === 'tgapi')
+  )
+}
+
+async function reconnectChannel(ch: Channel) {
+  if (reconnectBusyId.value != null || !canReconnect(ch)) return
+  reconnectBusyId.value = ch.id
+  reconnectError.value = ''
+  channels.loadError = ''
+  const ok = await channels.reconnectChannel(ch.id)
+  reconnectBusyId.value = null
+  if (!ok) {
+    reconnectError.value = channels.loadError || 'Не удалось переподключить'
+  }
 }
 
 function openEdit(ch: Channel) {
@@ -187,6 +209,7 @@ watch(
           Называйте каналы по отделу (например «Продажи · Telegram бот»), чтобы было ясно, кому назначать.
         </p>
         <p v-if="channels.loadError" class="mt-1 text-sm text-danger">{{ channels.loadError }}</p>
+        <p v-else-if="reconnectError" class="mt-1 text-sm text-danger">{{ reconnectError }}</p>
       </div>
       <button
         v-if="canManage"
@@ -293,6 +316,27 @@ watch(
                 : ch.status === 'online'
                   ? 'Выключить'
                   : 'Включить'
+            }}
+          </button>
+        </div>
+        <div v-else-if="canReconnect(ch)" class="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold transition"
+            :class="
+              ch.status === 'error' || ch.lastError
+                ? 'border-danger/30 text-danger hover:bg-danger/10'
+                : 'text-muted hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
+            "
+            :disabled="reconnectBusyId === ch.id"
+            @click="reconnectChannel(ch)"
+          >
+            <RefreshCw
+              class="size-3.5"
+              :class="reconnectBusyId === ch.id ? 'animate-spin' : ''"
+            />
+            {{
+              reconnectBusyId === ch.id ? 'Переподключение…' : 'Переподключить'
             }}
           </button>
         </div>

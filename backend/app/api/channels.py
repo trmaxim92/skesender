@@ -395,6 +395,40 @@ async def qr_2fa(
     )
 
 
+@router.post("/{channel_id}/reconnect", response_model=ChannelOut)
+async def reconnect_channel(
+    channel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(ACTION_MANAGE_CHANNELS)),
+) -> ChannelOut:
+    """Manual session restore for personal MAX / Telegram accounts (no QR wipe)."""
+    channel = await _load_channel(db, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    if not channel.credentials_enc:
+        raise HTTPException(
+            status_code=400,
+            detail="Нет сохранённой сессии — подключите канал заново через QR",
+        )
+    transport = channel.transport
+    try:
+        if transport == ChannelTransport.MAX.value:
+            await max_runtime.manual_reconnect(channel_id)
+        elif transport == ChannelTransport.TGAPI.value:
+            await telegram_user_runtime.manual_reconnect(channel_id)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Ручное переподключение доступно только для MAX · аккаунт и Telegram · аккаунт",
+            )
+    except IntegrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    loaded = await _load_channel(db, channel_id)
+    assert loaded is not None
+    return to_channel_out(loaded)
+
+
 @router.delete("/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_channel(
     channel_id: int,

@@ -9,6 +9,7 @@ import {
   mapChannel,
   maxQr2faRequest,
   maxQrStatusRequest,
+  reconnectChannelRequest,
   startMaxQrRequest,
   startTelegramQrRequest,
 } from '@/api/auth'
@@ -263,6 +264,21 @@ export const useChannelsStore = defineStore('channels', () => {
     }
   }
 
+  async function reconnectChannel(id: number): Promise<boolean> {
+    try {
+      const updated = await reconnectChannelRequest(id)
+      const mapped = mapChannel(updated)
+      const idx = channels.value.findIndex((c) => c.id === id)
+      if (idx >= 0) channels.value[idx] = mapped
+      else channels.value.unshift(mapped)
+      return true
+    } catch (e) {
+      loadError.value = e instanceof ApiError ? e.detail : 'Не удалось переподключить канал'
+      await fetchChannels()
+      return false
+    }
+  }
+
   async function removeChannel(id: number): Promise<boolean> {
     try {
       await deleteChannelRequest(id)
@@ -302,6 +318,7 @@ export const useChannelsStore = defineStore('channels', () => {
     connectBot,
     submit2fa,
     updateChannel,
+    reconnectChannel,
     removeChannel,
   }
 })
