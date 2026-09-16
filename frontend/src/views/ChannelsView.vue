@@ -46,6 +46,21 @@ const diagError = ref('')
 const diagChannelFilter = ref<string>('all')
 let diagTimer: number | undefined
 
+const kindLabel: Record<string, string> = {
+  online: 'Онлайн',
+  offline: 'Оффлайн',
+  connecting: 'Подключение',
+  qr: 'QR',
+  error: 'Ошибка',
+  disconnect: 'Обрыв',
+  reconnect: 'Переподключение',
+  reconnect_attempt: 'Попытка',
+  gave_up: 'Сбой',
+  manual_reconnect: 'Вручную',
+  note: 'Заметка',
+  status: 'Статус',
+}
+
 async function loadDiagnostics() {
   diagLoading.value = true
   diagError.value = ''
