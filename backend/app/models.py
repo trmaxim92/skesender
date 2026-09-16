@@ -361,7 +361,6 @@ class ChannelEvent(Base):
     __tablename__ = "channel_events"
     __table_args__ = (
         Index("ix_channel_events_channel_created", "channel_id", "created_at"),
-        Index("ix_channel_events_created_at", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
