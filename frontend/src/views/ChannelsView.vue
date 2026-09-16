@@ -8,10 +8,18 @@ import StatusDot from '@/components/ui/StatusDot.vue'
 import Modal from '@/components/ui/Modal.vue'
 import AddChannelModal from '@/components/channels/AddChannelModal.vue'
 import { listDepartmentsRequest, mapDepartment } from '@/api/settings'
+import {
+  listChannelEventsRequest,
+  mapChannelEvent,
+  type ChannelEvent,
+} from '@/api/auth'
+import { ApiError } from '@/api/client'
 
 const auth = useAuthStore()
 const channels = useChannelsStore()
 const departments = ref<Department[]>([])
+
+const tab = ref<'channels' | 'diagnostics'>('channels')
 
 const editOpen = ref(false)
 const editChannel = ref<Channel | null>(null)
@@ -32,6 +40,44 @@ const toggleBusyId = ref<number | null>(null)
 const reconnectBusyId = ref<number | null>(null)
 const reconnectError = ref('')
 
+const diagEvents = ref<ChannelEvent[]>([])
+const diagLoading = ref(false)
+const diagError = ref('')
+const diagChannelFilter = ref<string>('all')
+let diagTimer: number | undefined
+
+async function loadDiagnostics() {
+  diagLoading.value = true
+  diagError.value = ''
+  try {
+    const channelId =
+      diagChannelFilter.value === 'all' ? null : Number(diagChannelFilter.value)
+    const rows = await listChannelEventsRequest({
+      channelId: Number.isFinite(channelId as number) ? (channelId as number) : null,
+      limit: 150,
+    })
+    diagEvents.value = rows.map(mapChannelEvent)
+  } catch (e) {
+    diagError.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить логи'
+  } finally {
+    diagLoading.value = false
+  }
+}
+
+function startDiagPoll() {
+  stopDiagPoll()
+  diagTimer = window.setInterval(() => {
+    if (tab.value === 'diagnostics') void loadDiagnostics()
+  }, 8000)
+}
+
+function stopDiagPoll() {
+  if (diagTimer) {
+    window.clearInterval(diagTimer)
+    diagTimer = undefined
+  }
+}
+
 onMounted(async () => {
   void channels.fetchChannels()
   try {
@@ -43,9 +89,40 @@ onMounted(async () => {
 
 onUnmounted(() => {
   channels.closeConnect()
+  stopDiagPoll()
+})
+
+watch(tab, (t) => {
+  if (t === 'diagnostics') {
+    void loadDiagnostics()
+    startDiagPoll()
+  } else {
+    stopDiagPoll()
+  }
+})
+
+watch(diagChannelFilter, () => {
+  if (tab.value === 'diagnostics') void loadDiagnostics()
 })
 
 const canManage = computed(() => auth.can('action.manage_channels'))
+
+function formatDiagAt(iso: string) {
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function levelClass(level: string) {
+  if (level === 'error') return 'text-danger'
+  if (level === 'warn') return 'text-amber-700'
+  return 'text-muted'
+}
 
 const transportTone = computed(() => ({
   maxbot: 'bg-max text-white',
@@ -198,21 +275,48 @@ watch(
 
 <template>
   <div class="h-full overflow-auto p-4 md:p-6">
-    <div class="mb-5 flex items-center justify-between gap-3">
+    <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p class="text-sm text-muted">
-          Онлайн: <span class="font-semibold text-ink">{{ channels.onlineCount }}</span>
-          из {{ channels.channels.length }}
-          <span v-if="channels.loading" class="ml-2">загрузка…</span>
-        </p>
-        <p class="mt-1 text-xs text-muted">
-          Называйте каналы по отделу (например «Продажи · Telegram бот»), чтобы было ясно, кому назначать.
-        </p>
-        <p v-if="channels.loadError" class="mt-1 text-sm text-danger">{{ channels.loadError }}</p>
-        <p v-else-if="reconnectError" class="mt-1 text-sm text-danger">{{ reconnectError }}</p>
+        <div class="mb-2 flex gap-1 rounded-lg bg-surface p-0.5 w-fit">
+          <button
+            type="button"
+            class="rounded-md px-3 py-1.5 text-xs font-semibold transition"
+            :class="tab === 'channels' ? 'bg-panel text-ink shadow-sm' : 'text-muted'"
+            @click="tab = 'channels'"
+          >
+            Каналы
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-3 py-1.5 text-xs font-semibold transition"
+            :class="tab === 'diagnostics' ? 'bg-panel text-ink shadow-sm' : 'text-muted'"
+            @click="tab = 'diagnostics'"
+          >
+            Диагностика
+          </button>
+        </div>
+        <template v-if="tab === 'channels'">
+          <p class="text-sm text-muted">
+            Онлайн: <span class="font-semibold text-ink">{{ channels.onlineCount }}</span>
+            из {{ channels.channels.length }}
+            <span v-if="channels.loading" class="ml-2">загрузка…</span>
+          </p>
+          <p class="mt-1 text-xs text-muted">
+            Называйте каналы по отделу (например «Продажи · Telegram бот»), чтобы было ясно, кому
+            назначать.
+          </p>
+          <p v-if="channels.loadError" class="mt-1 text-sm text-danger">{{ channels.loadError }}</p>
+          <p v-else-if="reconnectError" class="mt-1 text-sm text-danger">{{ reconnectError }}</p>
+        </template>
+        <template v-else>
+          <p class="text-sm text-muted">
+            Журнал подключений: обрывы, автопереподключения и ошибки сессии.
+          </p>
+          <p v-if="diagError" class="mt-1 text-sm text-danger">{{ diagError }}</p>
+        </template>
       </div>
       <button
-        v-if="canManage"
+        v-if="canManage && tab === 'channels'"
         type="button"
         class="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:brightness-105"
         @click="channels.openConnect()"
@@ -220,7 +324,72 @@ watch(
         <Plus class="size-4" />
         Добавить канал
       </button>
+      <button
+        v-else-if="tab === 'diagnostics'"
+        type="button"
+        class="inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-muted hover:bg-surface hover:text-ink disabled:opacity-50"
+        :disabled="diagLoading"
+        @click="loadDiagnostics"
+      >
+        <RefreshCw class="size-4" :class="diagLoading ? 'animate-spin' : ''" />
+        Обновить
+      </button>
     </div>
+
+    <template v-if="tab === 'diagnostics'">
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <label class="text-xs font-semibold uppercase tracking-wide text-muted">Канал</label>
+        <select
+          v-model="diagChannelFilter"
+          class="rounded-xl border border-line bg-panel px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+        >
+          <option value="all">Все каналы</option>
+          <option v-for="ch in sortedChannels" :key="ch.id" :value="String(ch.id)">
+            {{ ch.name }}
+          </option>
+        </select>
+      </div>
+      <p v-if="diagLoading && !diagEvents.length" class="text-sm text-muted">Загрузка…</p>
+      <p
+        v-else-if="!diagEvents.length"
+        class="rounded-2xl border border-dashed border-line bg-panel p-8 text-center text-sm text-muted"
+      >
+        Пока нет событий. Они появятся при обрыве связи, переподключении или ошибке канала.
+      </p>
+      <ul v-else class="space-y-2">
+        <li
+          v-for="ev in diagEvents"
+          :key="ev.id"
+          class="rounded-2xl border border-line bg-panel px-4 py-3"
+        >
+          <div class="flex flex-wrap items-center gap-2 text-[11px]">
+            <span
+              class="rounded-md px-1.5 py-0.5 font-bold uppercase tracking-wide"
+              :class="
+                ev.level === 'error'
+                  ? 'bg-danger/15 text-danger'
+                  : ev.level === 'warn'
+                    ? 'bg-amber-500/15 text-amber-800'
+                    : 'bg-surface text-muted'
+              "
+            >
+              {{ kindLabel[ev.kind] || ev.kind }}
+            </span>
+            <span v-if="ev.transport" class="rounded-md bg-surface px-1.5 py-0.5 text-muted">
+              {{ transportLabel[ev.transport] }}
+            </span>
+            <span class="font-semibold text-ink">{{ ev.channelName || `#${ev.channelId}` }}</span>
+            <span class="ml-auto text-muted">{{ formatDiagAt(ev.createdAt) }}</span>
+          </div>
+          <p class="mt-1.5 text-sm" :class="levelClass(ev.level)">{{ ev.message }}</p>
+          <p v-if="ev.detail" class="mt-1 whitespace-pre-wrap font-mono text-[11px] text-muted">
+            {{ ev.detail }}
+          </p>
+        </li>
+      </ul>
+    </template>
+
+    <template v-else>
 
     <div
       v-if="!channels.loading && !channels.channels.length"
@@ -342,6 +511,7 @@ watch(
         </div>
       </article>
     </div>
+    </template>
 
     <AddChannelModal v-if="channels.connectOpen && canManage" />
 

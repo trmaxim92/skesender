@@ -205,6 +205,20 @@ class ChannelOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ChannelEventOut(BaseModel):
+    id: int
+    channel_id: int
+    channel_name: str | None = None
+    transport: ChannelTransport | None = None
+    level: str
+    kind: str
+    message: str
+    detail: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ChannelUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     department_id: int | None = None

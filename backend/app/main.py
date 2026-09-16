@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -672,8 +672,34 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
-                "CREATE INDEX IF NOT EXISTS ix_system_news_reads_news_id "
-                "ON system_news_reads (news_id)"
+                """
+                CREATE TABLE IF NOT EXISTS channel_events (
+                    id SERIAL PRIMARY KEY,
+                    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                    level VARCHAR(16) NOT NULL DEFAULT 'info',
+                    kind VARCHAR(32) NOT NULL,
+                    message TEXT NOT NULL DEFAULT '',
+                    detail TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_channel_events_channel_created "
+                "ON channel_events (channel_id, created_at)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_channel_events_created_at "
+                "ON channel_events (created_at)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_channel_events_kind ON channel_events (kind)"
             )
         )
 

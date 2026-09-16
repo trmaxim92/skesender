@@ -291,6 +291,17 @@ class TelegramUserRuntime:
             status=ChannelStatus.CONNECTING.value,
             last_error="Ручное переподключение…",
         )
+        try:
+            from app.channel_events import record_channel_event
+
+            await record_channel_event(
+                channel_id,
+                kind="manual_reconnect",
+                message="Запущено ручное переподключение по сохранённой сессии",
+                level="info",
+            )
+        except Exception:
+            pass
         await self._restore_channel(channel_id)
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
@@ -848,10 +859,16 @@ class TelegramUserRuntime:
         connected_at: Any = None,
         last_error: str | None = ...,  # type: ignore[assignment]
     ) -> None:
+        from app.channel_events import record_status_change
+
+        old_status: str | None = None
+        old_error: str | None = None
         async with SessionLocal() as session:
             channel = await session.get(Channel, channel_id)
             if channel is None:
                 return
+            old_status = channel.status
+            old_error = channel.last_error
             if status is not None:
                 channel.status = status
             if identity is not None:
@@ -865,6 +882,17 @@ class TelegramUserRuntime:
             if last_error is not ...:
                 channel.last_error = last_error
             await session.commit()
+
+        new_status = status if status is not None else old_status
+        new_error = last_error if last_error is not ... else old_error
+        await record_status_change(
+            channel_id,
+            old_status=old_status,
+            new_status=new_status,
+            old_error=old_error,
+            new_error=new_error,
+            identity=identity,
+        )
 
 
 runtime = TelegramUserRuntime()

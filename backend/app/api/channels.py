@@ -14,7 +14,7 @@ from app.integrations.base import IntegrationError
 from app.integrations.max_personal.runtime import runtime as max_runtime
 from app.integrations.telegram_user.runtime import runtime as telegram_user_runtime
 from app.integrations.registry import get_adapter
-from app.models import Channel, ChannelStatus, ChannelTransport, Department, Dialog, User
+from app.models import Channel, ChannelEvent, ChannelStatus, ChannelTransport, Department, Dialog, User
 from app.rbac import (
     ACTION_MANAGE_CHANNELS,
     ACTION_MANAGE_USERS,
@@ -30,6 +30,7 @@ from app.rbac import (
 )
 from app.schemas import (
     ChannelConnectResult,
+    ChannelEventOut,
     ChannelOut,
     ChannelUpdateRequest,
     MaxBotConnectRequest,
@@ -130,6 +131,52 @@ async def list_channels(
         stmt = stmt.where(Channel.id.in_(ids))
     result = await db.execute(stmt)
     return [to_channel_out(ch) for ch in result.scalars().all()]
+
+
+@router.get("/events", response_model=list[ChannelEventOut])
+async def list_channel_events(
+    channel_id: int | None = None,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CHANNELS)),
+) -> list[ChannelEventOut]:
+    """Diagnostics trail: disconnects, reconnects, errors."""
+    limit = max(1, min(limit, 300))
+    loaded = await load_user_rbac(db, user)
+    ids = await accessible_channel_ids(loaded, db)
+
+    stmt = (
+        select(ChannelEvent, Channel)
+        .join(Channel, Channel.id == ChannelEvent.channel_id)
+        .order_by(ChannelEvent.created_at.desc(), ChannelEvent.id.desc())
+        .limit(limit)
+    )
+    if channel_id is not None:
+        if ids is not None and channel_id not in ids:
+            raise HTTPException(status_code=403, detail="Нет доступа к каналу")
+        stmt = stmt.where(ChannelEvent.channel_id == channel_id)
+    elif ids is not None:
+        if not ids:
+            return []
+        stmt = stmt.where(ChannelEvent.channel_id.in_(ids))
+
+    rows = (await db.execute(stmt)).all()
+    out: list[ChannelEventOut] = []
+    for ev, ch in rows:
+        out.append(
+            ChannelEventOut(
+                id=ev.id,
+                channel_id=ev.channel_id,
+                channel_name=ch.name,
+                transport=ChannelTransport(ch.transport),
+                level=ev.level,
+                kind=ev.kind,
+                message=ev.message,
+                detail=ev.detail,
+                created_at=ev.created_at,
+            )
+        )
+    return out
 
 
 @router.patch("/{channel_id}", response_model=ChannelOut)

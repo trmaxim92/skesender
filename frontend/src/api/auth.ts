@@ -218,6 +218,55 @@ export async function reconnectChannelRequest(id: number) {
   return api<ApiChannel>(`/api/channels/${id}/reconnect`, { method: 'POST' })
 }
 
+export interface ApiChannelEvent {
+  id: number
+  channel_id: number
+  channel_name: string | null
+  transport: ChannelTransport | null
+  level: string
+  kind: string
+  message: string
+  detail: string | null
+  created_at: string
+}
+
+export type ChannelEvent = {
+  id: number
+  channelId: number
+  channelName: string | null
+  transport: ChannelTransport | null
+  level: 'info' | 'warn' | 'error' | string
+  kind: string
+  message: string
+  detail: string | null
+  createdAt: string
+}
+
+export function mapChannelEvent(e: ApiChannelEvent): ChannelEvent {
+  return {
+    id: e.id,
+    channelId: e.channel_id,
+    channelName: e.channel_name,
+    transport: e.transport,
+    level: e.level,
+    kind: e.kind,
+    message: e.message,
+    detail: e.detail,
+    createdAt: e.created_at,
+  }
+}
+
+export async function listChannelEventsRequest(params?: {
+  channelId?: number | null
+  limit?: number
+}) {
+  const q = new URLSearchParams()
+  if (params?.channelId != null) q.set('channel_id', String(params.channelId))
+  if (params?.limit != null) q.set('limit', String(params.limit))
+  const suffix = q.toString() ? `?${q}` : ''
+  return api<ApiChannelEvent[]>(`/api/channels/events${suffix}`)
+}
+
 export async function deleteChannelRequest(id: number) {
   return api<void>(`/api/channels/${id}`, { method: 'DELETE' })
 }

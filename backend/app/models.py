@@ -355,6 +355,28 @@ class Channel(Base):
     )
 
 
+class ChannelEvent(Base):
+    """Connection / reconnect / error trail for channel diagnostics."""
+
+    __tablename__ = "channel_events"
+    __table_args__ = (
+        Index("ix_channel_events_channel_created", "channel_id", "created_at"),
+        Index("ix_channel_events_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel_id: Mapped[int] = mapped_column(
+        ForeignKey("channels.id", ondelete="CASCADE"), index=True
+    )
+    level: Mapped[str] = mapped_column(String(16), default="info")  # info|warn|error
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+
 class Dialog(Base):
     __tablename__ = "dialogs"
     __table_args__ = (
