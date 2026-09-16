@@ -371,6 +371,10 @@ class Dialog(Base):
     contact_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     contact_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Canonical CRM contact (phone card); optional until backfilled.
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     last_message: Mapped[str] = mapped_column(Text, default="")
     last_direction: Mapped[str | None] = mapped_column(String(8), nullable=True)
     last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -540,6 +544,24 @@ class FieldValue(Base):
     field_key: Mapped[str] = mapped_column(String(64), index=True)
     value_text: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class FieldValueHistory(Base):
+    """Append-only audit for CRM field changes."""
+
+    __tablename__ = "field_value_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope: Mapped[str] = mapped_column(String(16), index=True)
+    owner_id: Mapped[int] = mapped_column(Integer, index=True)
+    field_key: Mapped[str] = mapped_column(String(64), index=True)
+    old_value: Mapped[str] = mapped_column(Text, default="")
+    new_value: Mapped[str] = mapped_column(Text, default="")
+    changed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class TemplateCategory(Base):

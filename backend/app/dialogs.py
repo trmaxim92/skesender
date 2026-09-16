@@ -2,11 +2,64 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, ChatMessage, Dialog, utcnow
+from app.models import Channel, ChatMessage, Contact, ContactStatus, Dialog, utcnow
+
+
+def _normalize_phone(raw: str | None) -> str:
+    digits = re.sub(r"\D+", "", (raw or "").strip())
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    return digits
+
+
+async def ensure_dialog_crm_contact(session: AsyncSession, dialog: Dialog) -> Contact | None:
+    """Link dialog to a CRM Contact by phone (create if missing)."""
+    if dialog.contact_id is not None:
+        return await session.get(Contact, dialog.contact_id)
+
+    phone = _normalize_phone(dialog.contact_phone)
+    if len(phone) < 5:
+        return None
+
+    # Never treat the channel's own number as the client's phone.
+    channel = await session.get(Channel, dialog.channel_id)
+    if channel is not None:
+        channel_phone = _normalize_phone(channel.identity)
+        if len(channel_phone) >= 5 and channel_phone == phone:
+            dialog.contact_phone = None
+            return None
+
+    existing = (
+        await session.execute(select(Contact).where(Contact.phone == phone).limit(1))
+    ).scalar_one_or_none()
+    if existing is not None:
+        dialog.contact_id = existing.id
+        if dialog.department_id and existing.department_id is None:
+            existing.department_id = dialog.department_id
+        if dialog.contact_name and (
+            not existing.name
+            or existing.name == existing.phone
+            or existing.name.startswith("User ")
+        ):
+            existing.name = dialog.contact_name
+        return existing
+
+    contact = Contact(
+        name=(dialog.contact_name or "").strip() or phone,
+        phone=phone,
+        status=ContactStatus.NEW.value,
+        department_id=dialog.department_id,
+    )
+    session.add(contact)
+    await session.flush()
+    dialog.contact_id = contact.id
+    return contact
 
 
 async def get_or_create_dialog(
@@ -42,6 +95,10 @@ async def get_or_create_dialog(
             dialog.contact_avatar_url = contact_avatar_url
         if contact_phone and not dialog.contact_phone:
             dialog.contact_phone = contact_phone
+        try:
+            await ensure_dialog_crm_contact(session, dialog)
+        except Exception:
+            pass
         return dialog
 
     dialog = Dialog(
@@ -61,6 +118,10 @@ async def get_or_create_dialog(
         async with session.begin_nested():
             session.add(dialog)
             await session.flush()
+            try:
+                await ensure_dialog_crm_contact(session, dialog)
+            except Exception:
+                pass
     except IntegrityError:
         result = await session.execute(
             select(Dialog).where(

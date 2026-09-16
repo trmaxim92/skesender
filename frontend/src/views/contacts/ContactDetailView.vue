@@ -307,6 +307,7 @@ function onSent(dialogId: number) {
             <div v-for="f in detail.clientFields" :key="'c-' + f.key" class="space-y-1">
               <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
                 {{ f.label }}
+                <span v-if="f.required" class="text-danger">*</span>
               </label>
               <textarea
                 v-if="f.fieldType === 'textarea'"
@@ -377,6 +378,7 @@ function onSent(dialogId: number) {
             <div v-for="f in detail.appealFields" :key="'a-' + f.key" class="space-y-1">
               <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
                 {{ f.label }}
+                <span v-if="f.required" class="text-danger">*</span>
               </label>
               <textarea
                 v-if="f.fieldType === 'textarea'"
@@ -437,6 +439,7 @@ function onSent(dialogId: number) {
           >
             {{ fieldsSaving ? 'Сохранение…' : 'Сохранить карточку' }}
           </button>
+          <p v-if="error && detail" class="text-sm text-red-600 md:hidden">{{ error }}</p>
         </template>
       </div>
     </aside>

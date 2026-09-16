@@ -70,10 +70,14 @@ def _name_from_pymax_user(user: Any) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _phone_from_pymax_user(user: Any) -> str | None:
-    if user is None:
-        return None
-    raw = getattr(user, "phone", None)
+def _normalize_phone_digits(raw: str | None) -> str:
+    digits = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    return digits
+
+
+def _format_phone(raw: Any) -> str | None:
     if raw is None:
         return None
     phone = str(raw).strip()
@@ -82,6 +86,12 @@ def _phone_from_pymax_user(user: Any) -> str | None:
     if phone.isdigit():
         return f"+{phone}"
     return phone
+
+
+def _phone_from_pymax_user(user: Any) -> str | None:
+    if user is None:
+        return None
+    return _format_phone(getattr(user, "phone", None))
 
 
 def _avatar_from_obj(obj: Any) -> str | None:
@@ -110,9 +120,30 @@ def _my_user_id(client: Any | None) -> int | None:
         return None
 
 
+def _my_phone(client: Any | None) -> str | None:
+    """Channel-owner phone — must never be stored as the client's number."""
+    contact = _my_contact(client)
+    if contact is None:
+        return None
+    return _format_phone(
+        getattr(contact, "phone", None) or getattr(contact, "phone_number", None)
+    )
+
+
+def _peer_phone(phone: str | None, *, my_phone: str | None) -> str | None:
+    if not phone:
+        return None
+    mine = _normalize_phone_digits(my_phone)
+    if mine and _normalize_phone_digits(phone) == mine:
+        return None
+    return phone
+
+
 async def _resolve_contact_profile(
     client: Any | None, sender_id: int | None, chat_id: int
 ) -> tuple[str, str | None, str | None, str | None]:
+    my_id = _my_user_id(client)
+    my_phone = _my_phone(client)
     if client is not None and _is_group_chat(chat_id):
         try:
             chat = await client.get_chat(int(chat_id))
@@ -124,14 +155,22 @@ async def _resolve_contact_profile(
                 return f"Chat {chat_id}", None, avatar, None
         except Exception:
             logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
-    if client is not None and sender_id is not None:
+    if (
+        client is not None
+        and sender_id is not None
+        and not (my_id is not None and int(sender_id) == int(my_id))
+    ):
         try:
             user = client.get_cached_user(int(sender_id))
             if user is None:
                 user = await client.get_user(int(sender_id))
             resolved_name, resolved_username = _name_from_pymax_user(user)
             avatar = _avatar_from_obj(user)
-            phone = _phone_from_pymax_user(user)
+            phone = _peer_phone(_phone_from_pymax_user(user), my_phone=my_phone)
+            # If API fell back to our phone as the display name, drop it.
+            if resolved_name and my_phone:
+                if _normalize_phone_digits(resolved_name) == _normalize_phone_digits(my_phone):
+                    resolved_name = f"User {sender_id}"
             if resolved_name:
                 return resolved_name, resolved_username, avatar, phone
         except Exception:
@@ -162,6 +201,8 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
     token falsely matches every profile to the channel owner.
     """
     my_id = _my_user_id(client)
+    my_phone = _my_phone(client)
+    my_phone_digits = _normalize_phone_digits(my_phone)
     result = await session.execute(select(Dialog).where(Dialog.channel_id == channel.id))
     dialogs = list(result.scalars().all())
     updated = 0
@@ -171,12 +212,21 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
         has_self_contact_id = bool(
             my_id is not None and dialog.contact_external_id and dialog.contact_external_id == str(my_id)
         )
+        has_self_phone = bool(
+            my_phone_digits
+            and _normalize_phone_digits(dialog.contact_phone) == my_phone_digits
+        )
+        name_is_self_phone = bool(
+            my_phone_digits and _normalize_phone_digits(name) == my_phone_digits
+        )
         if not (
             _is_group_chat(chat_id)
             or name.startswith("User ")
             or name.startswith("Chat ")
             or not dialog.contact_avatar_url
             or has_self_contact_id
+            or has_self_phone
+            or name_is_self_phone
         ):
             continue
 
@@ -207,11 +257,19 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
         username = dialog.contact_username
         # Wrong self-id means stored avatar is untrusted — re-resolve from peer.
         avatar = None if has_self_contact_id else dialog.contact_avatar_url
-        phone = dialog.contact_phone
+        # Own channel phone must never stay on the client card.
+        phone = None if has_self_phone else dialog.contact_phone
         contact_ext = dialog.contact_external_id
         if has_self_contact_id and chat_id:
             contact_ext = str(chat_id)
-        changed = has_self_contact_id
+        changed = has_self_contact_id or has_self_phone or name_is_self_phone
+        if has_self_phone and dialog.contact_phone:
+            dialog.contact_phone = None
+            phone = None
+            changed = True
+        if name_is_self_phone:
+            resolved = f"User {chat_id or contact_ext or '?'}"
+            changed = True
 
         for sender_id in ordered:
             if my_id is not None and sender_id is not None and int(sender_id) == int(my_id):
@@ -219,6 +277,7 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             candidate, cand_username, cand_avatar, cand_phone = await _resolve_contact_profile(
                 client, sender_id, chat_id or 0
             )
+            cand_phone = _peer_phone(cand_phone, my_phone=my_phone)
             if cand_avatar and not avatar:
                 avatar = cand_avatar
                 changed = True
@@ -237,7 +296,10 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
                 if cand_avatar and cand_avatar != dialog.contact_avatar_url:
                     avatar = cand_avatar
                     changed = True
-                if cand_phone and not dialog.contact_phone:
+                if cand_phone and (
+                    not dialog.contact_phone
+                    or _normalize_phone_digits(dialog.contact_phone) == my_phone_digits
+                ):
                     phone = cand_phone
                     changed = True
                 if (
@@ -254,8 +316,10 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             dialog.contact_username = username
             dialog.contact_avatar_url = avatar
             dialog.contact_external_id = contact_ext
-            if phone and not dialog.contact_phone:
+            if phone:
                 dialog.contact_phone = phone
+            elif has_self_phone:
+                dialog.contact_phone = None
             updated += 1
     if updated:
         await session.flush()
@@ -394,6 +458,9 @@ async def ingest_pymax_message(
             client, sender_id, chat_id
         )
 
+    my_phone = _my_phone(client)
+    contact_phone = _peer_phone(contact_phone, my_phone=my_phone)
+
     dialog = await get_or_create_dialog(
         session,
         channel=channel,
@@ -405,7 +472,7 @@ async def ingest_pymax_message(
         contact_phone=contact_phone,
     )
 
-    # Heal dialogs that previously stored our own user id as the contact.
+    # Heal dialogs that previously stored our own user id / phone as the contact.
     if (
         my_user_id is not None
         and dialog.contact_external_id == str(my_user_id)
@@ -418,6 +485,10 @@ async def ingest_pymax_message(
             contact_name.startswith("User ") or contact_name.startswith("Chat ")
         ):
             dialog.contact_name = contact_name
+    if dialog.contact_phone and _peer_phone(dialog.contact_phone, my_phone=my_phone) is None:
+        dialog.contact_phone = None
+    if contact_phone and not dialog.contact_phone:
+        dialog.contact_phone = contact_phone
 
     if message_id is not None:
         exists = await session.execute(
@@ -526,6 +597,10 @@ async def ingest_pymax_message(
             if sender_id is not None:
                 dialog.contact_external_id = str(sender_id)
             if contact_phone and not dialog.contact_phone:
+                dialog.contact_phone = contact_phone
+            elif dialog.contact_phone and _peer_phone(
+                dialog.contact_phone, my_phone=my_phone
+            ) is None:
                 dialog.contact_phone = contact_phone
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])

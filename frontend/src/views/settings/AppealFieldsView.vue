@@ -21,6 +21,7 @@ const error = ref('')
 
 const label = ref('')
 const fieldType = ref<FieldType>('text')
+const required = ref(false)
 const optionRows = ref<string[]>([''])
 const saving = ref(false)
 
@@ -40,6 +41,9 @@ function typeLabel(type: FieldType | string) {
 }
 
 const selectedDept = computed(() => departments.value.find((d) => d.id === departmentId.value))
+const visibleFields = computed(() =>
+  [...fields.value].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id),
+)
 
 watch(fieldType, (type) => {
   if (type === 'select' && !optionRows.value.length) {
@@ -50,7 +54,7 @@ watch(fieldType, (type) => {
 async function loadDepartments() {
   departments.value = (await listDepartmentsRequest()).map(mapDepartment)
   if (!departmentId.value && departments.value.length) {
-    departmentId.value = departments.value[0].id
+    departmentId.value = departments.value[0]!.id
   }
 }
 
@@ -108,12 +112,14 @@ async function addField() {
       label: label.value.trim(),
       field_type: fieldType.value,
       options,
-      sort_order: fields.value.length,
+      required: required.value,
+      sort_order: (fields.value.at(-1)?.sortOrder ?? -10) + 10,
     })
     fields.value.push(mapFieldDefinition(created))
     label.value = ''
     optionRows.value = ['']
     fieldType.value = 'text'
+    required.value = false
     error.value = ''
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail : 'Не удалось добавить'
@@ -122,38 +128,52 @@ async function addField() {
   }
 }
 
-async function removeField(f: FieldDefinition) {
-  if (f.isSystem) return
-  if (!confirm(`Удалить поле «${f.label}»?`)) return
+async function patchField(f: FieldDefinition, payload: Parameters<typeof updateFieldRequest>[1]) {
   try {
-    await deleteFieldRequest(f.id)
-    fields.value = fields.value.filter((x) => x.id !== f.id)
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.detail : 'Не удалось удалить'
-  }
-}
-
-async function renameField(f: FieldDefinition, newLabel: string) {
-  const trimmed = newLabel.trim()
-  if (!trimmed || trimmed === f.label) return
-  try {
-    const updated = await updateFieldRequest(f.id, { label: trimmed })
+    const updated = await updateFieldRequest(f.id, payload)
     const mapped = mapFieldDefinition(updated)
-    const idx = fields.value.findIndex((x) => x.id === f.id)
+    const idx = fields.value.findIndex((x) => x.id === mapped.id)
     if (idx >= 0) fields.value[idx] = mapped
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail : 'Не удалось обновить'
   }
 }
+
+async function removeField(f: FieldDefinition) {
+  if (!confirm(`Отключить поле «${f.label}»? Значения в обращениях сохранятся.`)) return
+  try {
+    await deleteFieldRequest(f.id)
+    const idx = fields.value.findIndex((x) => x.id === f.id)
+    if (idx >= 0) fields.value[idx] = { ...fields.value[idx]!, isActive: false }
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.detail : 'Не удалось отключить'
+  }
+}
+
+async function moveField(f: FieldDefinition, dir: -1 | 1) {
+  const ordered = visibleFields.value
+  const idx = ordered.findIndex((x) => x.id === f.id)
+  const swap = ordered[idx + dir]
+  if (!swap) return
+  const aOrder = f.sortOrder
+  const bOrder = swap.sortOrder
+  await patchField(f, { sort_order: bOrder })
+  await patchField(swap, { sort_order: aOrder })
+}
 </script>
 
 <template>
   <div class="h-full overflow-auto p-4 md:p-6">
-    <p class="mb-4 text-sm text-muted">
-      Набор полей обращения зависит от отдела. У
-      <span class="font-medium text-ink">{{ selectedDept?.name || '…' }}</span>
-      свой список.
-    </p>
+    <div class="mb-4 max-w-2xl space-y-1 text-sm text-muted">
+      <p>
+        Набор полей обращения — <span class="font-medium text-ink">отдельный для каждого отдела</span>
+        (поддержка, продажи и т.д.). В карточке показывается набор отдела обращения/канала.
+      </p>
+      <p>
+        Сейчас редактируете:
+        <span class="font-medium text-ink">{{ selectedDept?.name || '…' }}</span>
+      </p>
+    </div>
     <p v-if="error" class="mb-3 text-sm text-danger">{{ error }}</p>
 
     <div class="mb-4 max-w-sm">
@@ -183,6 +203,10 @@ async function renameField(f: FieldDefinition, newLabel: string) {
       >
         Добавить
       </button>
+      <label class="flex items-center gap-2 text-sm text-ink sm:col-span-2">
+        <input v-model="required" type="checkbox" />
+        Обязательное
+      </label>
       <div v-if="fieldType === 'select'" class="sm:col-span-4">
         <FieldOptionsEditor v-model="optionRows" />
       </div>
@@ -190,39 +214,88 @@ async function renameField(f: FieldDefinition, newLabel: string) {
 
     <p v-if="loading" class="text-sm text-muted">Загрузка…</p>
     <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel">
-      <table class="w-full min-w-[560px] text-left text-sm">
+      <table class="w-full min-w-[720px] text-left text-sm">
         <thead class="border-b border-line bg-surface text-xs uppercase text-muted">
           <tr>
             <th class="px-4 py-3">Поле</th>
             <th class="px-4 py-3">Тип</th>
-            <th class="px-4 py-3">Ключ</th>
+            <th class="px-4 py-3">Обяз.</th>
+            <th class="px-4 py-3">Активно</th>
+            <th class="px-4 py-3">Порядок</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in fields" :key="f.id" class="border-b border-line last:border-0">
+          <tr
+            v-for="f in visibleFields"
+            :key="f.id"
+            class="border-b border-line last:border-0"
+            :class="f.isActive ? '' : 'opacity-50'"
+          >
             <td class="px-4 py-3">
               <input
                 class="w-full rounded-lg border border-transparent bg-transparent px-1 py-0.5 hover:border-line focus:border-line"
                 :value="f.label"
-                @change="renameField(f, ($event.target as HTMLInputElement).value)"
+                @change="patchField(f, { label: ($event.target as HTMLInputElement).value })"
               />
+              <div class="mt-0.5 font-mono text-[10px] text-muted">{{ f.key }}</div>
             </td>
             <td class="px-4 py-3 text-muted">{{ typeLabel(f.fieldType) }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-muted">{{ f.key }}</td>
+            <td class="px-4 py-3">
+              <input
+                type="checkbox"
+                :checked="f.required"
+                @change="
+                  patchField(f, {
+                    required: ($event.target as HTMLInputElement).checked,
+                  })
+                "
+              />
+            </td>
+            <td class="px-4 py-3">
+              <input
+                type="checkbox"
+                :checked="f.isActive"
+                @change="
+                  patchField(f, {
+                    is_active: ($event.target as HTMLInputElement).checked,
+                  })
+                "
+              />
+            </td>
+            <td class="px-4 py-3">
+              <div class="flex gap-1">
+                <button
+                  type="button"
+                  class="rounded border border-line px-2 py-0.5 text-xs hover:bg-surface"
+                  @click="moveField(f, -1)"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="rounded border border-line px-2 py-0.5 text-xs hover:bg-surface"
+                  @click="moveField(f, 1)"
+                >
+                  ↓
+                </button>
+              </div>
+            </td>
             <td class="px-4 py-3 text-right">
               <button
+                v-if="f.isActive"
                 type="button"
                 class="text-xs text-danger hover:underline"
                 @click="removeField(f)"
               >
-                Удалить
+                Отключить
               </button>
+              <span v-else class="text-[11px] text-muted">выкл.</span>
             </td>
           </tr>
-          <tr v-if="!fields.length">
-            <td colspan="4" class="px-4 py-6 text-center text-sm text-muted">
-              Пока нет полей — добавьте первое
+          <tr v-if="!visibleFields.length">
+            <td colspan="6" class="px-4 py-6 text-center text-sm text-muted">
+              Пока нет полей — добавьте первое для этого отдела
             </td>
           </tr>
         </tbody>

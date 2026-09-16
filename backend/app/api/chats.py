@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 
@@ -26,6 +26,7 @@ from app.db import get_db
 from app.departments import accessible_department_ids, ensure_department_access
 from app.deps import bearer, get_current_user
 from app.fields import (
+    assert_required_filled,
     field_def_to_out,
     list_field_definitions,
     load_field_values,
@@ -1149,6 +1150,25 @@ async def close_dialogs_batch(
             skipped.append(DialogCloseBatchSkipped(id=dialog_id, reason="нет открытого обращения"))
             continue
 
+        try:
+            await assert_required_filled(
+                db,
+                department_id=dialog.department_id,
+                client_owner_scope=FieldScope.CLIENT.value,
+                client_owner_id=dialog.id,
+                appeal_id=appeal.id,
+                client_overrides={
+                    "full_name": dialog.contact_name or "",
+                    "phone": dialog.contact_phone or "",
+                    "external_id": dialog.contact_external_id or "",
+                },
+            )
+        except HTTPException as exc:
+            skipped.append(
+                DialogCloseBatchSkipped(id=dialog_id, reason=str(exc.detail))
+            )
+            continue
+
         await close_appeal_with_status(db, appeal, closed_by_id=user.id)
         await clear_unread(db, dialog)
         loaded = await db.execute(
@@ -1184,6 +1204,19 @@ async def close_dialog_appeal(
     appeal = await get_current_appeal(db, dialog)
     if appeal is None or appeal.status != AppealStatus.OPEN.value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нет открытого обращения")
+
+    await assert_required_filled(
+        db,
+        department_id=dialog.department_id,
+        client_owner_scope=FieldScope.CLIENT.value,
+        client_owner_id=dialog.id,
+        appeal_id=appeal.id,
+        client_overrides={
+            "full_name": dialog.contact_name or "",
+            "phone": dialog.contact_phone or "",
+            "external_id": dialog.contact_external_id or "",
+        },
+    )
 
     channel = await db.get(Channel, dialog.channel_id)
     if channel is None or not channel.credentials_enc:
@@ -1341,7 +1374,11 @@ async def dialog_sidebar(
         appeals=[_appeal_to_out(a) for a in appeals],
         client_fields=[
             field_def_to_out(f)
-            for f in await list_field_definitions(db, scope=FieldScope.CLIENT.value)
+            for f in await list_field_definitions(
+                db,
+                scope=FieldScope.CLIENT.value,
+                department_id=dialog.department_id,
+            )
         ],
         appeal_fields=[
             field_def_to_out(f)
@@ -1392,7 +1429,11 @@ async def update_client_fields(
     if body.external_id is not None:
         dialog.contact_external_id = body.external_id.strip() or None
 
-    defs = await list_field_definitions(db, scope=FieldScope.CLIENT.value)
+    defs = await list_field_definitions(
+        db,
+        scope=FieldScope.CLIENT.value,
+        department_id=dialog.department_id,
+    )
     allowed = {f.key for f in defs if not f.is_system}
     for item in body.values:
         if item.key in {"full_name", "phone", "external_id"}:
@@ -1405,6 +1446,7 @@ async def update_client_fields(
             owner_id=dialog.id,
             field_key=item.key,
             value=item.value,
+            changed_by_id=user.id,
         )
     await db.commit()
     return await dialog_sidebar(dialog_id, db, user)
@@ -1442,6 +1484,7 @@ async def update_appeal_fields(
             owner_id=appeal.id,
             field_key=item.key,
             value=item.value,
+            changed_by_id=user.id,
         )
     await db.commit()
     return await dialog_sidebar(dialog.id, db, user)

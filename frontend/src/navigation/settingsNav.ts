@@ -56,14 +56,14 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       {
         to: '/settings/appeal-fields',
         label: 'Поля обращения',
-        description: 'Дополнительные поля в обращении',
+        description: 'Набор полей по отделам (поддержка, продажи…)',
         icon: FormInput,
         permission: 'section.settings',
       },
       {
         to: '/settings/client-fields',
         label: 'Поля клиента',
-        description: 'Поля профиля в карточке клиента',
+        description: 'Общие поля и доп. поля отделов',
         icon: IdCard,
         permission: 'section.settings',
       },

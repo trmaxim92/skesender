@@ -23,6 +23,7 @@ const selectedAppealId = ref<number | null>(null)
 const clientDraft = ref<Record<string, string>>({})
 const appealDraft = ref<Record<string, string>>({})
 const saving = ref(false)
+const saveError = ref('')
 const canWrite = computed(() => auth.can('action.write'))
 
 const shownAppeal = computed(() => {
@@ -65,15 +66,17 @@ function formatDate(iso: string | null | undefined) {
 async function saveClient() {
   if (!canWrite.value) return
   saving.value = true
+  saveError.value = ''
   const values = Object.entries(clientDraft.value)
     .filter(([key]) => !['full_name', 'phone', 'external_id'].includes(key))
     .map(([key, value]) => ({ key, value }))
-  await chats.saveClientFields({
+  const ok = await chats.saveClientFields({
     full_name: clientDraft.value.full_name ?? '',
     phone: clientDraft.value.phone ?? '',
     external_id: clientDraft.value.external_id ?? '',
     values,
   })
+  if (!ok) saveError.value = chats.error || 'Не удалось сохранить'
   saving.value = false
 }
 
@@ -81,8 +84,10 @@ async function saveAppeal() {
   if (!canWrite.value || !shownAppeal.value) return
   if (shownAppeal.value.id !== props.data?.currentAppeal?.id) return
   saving.value = true
+  saveError.value = ''
   const values = Object.entries(appealDraft.value).map(([key, value]) => ({ key, value }))
-  await chats.saveAppealFields(shownAppeal.value.id, values)
+  const ok = await chats.saveAppealFields(shownAppeal.value.id, values)
+  if (!ok) saveError.value = chats.error || 'Не удалось сохранить'
   saving.value = false
 }
 
@@ -181,6 +186,7 @@ function linkHref(value: string | undefined) {
               >
                 <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
                   {{ f.label }}
+                  <span v-if="f.required" class="text-danger">*</span>
                   <span v-if="f.isSystem" class="normal-case text-muted/70">(базовое)</span>
                 </label>
                 <textarea
@@ -248,6 +254,8 @@ function linkHref(value: string | undefined) {
                 <div>Обращений: {{ data.client.appealsCount }}</div>
               </div>
 
+              <p v-if="saveError && tab === 'client'" class="text-sm text-danger">{{ saveError }}</p>
+
               <button
                 v-if="canWrite"
                 type="button"
@@ -298,6 +306,7 @@ function linkHref(value: string | undefined) {
               >
                 <label class="text-[11px] font-semibold uppercase tracking-wide text-muted">
                   {{ f.label }}
+                  <span v-if="f.required" class="text-danger">*</span>
                 </label>
                 <textarea
                   v-if="f.fieldType === 'textarea'"
@@ -369,6 +378,8 @@ function linkHref(value: string | undefined) {
               <p v-else-if="!data.appealFields.length" class="text-xs text-muted">
                 Для отдела этого чата пока нет кастомных полей обращения.
               </p>
+
+              <p v-if="saveError && tab === 'appeal'" class="text-sm text-danger">{{ saveError }}</p>
 
               <button
                 v-if="

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -34,11 +35,32 @@ async def list_fields(
     scope: str = Query(..., pattern="^(client|appeal)$"),
     department_id: int | None = Query(default=None),
     include_inactive: bool = False,
+    manage: bool = Query(
+        default=False,
+        description="For client+department: only that department's fields (exclude global)",
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_settings_access),
 ) -> list[FieldDefinitionOut]:
     if scope == FieldScope.APPEAL.value and department_id is None:
         raise HTTPException(status_code=400, detail="Укажите department_id для полей обращения")
+
+    if (
+        scope == FieldScope.CLIENT.value
+        and manage
+        and department_id is not None
+    ):
+        # Admin UI: edit only this department's extra client fields.
+        stmt = select(FieldDefinition).where(
+            FieldDefinition.scope == FieldScope.CLIENT.value,
+            FieldDefinition.department_id == department_id,
+        )
+        if not include_inactive:
+            stmt = stmt.where(FieldDefinition.is_active.is_(True))
+        stmt = stmt.order_by(FieldDefinition.sort_order.asc(), FieldDefinition.id.asc())
+        items = list((await db.execute(stmt)).scalars().all())
+        return [field_def_to_out(x) for x in items]
+
     items = await list_field_definitions(
         db,
         scope=scope,
@@ -54,6 +76,7 @@ async def create_field(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_settings_access),
 ) -> FieldDefinitionOut:
+    department_id: int | None
     if body.scope == FieldScope.APPEAL.value:
         if body.department_id is None:
             raise HTTPException(status_code=400, detail="Укажите department_id")
@@ -62,13 +85,42 @@ async def create_field(
             raise HTTPException(status_code=400, detail="Отдел не найден")
         department_id = body.department_id
     else:
-        department_id = None
+        # Client: null = shared for all departments; set = department-only extras.
+        department_id = body.department_id
+        if department_id is not None:
+            dept = await db.get(Department, department_id)
+            if dept is None:
+                raise HTTPException(status_code=400, detail="Отдел не найден")
 
     key = make_field_key(body.label, body.key)
-    existing = await list_field_definitions(
-        db, scope=body.scope, department_id=department_id, active_only=False
-    )
-    if any(f.key == key for f in existing):
+
+    if body.scope == FieldScope.CLIENT.value and department_id is None:
+        clash = (
+            await db.execute(
+                select(FieldDefinition).where(
+                    FieldDefinition.scope == FieldScope.CLIENT.value,
+                    FieldDefinition.department_id.is_(None),
+                    FieldDefinition.key == key,
+                )
+            )
+        ).scalar_one_or_none()
+    elif body.scope == FieldScope.CLIENT.value:
+        clash = (
+            await db.execute(
+                select(FieldDefinition).where(
+                    FieldDefinition.scope == FieldScope.CLIENT.value,
+                    FieldDefinition.department_id == department_id,
+                    FieldDefinition.key == key,
+                )
+            )
+        ).scalar_one_or_none()
+    else:
+        existing = await list_field_definitions(
+            db, scope=body.scope, department_id=department_id, active_only=False
+        )
+        clash = next((f for f in existing if f.key == key), None)
+
+    if clash is not None:
         raise HTTPException(status_code=400, detail=f"Поле с ключом «{key}» уже есть")
 
     fd = FieldDefinition(
@@ -127,10 +179,12 @@ async def delete_field(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_settings_access),
 ) -> None:
+    """Archive field (soft-delete) so values are not orphaned under a recycled key."""
     fd = await db.get(FieldDefinition, field_id)
     if fd is None:
         raise HTTPException(status_code=404, detail="Поле не найдено")
     if fd.is_system:
         raise HTTPException(status_code=400, detail="Системное поле нельзя удалить")
-    await db.delete(fd)
+    fd.is_active = False
+    fd.updated_at = utcnow()
     await db.commit()

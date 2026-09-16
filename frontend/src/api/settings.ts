@@ -76,10 +76,12 @@ export async function listFieldsRequest(params: {
   scope: FieldScope
   department_id?: number
   include_inactive?: boolean
+  manage?: boolean
 }) {
   const q = new URLSearchParams({ scope: params.scope })
   if (params.department_id != null) q.set('department_id', String(params.department_id))
   if (params.include_inactive) q.set('include_inactive', 'true')
+  if (params.manage) q.set('manage', 'true')
   return api<ApiFieldDefinition[]>(`/api/settings/fields?${q}`)
 }
 

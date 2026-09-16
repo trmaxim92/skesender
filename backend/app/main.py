@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -225,11 +225,22 @@ async def ensure_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_messages_is_internal ON messages (is_internal)"
             )
         )
+        await conn.execute(text("DROP INDEX IF EXISTS uq_field_def_client_key"))
         await conn.execute(
             text(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_field_def_client_key
-                ON field_definitions (key) WHERE scope = 'client'
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_field_def_client_global_key
+                ON field_definitions (key)
+                WHERE scope = 'client' AND department_id IS NULL
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_field_def_client_dept_key
+                ON field_definitions (department_id, key)
+                WHERE scope = 'client' AND department_id IS NOT NULL
                 """
             )
         )
@@ -240,6 +251,38 @@ async def ensure_schema() -> None:
                 ON field_definitions (department_id, key) WHERE scope = 'appeal'
                 """
             )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS field_value_history (
+                    id SERIAL PRIMARY KEY,
+                    scope VARCHAR(16) NOT NULL,
+                    owner_id INTEGER NOT NULL,
+                    field_key VARCHAR(64) NOT NULL,
+                    old_value TEXT NOT NULL DEFAULT '',
+                    new_value TEXT NOT NULL DEFAULT '',
+                    changed_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    source VARCHAR(32) NOT NULL DEFAULT 'user',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_field_value_history_owner "
+                "ON field_value_history (scope, owner_id, created_at)"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS contact_id "
+                "INTEGER REFERENCES contacts(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_dialogs_contact_id ON dialogs (contact_id)")
         )
         await conn.execute(
             text(

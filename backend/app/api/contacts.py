@@ -20,7 +20,14 @@ from app.appeal_statuses import (
 )
 from app.db import get_db
 from app.departments import ensure_default_department
-from app.fields import field_def_to_out, list_field_definitions, load_field_values, upsert_field_value
+from app.fields import (
+    assert_required_filled,
+    field_def_to_out,
+    list_field_definitions,
+    load_field_values,
+    migrate_contact_appeal_values_to_appeal,
+    upsert_field_value,
+)
 from app.models import (
     Appeal,
     AppealStatus,
@@ -30,6 +37,7 @@ from app.models import (
     ContactCallResult,
     ContactComment,
     ContactStatus,
+    Dialog,
     FieldScope,
     User,
     utcnow,
@@ -140,7 +148,57 @@ async def _contact_out(
     current_appeal: AppealOut | None = None
     appeal_statuses: list[AppealStatusDefOut] = []
     if with_fields:
-        defs = await list_field_definitions(db, scope=FieldScope.CLIENT.value)
+        status_rows = (
+            await db.execute(
+                select(AppealStatusDef)
+                .where(AppealStatusDef.is_active.is_(True))
+                .order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
+            )
+        ).scalars().all()
+        appeal_statuses = [AppealStatusDefOut.model_validate(r) for r in status_rows]
+
+        appeal_row = (
+            await db.execute(
+                select(Appeal)
+                .options(
+                    selectinload(Appeal.status_def),
+                    selectinload(Appeal.closed_by),
+                    selectinload(Appeal.dialog),
+                )
+                .where(
+                    Appeal.contact_id == c.id,
+                    Appeal.status == AppealStatus.OPEN.value,
+                )
+                .order_by(Appeal.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if appeal_row is None:
+            appeal_row = (
+                await db.execute(
+                    select(Appeal)
+                    .options(
+                        selectinload(Appeal.status_def),
+                        selectinload(Appeal.closed_by),
+                        selectinload(Appeal.dialog),
+                    )
+                    .where(Appeal.contact_id == c.id)
+                    .order_by(Appeal.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+        # Layout by appeal/channel department (option A), fallback contact → general.
+        dept_id = c.department_id
+        if appeal_row is not None and appeal_row.dialog is not None and appeal_row.dialog.department_id:
+            dept_id = appeal_row.dialog.department_id
+        if dept_id is None:
+            general = await ensure_default_department(db)
+            dept_id = general.id
+
+        defs = await list_field_definitions(
+            db, scope=FieldScope.CLIENT.value, department_id=dept_id
+        )
         client_fields = [field_def_to_out(f) for f in defs]
         stored = await load_field_values(
             db, scope=FieldScope.CONTACT.value, owner_id=c.id
@@ -156,50 +214,15 @@ async def _contact_out(
         if not client_values["phone"] and stored.get("phone"):
             client_values["phone"] = stored["phone"]
 
-        dept_id = c.department_id
-        if dept_id is None:
-            general = await ensure_default_department(db)
-            dept_id = general.id
         appeal_defs = await list_field_definitions(
             db, scope=FieldScope.APPEAL.value, department_id=dept_id
         )
         appeal_fields = [field_def_to_out(f) for f in appeal_defs]
-        appeal_values = await load_field_values(
-            db, scope=FieldScope.CONTACT_APPEAL.value, owner_id=c.id
-        )
 
-        status_rows = (
-            await db.execute(
-                select(AppealStatusDef)
-                .where(AppealStatusDef.is_active.is_(True))
-                .order_by(AppealStatusDef.sort_order, AppealStatusDef.id)
-            )
-        ).scalars().all()
-        appeal_statuses = [AppealStatusDefOut.model_validate(r) for r in status_rows]
-
-        appeal_row = (
-            await db.execute(
-                select(Appeal)
-                .options(selectinload(Appeal.status_def), selectinload(Appeal.closed_by))
-                .where(
-                    Appeal.contact_id == c.id,
-                    Appeal.status == AppealStatus.OPEN.value,
-                )
-                .order_by(Appeal.id.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if appeal_row is None:
-            appeal_row = (
-                await db.execute(
-                    select(Appeal)
-                    .options(selectinload(Appeal.status_def), selectinload(Appeal.closed_by))
-                    .where(Appeal.contact_id == c.id)
-                    .order_by(Appeal.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
         if appeal_row is not None:
+            appeal_values = await migrate_contact_appeal_values_to_appeal(
+                db, contact_id=c.id, appeal_id=appeal_row.id
+            )
             current_appeal = AppealOut(
                 id=appeal_row.id,
                 dialog_id=appeal_row.dialog_id,
@@ -217,6 +240,10 @@ async def _contact_out(
                 closed_by_id=appeal_row.closed_by_id,
                 closed_by_name=appeal_row.closed_by.name if appeal_row.closed_by else None,
             )
+        else:
+            # No appeal yet — show empty values; do not keep contact_appeal as source of truth.
+            appeal_values = {}
+
 
     return ContactOut(
         id=c.id,
@@ -262,6 +289,7 @@ async def _apply_client_fields(
     values: list,
     appeal_values: list | None = None,
     department_id: int | None = None,
+    changed_by_id: int | None = None,
 ) -> None:
     if department_id is not None:
         contact.department_id = department_id
@@ -278,9 +306,15 @@ async def _apply_client_fields(
             owner_id=contact.id,
             field_key="external_id",
             value=external_id.strip(),
+            changed_by_id=changed_by_id,
         )
 
-    defs = await list_field_definitions(db, scope=FieldScope.CLIENT.value)
+    defs = await list_field_definitions(
+        db,
+        scope=FieldScope.CLIENT.value,
+        department_id=contact.department_id
+        or (await ensure_default_department(db)).id,
+    )
     allowed = {f.key for f in defs if not f.is_system}
     for item in values:
         key = getattr(item, "key", None) or (item.get("key") if isinstance(item, dict) else None)
@@ -297,15 +331,24 @@ async def _apply_client_fields(
             owner_id=contact.id,
             field_key=str(key),
             value=str(value or ""),
+            changed_by_id=changed_by_id,
         )
 
     if appeal_values is not None:
+        appeal = await ensure_contact_appeal(db, contact)
         dept_id = contact.department_id
+        if appeal.dialog_id:
+            dialog = await db.get(Dialog, appeal.dialog_id)
+            if dialog is not None and dialog.department_id is not None:
+                dept_id = dialog.department_id
         if dept_id is None:
             general = await ensure_default_department(db)
             dept_id = general.id
             if contact.department_id is None:
                 contact.department_id = dept_id
+        await migrate_contact_appeal_values_to_appeal(
+            db, contact_id=contact.id, appeal_id=appeal.id, clear_legacy=True
+        )
         appeal_defs = await list_field_definitions(
             db, scope=FieldScope.APPEAL.value, department_id=dept_id
         )
@@ -319,10 +362,11 @@ async def _apply_client_fields(
                 continue
             await upsert_field_value(
                 db,
-                scope=FieldScope.CONTACT_APPEAL.value,
-                owner_id=contact.id,
+                scope=FieldScope.APPEAL.value,
+                owner_id=appeal.id,
                 field_key=str(key),
                 value=str(value or ""),
+                changed_by_id=changed_by_id,
             )
 
 
@@ -697,6 +741,8 @@ async def import_contacts(
                 owner_id=contact.id,
                 field_key=key,
                 value=val,
+                changed_by_id=user.id,
+                source="import",
             )
 
     await db.commit()
@@ -714,7 +760,10 @@ async def get_contact(
         await ensure_contact_appeal(db, contact)
         await db.commit()
         contact = await _get_contact(db, contact_id)
-    return await _contact_out(db, contact, with_comments=True, with_fields=True)
+    out = await _contact_out(db, contact, with_comments=True, with_fields=True)
+    # Persist any lazy contact_appeal → appeal value copy from _contact_out.
+    await db.commit()
+    return out
 
 
 @router.patch("/{contact_id}", response_model=ContactOut)
@@ -762,6 +811,7 @@ async def update_contact_fields(
         values=body.values,
         appeal_values=body.appeal_values,
         department_id=body.department_id,
+        changed_by_id=user.id,
     )
     await db.commit()
     contact = await _get_contact(db, contact_id)
@@ -849,6 +899,27 @@ async def set_contact_appeal_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Статус не найден")
 
     appeal = await ensure_contact_appeal(db, contact)
+    if status_def.is_terminal or not status_def.counts_as_open:
+        dept_id = contact.department_id
+        if appeal.dialog_id:
+            dialog = await db.get(Dialog, appeal.dialog_id)
+            if dialog is not None and dialog.department_id is not None:
+                dept_id = dialog.department_id
+        if dept_id is None:
+            general = await ensure_default_department(db)
+            dept_id = general.id
+        await assert_required_filled(
+            db,
+            department_id=dept_id,
+            client_owner_scope=FieldScope.CONTACT.value,
+            client_owner_id=contact.id,
+            appeal_id=appeal.id,
+            client_overrides={
+                "full_name": contact.name or "",
+                "phone": contact.phone or "",
+            },
+        )
+
     apply_status_def_to_appeal(appeal, status_def, closed_by_id=user.id)
     sync_contact_status_from_stage(contact, status_def)
 
