@@ -15,7 +15,7 @@ export async function finishLaunchSplash(options?: {
   const el = document.getElementById(SPLASH_ID)
   if (!el) return
 
-  const minMs = options?.minMs ?? 1200
+  const minMs = options?.minMs ?? 1600
   const fadeMs = options?.fadeMs ?? 520
   const startedAttr = el.getAttribute('data-started')
   const started = startedAttr ? Number(startedAttr) : performance.now()

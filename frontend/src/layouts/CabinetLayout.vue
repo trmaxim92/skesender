@@ -293,6 +293,7 @@ watch(
 
 const showInstallBanner = ref(false)
 const installPromptReady = ref(false)
+const installHelp = ref('')
 const iosInstallHint = computed(() => isIosDevice() && !isStandaloneDisplay())
 
 function refreshInstallBanner() {
@@ -300,22 +301,32 @@ function refreshInstallBanner() {
     showInstallBanner.value = false
     return
   }
-  // Show for any browser session until dismissed — strongest CTA for phone install.
   showInstallBanner.value = true
 }
 
 async function onInstallApp() {
+  installHelp.value = ''
   const outcome = await promptPwaInstall()
-  if (outcome === 'unavailable' && iosInstallHint.value) {
-    // Keep banner — instructions below
+  if (outcome === 'accepted') {
+    refreshInstallBanner()
     return
   }
-  refreshInstallBanner()
+  if (outcome === 'dismissed') {
+    installHelp.value = 'Установка отменена — можно попробовать ещё раз'
+    return
+  }
+  if (iosInstallHint.value) {
+    installHelp.value = 'На iPhone: Поделиться → «На экран „Домой“»'
+    return
+  }
+  installHelp.value =
+    'В меню браузера (⋮) выберите «Установить приложение» или «Добавить на главный экран»'
 }
 
 function onDismissInstall() {
   dismissInstallHint()
   showInstallBanner.value = false
+  installHelp.value = ''
 }
 
 let stopInstallWatch: (() => void) | null = null
@@ -900,21 +911,12 @@ onUnmounted(() => {
             </p>
             <div class="mt-2.5 flex flex-wrap items-center gap-2">
               <button
-                v-if="installPromptReady"
                 type="button"
                 class="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-[#0b4fd9] shadow-sm transition hover:bg-white/95 active:scale-[0.98]"
                 @click="onInstallApp"
               >
                 <Download class="size-3.5" />
-                Установить
-              </button>
-              <button
-                v-else-if="iosInstallHint"
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-3.5 py-2 text-xs font-semibold text-white ring-1 ring-white/35 backdrop-blur-sm transition hover:bg-white/25"
-                @click="onDismissInstall"
-              >
-                Понятно
+                Установить приложение
               </button>
               <button
                 type="button"
@@ -924,6 +926,9 @@ onUnmounted(() => {
                 Позже
               </button>
             </div>
+            <p v-if="installHelp" class="mt-2 text-xs leading-snug text-white/90">
+              {{ installHelp }}
+            </p>
           </div>
           <button
             type="button"
