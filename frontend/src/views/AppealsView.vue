@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { CheckSquare, Plus, Search, Trash2, X } from 'lucide-vue-next'
+import { CheckSquare, ChevronRight, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import CreateAppealModal from '@/components/appeals/CreateAppealModal.vue'
 import { useAppealsStore } from '@/stores/appeals'
 import { useAuthStore } from '@/stores/auth'
@@ -166,18 +166,30 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
 
 <template>
   <div class="relative flex h-full min-h-0 flex-col">
-    <div class="border-b border-line bg-panel px-4 py-4 md:px-6">
-      <div class="mb-4 flex items-center justify-between gap-3">
-        <div>
+    <div class="border-b border-line bg-panel px-3 py-3 md:px-6 md:py-4">
+      <div class="mb-3 flex items-center justify-between gap-3 md:mb-4">
+        <div class="hidden md:block">
           <h1 class="text-lg font-bold tracking-tight text-ink">Обращения</h1>
           <p class="text-xs text-muted">
             Отметьте нужные и закройте или удалите пачкой
           </p>
         </div>
+        <div class="min-w-0 flex-1 md:hidden">
+          <div class="relative">
+            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+            <input
+              v-model="appeals.q"
+              type="search"
+              placeholder="Поиск обращений…"
+              class="w-full rounded-xl border border-line bg-surface py-2.5 pl-9 pr-3 text-sm outline-none ring-brand focus:ring-2"
+              @keydown.enter.prevent="onSubmit"
+            />
+          </div>
+        </div>
         <button
           v-if="canCreate"
           type="button"
-          class="inline-flex size-10 items-center justify-center rounded-xl bg-brand text-white shadow-sm transition hover:opacity-90"
+          class="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-sm transition hover:opacity-90"
           title="Создать обращение"
           @click="openCreate"
         >
@@ -185,7 +197,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
         </button>
       </div>
 
-      <form class="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end" @submit.prevent="onSubmit">
+      <form class="hidden flex-col gap-3 md:flex md:flex-row md:flex-wrap md:items-end" @submit.prevent="onSubmit">
         <label class="min-w-0 w-full md:min-w-[220px] md:flex-1">
           <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Поиск
@@ -264,22 +276,97 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
         </button>
       </form>
       <p v-if="bulkMsg" class="mt-2 text-xs text-ok">{{ bulkMsg }}</p>
+      <div class="mt-3 flex gap-2 overflow-x-auto md:hidden">
+        <button
+          v-for="opt in [
+            { id: 'open' as const, label: 'Открытые' },
+            { id: 'closed' as const, label: 'Закрытые' },
+            { id: 'all' as const, label: 'Все' },
+          ]"
+          :key="opt.id"
+          type="button"
+          class="shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition"
+          :class="
+            appeals.status === opt.id
+              ? 'bg-brand text-white'
+              : 'bg-surface text-muted'
+          "
+          @click="appeals.status = opt.id; appeals.search()"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
     </div>
 
     <div
-      class="min-h-0 flex-1 overflow-auto p-4 md:p-6"
-      :class="selectedCount ? 'pb-24' : ''"
+      class="min-h-0 flex-1 overflow-auto p-0 md:p-6"
+      :class="selectedCount ? 'pb-28 md:pb-24' : ''"
     >
-      <p v-if="appeals.error" class="mb-4 text-sm text-danger">{{ appeals.error }}</p>
-      <p v-if="appeals.loading && !appeals.items.length" class="text-sm text-muted">Загрузка…</p>
+      <p v-if="appeals.error" class="mb-4 px-4 pt-4 text-sm text-danger md:px-0 md:pt-0">{{ appeals.error }}</p>
+      <p v-if="appeals.loading && !appeals.items.length" class="px-4 pt-4 text-sm text-muted md:px-0 md:pt-0">Загрузка…</p>
       <p
         v-else-if="!appeals.loading && !appeals.items.length"
-        class="text-sm text-muted"
+        class="px-4 pt-4 text-sm text-muted md:px-0 md:pt-0"
       >
         Обращений не найдено
       </p>
 
-      <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel">
+      <!-- Mobile native list -->
+      <div v-else-if="appeals.items.length" class="divide-y divide-line bg-panel md:hidden">
+        <button
+          v-for="a in appeals.items"
+          :key="'m-' + a.id"
+          type="button"
+          class="flex w-full items-center gap-3 px-3 py-3 text-left transition active:bg-surface"
+          :class="selected.has(a.id) ? 'bg-brand-soft/40' : ''"
+          @click="openAppeal(a.id)"
+        >
+          <div
+            v-if="canBulk"
+            class="shrink-0"
+            @click.stop
+          >
+            <input
+              type="checkbox"
+              class="size-4 rounded border-line accent-brand"
+              :checked="selected.has(a.id)"
+              @change="toggleSelect(a.id)"
+            />
+          </div>
+          <div
+            class="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface text-sm font-bold text-muted"
+          >
+            <img
+              v-if="a.contactAvatarUrl"
+              :src="a.contactAvatarUrl"
+              :alt="a.contactName"
+              class="size-full object-cover"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            />
+            <span v-else>{{ a.contactName.slice(0, 1) }}</span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-[15px] font-semibold text-ink">{{ a.contactName }}</span>
+              <span class="shrink-0 text-[10px] text-muted">{{ formatDate(a.lastAt || a.openedAt) }}</span>
+            </div>
+            <div class="mt-0.5 flex items-center gap-1.5">
+              <span class="text-xs font-semibold text-muted">#{{ a.number }}</span>
+              <span
+                class="rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+                :class="a.status === 'open' ? 'bg-ok/15 text-ok' : 'bg-muted/15 text-muted'"
+              >
+                {{ appealStatusLabel[a.status] }}
+              </span>
+            </div>
+            <p class="mt-0.5 truncate text-xs text-muted">{{ a.lastMessage || a.assigneeName || '—' }}</p>
+          </div>
+          <ChevronRight class="size-4 shrink-0 text-mute" />
+        </button>
+      </div>
+
+      <div v-if="appeals.items.length" class="mt-0 hidden overflow-x-auto rounded-2xl border border-line bg-panel md:mt-0 md:block">
         <table class="w-full min-w-[680px] text-left text-sm">
           <thead class="border-b border-line bg-surface text-[11px] uppercase tracking-wide text-muted">
             <tr>
@@ -378,7 +465,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
 
       <div
         v-if="appeals.total"
-        class="mt-4 flex items-center justify-between text-xs text-muted"
+        class="mt-4 flex items-center justify-between px-4 text-xs text-muted md:px-0"
       >
         <span>
           {{ pageFrom() }}–{{ pageTo() }} из {{ appeals.total }}
@@ -406,7 +493,7 @@ const pageTo = () => Math.min(appeals.offset + appeals.items.length, appeals.tot
 
     <div
       v-if="canBulk && selectedCount"
-      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 md:pb-6"
+      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-6"
     >
       <div
         class="pointer-events-auto flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3 shadow-lg"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Hand, Phone, Plus, RefreshCw, Search, SkipForward, Upload, X } from 'lucide-vue-next'
+import { ChevronRight, Hand, Phone, Plus, RefreshCw, Search, SkipForward, Upload, X } from 'lucide-vue-next'
 import {
   claimContactsBatchRequest,
   claimNextContactRequest,
@@ -300,17 +300,27 @@ const subtitle = computed(() => {
 
 <template>
   <div class="relative flex h-full min-h-0 flex-col">
-    <div class="border-b border-line bg-panel px-4 py-4 md:px-6">
-      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
+    <div class="border-b border-line bg-panel px-3 py-3 md:px-6 md:py-4">
+      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between md:mb-4">
+        <div class="hidden min-w-0 md:block">
           <h1 class="text-lg font-bold tracking-tight text-ink">{{ title }}</h1>
           <p class="mt-0.5 text-xs text-muted">{{ subtitle }}</p>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex w-full items-center gap-2 md:w-auto md:flex-wrap">
+          <div class="relative min-w-0 flex-1 md:hidden">
+            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+            <input
+              v-model="q"
+              type="search"
+              placeholder="Имя или телефон…"
+              class="w-full rounded-xl border border-line bg-surface py-2.5 pl-9 pr-3 text-sm outline-none ring-brand focus:ring-2"
+              @keydown.enter.prevent="onSearch"
+            />
+          </div>
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
+            class="hidden items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-brand-soft/50 disabled:opacity-50 sm:inline-flex"
             :disabled="nextBusy"
             title="Взять следующий свободный"
             @click="onNext"
@@ -321,7 +331,7 @@ const subtitle = computed(() => {
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
+            class="hidden size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50 sm:inline-flex"
             title="Импорт CSV"
             :disabled="importBusy"
             @click="triggerImport"
@@ -331,7 +341,7 @@ const subtitle = computed(() => {
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
+            class="hidden size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50 sm:inline-flex"
             title="Синхронизировать водителей из Яндекс Fleet"
             :disabled="fleetBusy"
             @click="onFleetSync"
@@ -341,16 +351,16 @@ const subtitle = computed(() => {
           <button
             v-if="canWrite"
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+            class="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-sm transition hover:opacity-90 md:size-auto md:gap-1.5 md:px-3.5 md:py-2 md:text-sm md:font-semibold"
             @click="openCreate"
           >
-            <Plus class="size-4" />
-            Добавить
+            <Plus class="size-5 md:size-4" />
+            <span class="hidden md:inline">Добавить</span>
           </button>
         </div>
       </div>
 
-      <form class="flex flex-col gap-3 md:flex-row md:items-end" @submit.prevent="onSearch">
+      <form class="mb-3 hidden flex-col gap-3 md:flex md:flex-row md:items-end" @submit.prevent="onSearch">
         <label class="min-w-0 w-full md:flex-1">
           <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Поиск
@@ -385,7 +395,7 @@ const subtitle = computed(() => {
       <p v-if="actionOk" class="mt-2 text-xs text-ok">{{ actionOk }}</p>
       <p v-if="actionError" class="mt-2 text-xs text-danger">{{ actionError }}</p>
 
-      <div class="mt-4 flex flex-wrap gap-2">
+      <div class="flex gap-2 overflow-x-auto pb-0.5 md:mt-4 md:flex-wrap">
         <button
           v-for="opt in [
             { id: 'all' as const, label: 'Свободные', count: summary.all },
@@ -394,7 +404,7 @@ const subtitle = computed(() => {
           ]"
           :key="opt.id"
           type="button"
-          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
+          class="shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition"
           :class="
             filter === opt.id
               ? 'bg-brand text-white shadow-sm'
@@ -413,19 +423,79 @@ const subtitle = computed(() => {
       </div>
     </div>
 
-    <div class="relative min-h-0 flex-1 overflow-auto p-4 md:p-6" :class="selectedCount ? 'pb-24' : ''">
-      <p v-if="loading && !items.length" class="text-sm text-muted">Загрузка…</p>
-      <p v-else-if="loadError" class="text-sm text-danger">{{ loadError }}</p>
+    <div class="relative min-h-0 flex-1 overflow-auto p-0 md:p-6" :class="selectedCount ? 'pb-28 md:pb-24' : ''">
+      <p v-if="loading && !items.length" class="px-4 pt-4 text-sm text-muted md:px-0 md:pt-0">Загрузка…</p>
+      <p v-else-if="loadError" class="px-4 pt-4 text-sm text-danger md:px-0 md:pt-0">{{ loadError }}</p>
 
       <template v-else>
-        <p v-if="!items.length" class="rounded-2xl border border-dashed border-line bg-panel px-6 py-12 text-center text-sm text-muted">
+        <p v-if="!items.length" class="mx-4 mt-4 rounded-2xl border border-dashed border-line bg-panel px-6 py-12 text-center text-sm text-muted md:mx-0 md:mt-0">
           Клиентов с такими условиями нет.
           <button type="button" class="ml-1 font-semibold text-brand hover:underline" @click="clearFilters">
             Показать свободные
           </button>
         </p>
 
-        <div v-else class="overflow-x-auto rounded-2xl border border-line bg-panel shadow-sm">
+        <!-- Mobile list -->
+        <div v-else class="divide-y divide-line bg-panel md:hidden">
+          <button
+            v-for="c in items"
+            :key="'m-' + c.id"
+            type="button"
+            class="flex w-full items-center gap-3 px-3 py-3 text-left transition active:bg-surface"
+            :class="selected.has(c.id) ? 'bg-brand-soft/40' : ''"
+            @click="openContact(c.id)"
+          >
+            <div v-if="canWrite" class="shrink-0" @click.stop>
+              <input
+                type="checkbox"
+                class="size-4 rounded border-line accent-brand disabled:opacity-30"
+                :checked="selected.has(c.id)"
+                :disabled="!isClaimable(c)"
+                @change="toggleSelect(c.id, isClaimable(c))"
+              />
+            </div>
+            <div
+              class="flex size-11 shrink-0 items-center justify-center rounded-full bg-brand-soft text-sm font-bold text-brand"
+            >
+              {{ initials(c.name || c.phone) }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[15px] font-semibold text-ink">
+                {{ c.name || 'Без имени' }}
+              </div>
+              <div class="mt-0.5 truncate text-xs text-muted">
+                {{ c.phone }}{{ companyOf(c) ? ` · ${companyOf(c)}` : '' }}
+              </div>
+              <div class="mt-1 flex items-center gap-1.5">
+                <span
+                  v-if="c.currentAppeal?.statusDef"
+                  class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  :style="{
+                    background: c.currentAppeal.statusDef.color + '22',
+                    color: c.currentAppeal.statusDef.color,
+                  }"
+                >
+                  {{ c.currentAppeal.statusDef.name }}
+                </span>
+                <span class="text-[10px] text-muted">
+                  {{ c.assigneeName || 'Свободный' }}
+                </span>
+              </div>
+            </div>
+            <a
+              v-if="c.phone"
+              :href="telHref(c.phone)"
+              class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand"
+              title="Позвонить"
+              @click.stop
+            >
+              <Phone class="size-4" />
+            </a>
+            <ChevronRight class="size-4 shrink-0 text-mute" />
+          </button>
+        </div>
+
+        <div v-if="items.length" class="hidden overflow-x-auto rounded-2xl border border-line bg-panel shadow-sm md:block">
           <table class="w-full min-w-[760px] text-left text-sm">
             <thead class="border-b border-line bg-surface/80 text-[11px] font-semibold uppercase tracking-wide text-muted">
               <tr>
@@ -517,7 +587,7 @@ const subtitle = computed(() => {
           </table>
         </div>
 
-        <div v-if="total" class="mt-3 text-xs text-muted">
+        <div v-if="total" class="mt-3 px-4 text-xs text-muted md:px-0">
           Показано {{ items.length }} из {{ total }}
         </div>
       </template>
@@ -526,7 +596,7 @@ const subtitle = computed(() => {
     <!-- Bulk claim bar -->
     <div
       v-if="canWrite && selectedCount"
-      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 md:pb-6"
+      class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-6"
     >
       <div
         class="pointer-events-auto flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3 shadow-lg"

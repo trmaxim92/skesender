@@ -25,7 +25,7 @@ async function submit() {
 </script>
 
 <template>
-  <div class="relative flex min-h-full items-center justify-center overflow-hidden px-4">
+  <div class="relative flex min-h-full items-stretch justify-center overflow-hidden px-0 md:items-center md:px-4">
     <div class="absolute inset-0 bg-[#eef5fc]" />
     <div
       class="pointer-events-none absolute inset-0"
@@ -39,7 +39,7 @@ async function submit() {
     <PlexusBackground />
 
     <form
-      class="relative w-full max-w-md rounded-2xl border border-[#0d223f]/10 bg-white/90 p-8 shadow-[0_16px_40px_rgba(13,34,63,0.08)]"
+      class="relative flex w-full max-w-md flex-col justify-center rounded-none border-0 bg-white/95 px-5 py-10 shadow-none md:rounded-2xl md:border md:border-[#0d223f]/10 md:bg-white/90 md:p-8 md:shadow-[0_16px 40px_rgba(13,34,63,0.08)]"
       autocomplete="off"
       @submit.prevent="submit"
     >

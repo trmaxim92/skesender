@@ -102,6 +102,27 @@ html.oe-chat-immersive {
   overscroll-behavior: none;
 }
 
+/* Mobile page transition */
+.oe-page-enter-active,
+.oe-page-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.oe-page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.oe-page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* Native-feeling tab bar press */
+.oe-tabbar button:active {
+  transform: scale(0.96);
+}
+
 button,
 input,
 textarea,

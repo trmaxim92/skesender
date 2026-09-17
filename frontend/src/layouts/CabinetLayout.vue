@@ -194,6 +194,60 @@ const showSettingsGroup = computed(() => settingsGroupsVisible.value.length > 0)
 const navStartVisible = computed(() => navWorkStart.filter((item) => auth.canSection(item.to)))
 const navEndVisible = computed(() => navWorkEnd.filter((item) => auth.canSection(item.to)))
 
+type MobileTab = {
+  id: string
+  to?: string
+  label: string
+  icon: typeof MessageSquare
+  badge?: 'chats'
+}
+
+const mobileTabs = computed((): MobileTab[] => {
+  const tabs: MobileTab[] = []
+  if (auth.canSection('/chats')) {
+    tabs.push({ id: 'chats', to: '/chats', label: 'Чаты', icon: MessageSquare, badge: 'chats' })
+  }
+  if (auth.canSection('/appeals')) {
+    tabs.push({ id: 'appeals', to: '/appeals', label: 'Обращения', icon: Inbox })
+  }
+  if (auth.can('section.contacts')) {
+    tabs.push({ id: 'contacts', to: '/contacts', label: 'Клиенты', icon: ContactRound })
+  }
+  tabs.push({ id: 'more', label: 'Ещё', icon: Menu })
+  return tabs
+})
+
+const showMobileTabBar = computed(() => !isMdUp.value && !hideChromeForMobileChat.value)
+
+function isMobileTabActive(tab: MobileTab) {
+  if (tab.id === 'more') {
+    return (
+      route.path.startsWith('/employees') ||
+      route.path.startsWith('/mailing') ||
+      route.path.startsWith('/users') ||
+      route.path.startsWith('/roles') ||
+      route.path.startsWith('/departments') ||
+      route.path.startsWith('/news') ||
+      route.path.startsWith('/profile') ||
+      route.path.startsWith('/clients/') ||
+      isSettingsPath(route.path)
+    )
+  }
+  if (!tab.to) return false
+  return route.path === tab.to || route.path.startsWith(`${tab.to}/`)
+}
+
+function onMobileTab(tab: MobileTab) {
+  if (tab.id === 'more') {
+    mobileNavOpen.value = true
+    return
+  }
+  if (tab.to) {
+    mobileNavOpen.value = false
+    void router.push(tab.to)
+  }
+}
+
 const onClientsSection = computed(
   () => route.path.startsWith('/contacts') || route.path.startsWith('/clients/'),
 )
@@ -646,10 +700,10 @@ onUnmounted(() => {
     />
 
     <aside
-      class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width,transform] duration-300 ease-out max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:shadow-xl"
+      class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width,transform] duration-300 ease-out max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:shadow-xl"
       :class="[
         isMdUp ? (collapsed ? 'w-[4.25rem]' : 'w-60') : 'w-72',
-        !isMdUp && !mobileNavOpen ? '-translate-x-full' : 'translate-x-0',
+        !isMdUp && !mobileNavOpen ? '-translate-x-full pointer-events-none' : 'translate-x-0',
       ]"
     >
       <div
@@ -943,18 +997,10 @@ onUnmounted(() => {
 
       <header
         v-if="!hideChromeForMobileChat"
-        class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6"
+        class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 backdrop-blur-md md:h-14 md:px-6"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-ink transition hover:bg-panel md:hidden"
-            title="Меню"
-            @click="mobileNavOpen = true"
-          >
-            <Menu class="size-4" />
-          </button>
-          <h1 class="truncate text-base font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
+          <h1 class="truncate text-[15px] font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
         </div>
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <div ref="bellRoot" class="relative">
@@ -1166,9 +1212,42 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <main class="min-h-0 flex-1 overflow-hidden">
-        <RouterView />
+      <main
+        class="min-h-0 flex-1 overflow-hidden"
+        :class="showMobileTabBar ? 'pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0' : ''"
+      >
+        <RouterView v-slot="{ Component }">
+          <Transition name="oe-page" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </Transition>
+        </RouterView>
       </main>
+
+      <nav
+        v-if="showMobileTabBar"
+        class="oe-tabbar fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+        aria-label="Основная навигация"
+      >
+        <button
+          v-for="tab in mobileTabs"
+          :key="tab.id"
+          type="button"
+          class="relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] font-semibold transition"
+          :class="
+            isMobileTabActive(tab) ? 'text-brand' : 'text-mute hover:text-ink'
+          "
+          @click="onMobileTab(tab)"
+        >
+          <component :is="tab.icon" class="size-5 shrink-0" />
+          <span class="truncate">{{ tab.label }}</span>
+          <span
+            v-if="tab.badge === 'chats' && chatsUnread > 0"
+            class="absolute right-[18%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[9px] font-bold text-white"
+          >
+            {{ chatsUnread > 99 ? '99+' : chatsUnread }}
+          </span>
+        </button>
+      </nav>
     </div>
 
     <div
