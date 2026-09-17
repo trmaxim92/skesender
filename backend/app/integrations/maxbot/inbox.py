@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.appeals import ensure_open_appeal
-from app.dialogs import bump_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
 from app.integrations.maxbot import client as max_client
 from app.models import (
     AttachmentKind,
@@ -211,10 +211,11 @@ async def _handle_message_created(
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
-    dialog.last_message = message_preview_text(msg.text, stored)
-    dialog.last_direction = direction
-    dialog.last_status = msg.status
-    dialog.last_at = created_at
+    if dialog.last_at is None or created_at >= dialog.last_at:
+        dialog.last_message = message_preview_text(msg.text, stored)
+        dialog.last_direction = direction
+        dialog.last_status = msg.status
+        dialog.last_at = created_at
     if direction == MessageDirection.IN.value:
         await bump_unread(session, dialog)
         if sender:
@@ -225,6 +226,8 @@ async def _handle_message_created(
                 dialog.contact_avatar_url = avatar
             if user_id is not None:
                 dialog.contact_external_id = str(user_id)
+    else:
+        await clear_unread(session, dialog)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

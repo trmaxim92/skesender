@@ -11,7 +11,7 @@ from telethon.tl.custom.message import Message as TlMessage
 from telethon.tl.types import User, Chat, Channel as TlChannel
 
 from app.appeals import ensure_open_appeal
-from app.dialogs import bump_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
 from app.models import (
     AttachmentKind,
     Channel,
@@ -181,10 +181,11 @@ async def ingest_telethon_message(
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
-    dialog.last_message = message_preview_text(msg.text, stored)
-    dialog.last_direction = direction
-    dialog.last_status = msg.status
-    dialog.last_at = msg.created_at
+    if dialog.last_at is None or msg.created_at >= dialog.last_at:
+        dialog.last_message = message_preview_text(msg.text, stored)
+        dialog.last_direction = direction
+        dialog.last_status = msg.status
+        dialog.last_at = msg.created_at
     if direction == MessageDirection.IN.value:
         await bump_unread(session, dialog)
         dialog.contact_name = contact_name or dialog.contact_name
@@ -192,6 +193,8 @@ async def ingest_telethon_message(
         dialog.contact_external_id = contact_external_id
         if contact_phone and not dialog.contact_phone:
             dialog.contact_phone = contact_phone
+    else:
+        await clear_unread(session, dialog)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

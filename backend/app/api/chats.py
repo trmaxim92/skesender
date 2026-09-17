@@ -93,7 +93,13 @@ from app.schemas import (
 from app.security import decode_access_token, token_version_matches
 from app.serializers import message_preview_text, message_to_out
 from app.storage.attachments import absolute_path, guess_kind, save_bytes
-from app.dialogs import claim_if_unassigned, clear_unread, get_or_create_dialog
+from app.dialogs import (
+    claim_if_unassigned,
+    clear_unread,
+    clear_unread_after_outbound,
+    get_or_create_dialog,
+    heal_stale_outbound_unread,
+)
 from app.outbound_start import PeerResolveError, resolve_outbound_peer, transport_allows_start
 
 logger = logging.getLogger(__name__)
@@ -114,9 +120,10 @@ _MESSAGE_LOAD_OPTIONS = (
 class OutboundDeliveryFailed(IntegrationError):
     """Provider send failed after a durable CRM draft was marked failed."""
 
-    def __init__(self, detail: str, *, message_id: int):
+    def __init__(self, detail: str, *, message_id: int, retry_after: int | None = None):
         super().__init__(detail)
         self.message_id = message_id
+        self.retry_after = retry_after
 
 
 def _require_write(user: User) -> None:
@@ -296,7 +303,14 @@ async def _send_and_finalize_outbound(
 ) -> ChatMessage:
     try:
         send_result = await send()
-    except ChannelNotReadyError:
+    except ChannelNotReadyError as exc:
+        msg = await db.get(ChatMessage, msg_id)
+        if msg is not None:
+            await _mark_outbound_failed(db, msg)
+            await db.commit()
+            raise OutboundDeliveryFailed(
+                str(exc), message_id=msg_id, retry_after=exc.retry_after
+            ) from exc
         raise
     except IntegrationError as exc:
         msg = await db.get(ChatMessage, msg_id)
@@ -313,6 +327,22 @@ async def _send_and_finalize_outbound(
     )
     await db.commit()
     return finalized
+
+
+async def _fail_remaining_drafts(
+    db: AsyncSession, draft_ids: list[int], *, skip_ids: set[int]
+) -> None:
+    """Mark unsent multi-file drafts as failed so they do not stay as phantom `sent`."""
+    pending = [mid for mid in draft_ids if mid not in skip_ids]
+    if not pending:
+        return
+    for mid in pending:
+        msg = await db.get(ChatMessage, mid)
+        if msg is None:
+            continue
+        if msg.status == MessageStatus.SENT.value and not msg.external_id:
+            msg.status = MessageStatus.FAILED.value
+    await db.commit()
 
 
 async def _deliver_outbound_parts(
@@ -341,23 +371,32 @@ async def _deliver_outbound_parts(
     await db.commit()
 
     created: list[ChatMessage] = []
+    all_ids = [mid for mid, _ in drafts]
     for msg_id, send in drafts:
         try:
             msg = await _send_and_finalize_outbound(
                 db, msg_id=msg_id, channel_id=channel.id, send=send
             )
             created.append(msg)
-        except ChannelNotReadyError:
-            raise
         except OutboundDeliveryFailed as exc:
+            await _fail_remaining_drafts(
+                db, all_ids, skip_ids={m.id for m in created} | {exc.message_id}
+            )
             return created, exc
         except IntegrationError as exc:
+            await _fail_remaining_drafts(db, all_ids, skip_ids={m.id for m in created})
             return created, exc
     return created, None
 
 
 def _http_for_integration_error(exc: IntegrationError) -> HTTPException:
     if isinstance(exc, ChannelNotReadyError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+    if isinstance(exc, OutboundDeliveryFailed) and exc.retry_after is not None:
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
@@ -373,11 +412,18 @@ async def _publish_failed_outbound(
     loaded = await _load_message(db, message_id)
     result = await db.execute(select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog_id))
     dialog_loaded = result.scalar_one()
-    preview = message_preview_text(loaded.text or "", list(loaded.attachments or []))
-    dialog_loaded.last_message = preview or loaded.text or ""
-    dialog_loaded.last_direction = MessageDirection.OUT.value
-    dialog_loaded.last_status = loaded.status
-    dialog_loaded.last_at = loaded.created_at
+    # Do not clobber a newer inbound that arrived during the failed send.
+    if not (
+        dialog_loaded.last_at
+        and loaded.created_at
+        and dialog_loaded.last_at > loaded.created_at
+        and dialog_loaded.last_direction == MessageDirection.IN.value
+    ):
+        preview = message_preview_text(loaded.text or "", list(loaded.attachments or []))
+        dialog_loaded.last_message = preview or loaded.text or ""
+        dialog_loaded.last_direction = MessageDirection.OUT.value
+        dialog_loaded.last_status = loaded.status
+        dialog_loaded.last_at = loaded.created_at
     await db.commit()
     await emit_event(message_created_event(dialog_loaded, loaded))
 
@@ -405,6 +451,7 @@ async def _refresh_dialog_preview(db: AsyncSession, dialog: Dialog) -> None:
         dialog.last_message = ""
         dialog.last_direction = None
         dialog.last_status = None
+        dialog.last_at = dialog.created_at
 
 
 def to_dialog_out(dialog: Dialog) -> DialogOut:
@@ -528,7 +575,7 @@ async def unread_summary(
     user: User = Depends(require_permission(SECTION_CHATS)),
 ) -> UnreadSummaryOut:
     """Сумма непрочитанных по вкладкам Новые / Мои / Чужие (только открытые обращения)."""
-    # C9: heal runs on inbox/outbound paths; avoid extra UPDATE on every 30s poll.
+    await heal_stale_outbound_unread(db)
     channel_ids = await accessible_channel_ids(user, db)
     dept_ids = await accessible_department_ids(user, db)
 
@@ -807,7 +854,8 @@ async def execute_start_chat(
                 "@username для лички Bot API обычно не принимает — "
                 "либо укажите user id, либо канал «Telegram · аккаунт»."
             )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail) from exc
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail) from exc
+        raise _http_for_integration_error(exc) from exc
     except ChannelNotReadyError as exc:
         raise _http_for_integration_error(exc) from exc
     except IntegrationError as exc:
@@ -828,7 +876,7 @@ async def execute_start_chat(
     dialog.last_direction = MessageDirection.OUT.value
     dialog.last_status = msg.status
     dialog.last_at = msg.created_at
-    await clear_unread(db, dialog)
+    await clear_unread_after_outbound(db, dialog, outbound_at=msg.created_at)
 
     result = await db.execute(select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id))
     dialog_loaded = result.scalar_one()
@@ -901,6 +949,10 @@ async def send_dialog_message(
     if not caption and not uploads:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty message")
 
+    # Claim early so two managers do not both deliver to the client.
+    claimed = await claim_if_unassigned(db, dialog, user.id)
+    await db.flush()
+
     adapter = get_adapter(channel.transport)
     created: list[ChatMessage] = []
     send_error: str | None = None
@@ -954,8 +1006,15 @@ async def send_dialog_message(
                     await _publish_failed_outbound(
                         db, dialog_id=dialog.id, message_id=part_err.message_id
                     )
+                    if part_err.retry_after is not None and not created:
+                        raise part_err
                 elif part_err is not None:
                     send_error = str(part_err)
+            except OutboundDeliveryFailed as exc:
+                await _publish_failed_outbound(
+                    db, dialog_id=dialog.id, message_id=exc.message_id
+                )
+                raise _http_for_integration_error(exc) from exc
             except ChannelNotReadyError as exc:
                 raise _http_for_integration_error(exc) from exc
             except IntegrationError as exc:
@@ -986,10 +1045,11 @@ async def send_dialog_message(
                 await _publish_failed_outbound(
                     db, dialog_id=dialog.id, message_id=exc.message_id
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-                ) from exc
+                raise _http_for_integration_error(exc) from exc
             created.append(msg)
+    except OutboundDeliveryFailed as exc:
+        await _publish_failed_outbound(db, dialog_id=dialog.id, message_id=exc.message_id)
+        raise _http_for_integration_error(exc) from exc
     except ChannelNotReadyError as exc:
         raise _http_for_integration_error(exc) from exc
     except IntegrationError as exc:
@@ -1008,14 +1068,17 @@ async def send_dialog_message(
     )
     if not preview and last.text:
         preview = last.text
-    dialog.last_message = preview or caption or (uploads[0][1] if uploads else "")
-    dialog.last_direction = MessageDirection.OUT.value
-    dialog.last_status = last.status
-    dialog.last_at = last.created_at
-    # Ответ оператора = чат просмотрен; иначе бейдж остаётся при last_direction=out.
-    await clear_unread(db, dialog)
-    # Первый ответивший на незанятое обращение становится ответственным.
-    claimed = await claim_if_unassigned(db, dialog, user.id)
+    # Prefer newest state if inbound arrived during send.
+    await clear_unread_after_outbound(db, dialog, outbound_at=last.created_at)
+    if not (
+        dialog.last_direction == MessageDirection.IN.value
+        and dialog.last_at
+        and dialog.last_at > last.created_at
+    ):
+        dialog.last_message = preview or caption or (uploads[0][1] if uploads else "")
+        dialog.last_direction = MessageDirection.OUT.value
+        dialog.last_status = last.status
+        dialog.last_at = last.created_at
 
     result = await db.execute(
         select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)
@@ -1304,10 +1367,17 @@ async def close_dialog_appeal(
                 exc,
             )
         else:
-            dialog_loaded.last_message = reply_text
-            dialog_loaded.last_direction = MessageDirection.OUT.value
-            dialog_loaded.last_status = created_msg.status
-            dialog_loaded.last_at = created_msg.created_at
+            fresh = await db.get(Dialog, dialog.id)
+            if fresh is not None and not (
+                fresh.last_direction == MessageDirection.IN.value
+                and fresh.last_at
+                and created_msg.created_at
+                and fresh.last_at > created_msg.created_at
+            ):
+                dialog_loaded.last_message = reply_text
+                dialog_loaded.last_direction = MessageDirection.OUT.value
+                dialog_loaded.last_status = created_msg.status
+                dialog_loaded.last_at = created_msg.created_at
             await db.commit()
             result = await db.execute(
                 select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)

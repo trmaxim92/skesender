@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.appeals import ensure_open_appeal
-from app.dialogs import bump_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
 from app.integrations.telegram_bot import client as tg_client
 from app.integrations.telegram_bot.result import telegram_message_external_id
 from app.models import (
@@ -214,10 +214,11 @@ async def _handle_message(
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
-    dialog.last_message = message_preview_text(msg.text, stored)
-    dialog.last_direction = direction
-    dialog.last_status = msg.status
-    dialog.last_at = created_at
+    if dialog.last_at is None or created_at >= dialog.last_at:
+        dialog.last_message = message_preview_text(msg.text, stored)
+        dialog.last_direction = direction
+        dialog.last_status = msg.status
+        dialog.last_at = created_at
     if direction == MessageDirection.IN.value:
         await bump_unread(session, dialog)
         if chat.get("type") == "private" and sender:
@@ -227,6 +228,8 @@ async def _handle_message(
                 dialog.contact_external_id = sender_id
         elif _chat_title(chat):
             dialog.contact_name = _chat_title(chat) or dialog.contact_name
+    else:
+        await clear_unread(session, dialog)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

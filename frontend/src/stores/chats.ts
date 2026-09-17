@@ -42,7 +42,7 @@ function mapDialog(d: ApiDialog): Dialog {
     lastAt: d.last_at,
     lastDirection: d.last_direction ?? null,
     lastStatus: d.last_status ?? null,
-    unread: d.last_direction === 'out' ? 0 : d.unread,
+    unread: d.unread,
     assigneeId: d.assignee_id,
     transport: d.transport,
     appealId: d.appeal_id ?? null,
@@ -471,9 +471,13 @@ export const useChatsStore = defineStore('chats', () => {
     }
   }
 
+  let unreadSummaryRequestId = 0
+
   async function fetchUnreadSummary() {
+    const reqId = ++unreadSummaryRequestId
     try {
       const data = await unreadSummaryRequest()
+      if (reqId !== unreadSummaryRequestId) return
       unreadByTab.value = {
         new: data.new || 0,
         mine: data.mine || 0,

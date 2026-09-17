@@ -7,7 +7,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.appeals import ensure_open_appeal
-from app.dialogs import get_or_create_dialog, try_insert_message
+from app.dialogs import clear_unread, get_or_create_dialog, try_insert_message
 from app.models import (
     Channel,
     ChatMessage,
@@ -64,6 +64,7 @@ async def write_mailing_to_crm(
         dialog.last_direction = MessageDirection.OUT.value
         dialog.last_status = msg.status
         dialog.last_at = utcnow()
+        await clear_unread(session, dialog)
         await session.flush()
     except Exception:
         logger.exception(

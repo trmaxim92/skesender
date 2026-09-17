@@ -235,6 +235,7 @@ async def _refresh_dialog_preview(db: AsyncSession, dialog: Dialog) -> None:
         dialog.last_message = ""
         dialog.last_direction = None
         dialog.last_status = None
+        dialog.last_at = dialog.created_at
 
 
 async def _load_appeal_for_mutation(db: AsyncSession, appeal_id: int) -> Appeal | None:
@@ -287,6 +288,8 @@ async def _hard_delete_appeal(
     next_appeal = remaining.scalar_one_or_none()
     dialog.current_appeal_id = next_appeal.id if next_appeal else None
     await _refresh_dialog_preview(db, dialog)
+    if dialog.last_direction != "in":
+        await clear_unread(db, dialog)
     loaded = await db.execute(
         select(Dialog)
         .options(

@@ -8,7 +8,15 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, ChatMessage, Contact, ContactStatus, Dialog, utcnow
+from app.models import (
+    Channel,
+    ChatMessage,
+    Contact,
+    ContactStatus,
+    Dialog,
+    MessageDirection,
+    utcnow,
+)
 
 
 def _normalize_phone(raw: str | None) -> str:
@@ -160,6 +168,34 @@ async def clear_unread(session: AsyncSession, dialog: Dialog) -> bool:
     cleared = result.scalar_one_or_none() is not None
     dialog.unread = 0
     return cleared
+
+
+async def clear_unread_after_outbound(
+    session: AsyncSession,
+    dialog: Dialog,
+    *,
+    outbound_at,
+) -> bool:
+    """Clear unread unless a newer inbound arrived during provider I/O.
+
+    Reload last_* from DB so in-memory dialog is not stale after a concurrent ingest.
+    """
+    fresh = await session.get(Dialog, dialog.id)
+    if fresh is None:
+        return False
+    dialog.unread = fresh.unread
+    dialog.last_direction = fresh.last_direction
+    dialog.last_at = fresh.last_at
+    dialog.last_message = fresh.last_message
+    dialog.last_status = fresh.last_status
+    if (
+        fresh.last_direction == MessageDirection.IN.value
+        and fresh.last_at is not None
+        and outbound_at is not None
+        and fresh.last_at > outbound_at
+    ):
+        return False
+    return await clear_unread(session, dialog)
 
 
 async def heal_stale_outbound_unread(session: AsyncSession) -> int:

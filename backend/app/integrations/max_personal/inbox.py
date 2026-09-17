@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.appeals import ensure_open_appeal
 from app.config import get_settings
-from app.dialogs import bump_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
 from app.models import (
     AttachmentKind,
     Channel,
@@ -397,7 +397,11 @@ async def apply_read_mark(
             ChatMessage.dialog_id == dialog.id,
             ChatMessage.direction == MessageDirection.OUT.value,
             ChatMessage.deleted_at.is_(None),
-            ChatMessage.status != MessageStatus.READ.value,
+            ChatMessage.is_internal.is_(False),
+            ChatMessage.external_id.is_not(None),
+            ChatMessage.status.in_(
+                (MessageStatus.SENT.value, MessageStatus.DELIVERED.value)
+            ),
             ChatMessage.created_at <= cutoff,
         )
         .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
@@ -409,7 +413,11 @@ async def apply_read_mark(
         await session.flush()
         latest = await session.execute(
             select(ChatMessage)
-            .where(ChatMessage.dialog_id == dialog.id, ChatMessage.deleted_at.is_(None))
+            .where(
+                ChatMessage.dialog_id == dialog.id,
+                ChatMessage.deleted_at.is_(None),
+                ChatMessage.is_internal.is_(False),
+            )
             .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
             .limit(1)
         )
@@ -574,10 +582,11 @@ async def ingest_pymax_message(
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
-    dialog.last_message = message_preview_text(msg.text, stored)
-    dialog.last_direction = direction
-    dialog.last_status = msg.status
-    dialog.last_at = created_at
+    if dialog.last_at is None or created_at >= dialog.last_at:
+        dialog.last_message = message_preview_text(msg.text, stored)
+        dialog.last_direction = direction
+        dialog.last_status = msg.status
+        dialog.last_at = created_at
     if direction == MessageDirection.IN.value:
         await bump_unread(session, dialog)
         if _is_group_chat(chat_id):
@@ -602,6 +611,9 @@ async def ingest_pymax_message(
                 dialog.contact_phone, my_phone=my_phone
             ) is None:
                 dialog.contact_phone = contact_phone
+    else:
+        # Native outbound (phone/desktop) — operator already handled the thread.
+        await clear_unread(session, dialog)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg
