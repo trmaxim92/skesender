@@ -641,10 +641,10 @@ onUnmounted(() => {
         >
           <img
             src="/logo-skayskel.png"
-            alt="СкайСкел"
-            class="h-9 w-auto max-w-full object-contain object-left"
+            alt="СкайСкейл"
+            class="h-11 w-auto max-w-full object-contain object-left"
             width="140"
-            height="36"
+            height="44"
           />
           <p class="mt-0.5 truncate text-[11px] text-mute">Кабинет оператора</p>
         </div>
