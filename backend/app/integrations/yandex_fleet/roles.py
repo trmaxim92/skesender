@@ -61,8 +61,6 @@ def categories_from_row(row: dict[str, Any]) -> set[str]:
 def infer_performer_role(row: dict[str, Any]) -> str:
     """Return display role(s), e.g. 'Водитель такси · Автокурьер'."""
     cats = categories_from_row(row)
-    car = row.get("car") if isinstance(row, dict) else None
-    has_car = isinstance(car, dict) and bool(car.get("id") or cats)
 
     roles: list[str] = []
     if cats & _TAXI_CATS:
@@ -75,8 +73,7 @@ def infer_performer_role(row: dict[str, Any]) -> str:
         roles.append(ROLE_MOTO)
 
     if not roles:
-        if not has_car:
-            return ROLE_WALKING
+        # List API often omits car for active taxi drivers; don't invent "пеший".
         return ROLE_TAXI
 
     # Stable order
