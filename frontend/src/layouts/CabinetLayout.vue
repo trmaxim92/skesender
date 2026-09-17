@@ -283,7 +283,8 @@ function refreshInstallBanner() {
     showInstallBanner.value = false
     return
   }
-  showInstallBanner.value = installPromptReady.value || iosInstallHint.value
+  // Show for any browser session until dismissed — strongest CTA for phone install.
+  showInstallBanner.value = true
 }
 
 async function onInstallApp() {
@@ -842,6 +843,81 @@ onUnmounted(() => {
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
+      <div
+        v-if="showInstallBanner"
+        class="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#0b4fd9] via-[#1a6dff] to-[#4aa3ff] px-3 py-3 text-white shadow-sm md:px-5"
+        role="region"
+        aria-label="Установка приложения"
+      >
+        <div
+          class="pointer-events-none absolute -left-10 -top-12 size-36 rounded-full bg-white/15 blur-2xl"
+          aria-hidden="true"
+        />
+        <div
+          class="pointer-events-none absolute -bottom-16 right-0 size-44 rounded-full bg-cyan-200/25 blur-3xl"
+          aria-hidden="true"
+        />
+        <div class="relative flex items-center gap-3 sm:gap-4">
+          <img
+            src="/pwa-192.png"
+            alt=""
+            width="56"
+            height="56"
+            class="size-12 shrink-0 rounded-[14px] shadow-lg shadow-black/20 ring-2 ring-white/35 sm:size-14 sm:rounded-2xl"
+          />
+          <div class="min-w-0 flex-1">
+            <p class="text-[15px] font-bold leading-snug tracking-tight sm:text-base">
+              Установите приложение на телефон
+            </p>
+            <p
+              v-if="iosInstallHint && !installPromptReady"
+              class="mt-0.5 text-xs leading-snug text-white/85"
+            >
+              Нажмите
+              <Share class="mx-0.5 inline size-3.5 align-text-bottom opacity-95" />
+              «Поделиться» → «На экран „Домой“»
+            </p>
+            <p v-else class="mt-0.5 text-xs leading-snug text-white/85">
+              Ярлык на экране, полный экран и быстрые оповещения — как в обычном приложении.
+            </p>
+            <div class="mt-2.5 flex flex-wrap items-center gap-2">
+              <button
+                v-if="installPromptReady"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-[#0b4fd9] shadow-sm transition hover:bg-white/95 active:scale-[0.98]"
+                @click="onInstallApp"
+              >
+                <Download class="size-3.5" />
+                Установить
+              </button>
+              <button
+                v-else-if="iosInstallHint"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-3.5 py-2 text-xs font-semibold text-white ring-1 ring-white/35 backdrop-blur-sm transition hover:bg-white/25"
+                @click="onDismissInstall"
+              >
+                Понятно
+              </button>
+              <button
+                type="button"
+                class="rounded-xl px-2.5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
+                @click="onDismissInstall"
+              >
+                Позже
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="shrink-0 self-start rounded-lg p-1.5 text-white/70 transition hover:bg-white/15 hover:text-white"
+            title="Закрыть"
+            @click="onDismissInstall"
+          >
+            <X class="size-4" />
+          </button>
+        </div>
+      </div>
+
       <header class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2">
           <button
@@ -1063,53 +1139,6 @@ onUnmounted(() => {
         </div>
         </div>
       </header>
-
-      <div
-        v-if="showInstallBanner"
-        class="shrink-0 border-b border-brand/20 bg-brand-soft px-3 py-2.5 md:px-4"
-      >
-        <div class="flex items-start gap-3">
-          <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white">
-            <Download class="size-4" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-sm font-semibold text-ink">Установить как приложение</div>
-            <p v-if="iosInstallHint && !installPromptReady" class="mt-0.5 text-xs leading-snug text-muted">
-              На iPhone: нажмите
-              <Share class="mx-0.5 inline size-3.5 align-text-bottom text-brand" />
-              «Поделиться» → «На экран „Домой“».
-            </p>
-            <p v-else class="mt-0.5 text-xs leading-snug text-muted">
-              Ярлык на телефоне, полноэкранный режим и оповещения как в приложении.
-            </p>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <button
-                v-if="installPromptReady"
-                type="button"
-                class="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
-                @click="onInstallApp"
-              >
-                Установить
-              </button>
-              <button
-                type="button"
-                class="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-panel"
-                @click="onDismissInstall"
-              >
-                Позже
-              </button>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="rounded-lg p-1 text-muted hover:bg-panel"
-            title="Закрыть"
-            @click="onDismissInstall"
-          >
-            <X class="size-4" />
-          </button>
-        </div>
-      </div>
 
       <main class="min-h-0 flex-1 overflow-hidden">
         <RouterView />

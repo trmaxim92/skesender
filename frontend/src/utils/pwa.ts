@@ -1,6 +1,6 @@
 /** PWA helpers: standalone detection, install prompt, app icon badge. */
 
-const DISMISS_INSTALL_KEY = 'oe_pwa_install_dismissed'
+const DISMISS_INSTALL_KEY = 'oe_pwa_install_dismissed_v2'
 
 export function isStandaloneDisplay(): boolean {
   if (typeof window === 'undefined') return false
