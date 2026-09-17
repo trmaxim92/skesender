@@ -49,11 +49,47 @@ body {
 }
 
 @media (display-mode: standalone) {
+  html,
   body {
-    /* Feel closer to a native shell */
+    background: var(--color-surface);
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
+
+  body {
+    /* Feel closer to a native shell */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Soften scrollbars in the installed shell */
+  * {
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+html.oe-standalone body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+html.oe-standalone.oe-launched,
+html.oe-standalone.oe-launched body {
+  background: var(--color-surface);
 }
 
 button,

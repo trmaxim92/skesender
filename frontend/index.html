@@ -6,10 +6,10 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1a6dff" />
+    <meta name="theme-color" content="#0b4fd9" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="СкайСкейл" />
     <meta name="application-name" content="СкайСкейл" />
     <meta name="description" content="Кабинет оператора СкайСкейл — чаты и оповещения" />
@@ -20,6 +20,164 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* Critical splash — paints before Vue bundle. */
+      #oe-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.1rem;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+        background: linear-gradient(160deg, #0b4fd9 0%, #1a6dff 48%, #3d8bff 100%);
+        color: #fff;
+        font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        transition:
+          opacity 0.48s cubic-bezier(0.22, 1, 0.36, 1),
+          transform 0.52s cubic-bezier(0.22, 1, 0.36, 1),
+          filter 0.48s ease;
+      }
+      #oe-splash.oe-splash--leave {
+        opacity: 0;
+        transform: scale(1.06);
+        filter: blur(8px);
+        pointer-events: none;
+      }
+      .oe-splash__glow {
+        position: absolute;
+        width: 22rem;
+        height: 22rem;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.28), transparent 68%);
+        animation: oe-splash-glow 2.4s ease-in-out infinite;
+        pointer-events: none;
+      }
+      .oe-splash__ring {
+        position: absolute;
+        width: 9.5rem;
+        height: 9.5rem;
+        border-radius: 999px;
+        border: 1.5px solid rgba(255, 255, 255, 0.28);
+        animation: oe-splash-ring 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+        pointer-events: none;
+      }
+      .oe-splash__icon {
+        position: relative;
+        width: 5.5rem;
+        height: 5.5rem;
+        border-radius: 1.35rem;
+        box-shadow:
+          0 18px 40px rgba(0, 0, 0, 0.28),
+          0 0 0 3px rgba(255, 255, 255, 0.28);
+        animation: oe-splash-pop 0.9s cubic-bezier(0.22, 1.4, 0.36, 1) both;
+      }
+      .oe-splash__brand {
+        position: relative;
+        margin: 0;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        animation: oe-splash-rise 0.7s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      .oe-splash__tag {
+        position: relative;
+        margin: -0.35rem 0 0;
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.82);
+        animation: oe-splash-rise 0.7s 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      .oe-splash__bar {
+        position: relative;
+        width: 7.5rem;
+        height: 3px;
+        margin-top: 0.65rem;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.22);
+        animation: oe-splash-rise 0.7s 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      .oe-splash__bar-fill {
+        width: 40%;
+        height: 100%;
+        border-radius: inherit;
+        background: #fff;
+        animation: oe-splash-bar 1.15s ease-in-out infinite;
+      }
+      @keyframes oe-splash-pop {
+        0% {
+          opacity: 0;
+          transform: scale(0.55) translateY(12px);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+      @keyframes oe-splash-rise {
+        0% {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes oe-splash-glow {
+        0%,
+        100% {
+          transform: scale(0.92);
+          opacity: 0.7;
+        }
+        50% {
+          transform: scale(1.08);
+          opacity: 1;
+        }
+      }
+      @keyframes oe-splash-ring {
+        0% {
+          transform: scale(0.78);
+          opacity: 0.55;
+        }
+        70% {
+          opacity: 0.12;
+        }
+        100% {
+          transform: scale(1.35);
+          opacity: 0;
+        }
+      }
+      @keyframes oe-splash-bar {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(280%);
+        }
+      }
+      html.oe-standalone,
+      html.oe-standalone body {
+        background: #0b4fd9;
+      }
+      html.oe-standalone #app {
+        opacity: 0;
+        transform: translateY(8px) scale(0.985);
+        transition:
+          opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+          transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      html.oe-standalone.oe-launched #app {
+        opacity: 1;
+        transform: none;
+      }
+    </style>
     <script>
       /* Best-effort: kill legacy SW before modules load (helps stuck iOS/PWA shells). */
       (function () {
@@ -42,9 +200,48 @@
           })
         }
       })()
+      ;(function () {
+        var standalone =
+          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+          (typeof navigator !== 'undefined' && navigator.standalone === true)
+        var root = document.documentElement
+        if (standalone) root.classList.add('oe-standalone')
+        else root.classList.add('oe-browser')
+        window.__OE_STANDALONE__ = standalone
+        // Safety: never leave splash forever if boot stalls.
+        window.setTimeout(function () {
+          var el = document.getElementById('oe-splash')
+          if (!el) return
+          el.classList.add('oe-splash--leave')
+          root.classList.add('oe-launched')
+          window.setTimeout(function () {
+            el.remove()
+          }, 600)
+        }, 8000)
+      })()
     </script>
   </head>
   <body>
+    <div id="oe-splash" data-started="" aria-hidden="true">
+      <div class="oe-splash__glow" aria-hidden="true"></div>
+      <div class="oe-splash__ring" aria-hidden="true"></div>
+      <img class="oe-splash__icon" src="/pwa-192.png" width="88" height="88" alt="" />
+      <p class="oe-splash__brand">СкайСкейл</p>
+      <p class="oe-splash__tag">Кабинет оператора</p>
+      <div class="oe-splash__bar" aria-hidden="true">
+        <div class="oe-splash__bar-fill"></div>
+      </div>
+    </div>
+    <script>
+      ;(function () {
+        var el = document.getElementById('oe-splash')
+        if (el) el.setAttribute('data-started', String(performance.now()))
+        if (!window.__OE_STANDALONE__) {
+          if (el) el.remove()
+          document.documentElement.classList.add('oe-launched')
+        }
+      })()
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
