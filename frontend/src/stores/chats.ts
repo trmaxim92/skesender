@@ -760,18 +760,12 @@ export const useChatsStore = defineStore('chats', () => {
       return
     }
     if (activeDialogId.value && !dialogs.value.some((d) => d.id === activeDialogId.value)) {
-      activeDialogId.value = dialogs.value[0]?.id ?? null
-      if (activeDialogId.value) {
-        const dialog = dialogs.value.find((d) => d.id === activeDialogId.value)
-        viewingAppealId.value = dialog?.appealId ?? null
-        dialogAppeals.value = []
-        await fetchDialogAppeals(activeDialogId.value)
-        await fetchMessages(activeDialogId.value, viewingAppealId.value)
-      } else {
-        viewingAppealId.value = null
-        dialogAppeals.value = []
-        messages.value = []
-      }
+      activeDialogId.value = null
+      viewingAppealId.value = null
+      dialogAppeals.value = []
+      messages.value = []
+      replyingTo.value = null
+      noteMode.value = false
     }
   }
 
@@ -1013,9 +1007,12 @@ export const useChatsStore = defineStore('chats', () => {
       // Сразу убираем из вкладок Новые/Мои/Чужие — закрытые там не живут.
       dialogs.value = dialogs.value.filter((d) => d.id !== closedId)
       if (activeDialogId.value === closedId) {
-        activeDialogId.value = dialogs.value[0]?.id ?? null
-        if (activeDialogId.value) await fetchMessages(activeDialogId.value)
-        else messages.value = []
+        activeDialogId.value = null
+        viewingAppealId.value = null
+        dialogAppeals.value = []
+        messages.value = []
+        replyingTo.value = null
+        noteMode.value = false
       }
       sidePanelOpen.value = false
       sidebar.value = null
@@ -1046,9 +1043,12 @@ export const useChatsStore = defineStore('chats', () => {
       const skippedIds = new Set(res.skipped.map((s) => String(s.id)))
       dialogs.value = dialogs.value.filter((d) => !dialogIds.includes(d.id) || skippedIds.has(d.id))
       if (activeDialogId.value && dialogIds.includes(activeDialogId.value) && !skippedIds.has(activeDialogId.value)) {
-        activeDialogId.value = dialogs.value[0]?.id ?? null
-        if (activeDialogId.value) await fetchMessages(activeDialogId.value)
-        else messages.value = []
+        activeDialogId.value = null
+        viewingAppealId.value = null
+        dialogAppeals.value = []
+        messages.value = []
+        replyingTo.value = null
+        noteMode.value = false
         sidePanelOpen.value = false
         sidebar.value = null
       }

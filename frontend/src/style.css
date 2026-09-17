@@ -92,6 +92,16 @@ html.oe-standalone.oe-launched body {
   background: var(--color-surface);
 }
 
+/* Immersive mobile chat thread: thread header / composer own the safe areas. */
+html.oe-chat-immersive body {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+html.oe-chat-immersive {
+  overscroll-behavior: none;
+}
+
 button,
 input,
 textarea,

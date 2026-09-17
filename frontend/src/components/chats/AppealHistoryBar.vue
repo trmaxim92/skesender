@@ -63,11 +63,12 @@ function pageVisible(index: number) {
 
 <template>
   <div
-    class="flex items-center gap-3 border-b border-line bg-panel/80 px-5 py-2"
+    v-if="hasPrevious"
+    class="flex items-center gap-2 border-b border-line bg-panel/80 px-3 py-1.5 md:gap-3 md:px-5 md:py-2"
   >
     <div class="min-w-0 flex-1 text-center text-xs font-medium text-muted">
       <span
-        class="inline-flex max-w-full items-center truncate rounded-full bg-surface px-3 py-1"
+        class="inline-flex max-w-full items-center truncate rounded-full bg-surface px-2.5 py-1 md:px-3"
         :class="
           hasPrevious && viewing && viewing.id !== currentAppealId
             ? 'text-ink'
@@ -78,13 +79,10 @@ function pageVisible(index: number) {
       </span>
     </div>
 
-    <div
-      v-if="hasPrevious"
-      class="flex shrink-0 items-center gap-0.5"
-    >
+    <div class="flex shrink-0 items-center gap-0.5">
       <button
         type="button"
-        class="flex size-7 items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-ink disabled:opacity-30"
+        class="flex size-9 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-ink disabled:opacity-30 md:size-7 md:rounded-md"
         :disabled="viewingIndex <= 0"
         title="Предыдущее обращение"
         @click="go(-1)"
@@ -99,7 +97,7 @@ function pageVisible(index: number) {
         <button
           v-if="pageVisible(index)"
           type="button"
-          class="flex size-7 items-center justify-center rounded-md text-[12px] font-semibold transition"
+          class="flex size-9 items-center justify-center rounded-lg text-[12px] font-semibold transition md:size-7 md:rounded-md"
           :class="
             appeal.id === viewingAppealId
               ? 'bg-brand text-white'
@@ -113,7 +111,7 @@ function pageVisible(index: number) {
       </template>
       <button
         type="button"
-        class="flex size-7 items-center justify-center rounded-md text-muted transition hover:bg-surface hover:text-ink disabled:opacity-30"
+        class="flex size-9 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-ink disabled:opacity-30 md:size-7 md:rounded-md"
         :disabled="viewingIndex < 0 || viewingIndex >= sorted.length - 1"
         title="Следующее обращение"
         @click="go(1)"

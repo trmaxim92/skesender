@@ -263,7 +263,7 @@ onMounted(() => {
 
 <template>
   <div
-    class="relative border-t border-line bg-panel px-4 py-3"
+    class="relative shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:py-3"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
     @dragover="onDragOver"
@@ -355,6 +355,34 @@ onMounted(() => {
       </div>
     </div>
 
+    <div
+      v-if="!notesOnly"
+      class="mb-2 flex gap-2 sm:hidden"
+    >
+      <button
+        type="button"
+        class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border text-xs font-semibold transition"
+        :class="
+          noteMode
+            ? 'border-bubble-note-border bg-bubble-note text-bubble-note-ink'
+            : 'border-line bg-surface text-muted'
+        "
+        @click="emit('update:noteMode', !noteMode)"
+      >
+        <NotebookPen class="size-3.5" />
+        Заметка
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface text-xs font-semibold text-muted transition disabled:opacity-40"
+        :disabled="noteMode"
+        @click="templatesOpen = true"
+      >
+        <TextQuote class="size-3.5" />
+        Шаблон
+      </button>
+    </div>
+
     <form class="flex items-end gap-2" @submit.prevent="emit('send')">
       <input
         ref="fileInput"
@@ -368,7 +396,7 @@ onMounted(() => {
       <button
         v-if="!notesOnly"
         type="button"
-        class="flex size-11 shrink-0 items-center justify-center rounded-xl border transition"
+        class="hidden size-11 shrink-0 items-center justify-center rounded-xl border transition sm:flex"
         :class="
           noteMode
             ? 'border-bubble-note-border bg-bubble-note text-bubble-note-ink'
@@ -383,7 +411,7 @@ onMounted(() => {
       <button
         v-if="!notesOnly"
         type="button"
-        class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+        class="hidden size-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:cursor-not-allowed disabled:opacity-40 sm:flex"
         title="Шаблон"
         :disabled="noteMode"
         @click="templatesOpen = true"
@@ -414,8 +442,8 @@ onMounted(() => {
           ref="textareaEl"
           :value="modelValue"
           rows="1"
-          :placeholder="noteMode ? 'Заметка для команды…' : 'Написать сообщение… или вставьте / перетащите файлы'"
-          class="composer-input max-h-[280px] min-h-[28px] w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-6 outline-none"
+          :placeholder="noteMode ? 'Заметка для команды…' : 'Сообщение…'"
+          class="composer-input max-h-[160px] min-h-[28px] w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-6 outline-none md:max-h-[280px]"
           :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/80'"
           @input="onInput"
           @paste="onPaste"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2, X } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -48,6 +48,7 @@ const canWrite = computed(() => auth.can('action.write') && auth.user?.canWriteC
 const canCreateOutbound = computed(() => canWrite.value && auth.can('section.appeals'))
 
 const createOpen = ref(false)
+const threadActionsOpen = ref(false)
 
 const route = useRoute()
 const router = useRouter()
@@ -505,6 +506,7 @@ watch(
 watch(
   () => chats.activeDialogId,
   async (id) => {
+    threadActionsOpen.value = false
     if (syncingUrl) return
     if (!id) {
       if (route.query.dialog) {
@@ -546,7 +548,7 @@ onUnmounted(() => {
           ] as const"
           :key="f.id"
           type="button"
-          class="relative flex flex-1 items-center justify-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold transition"
+          class="relative flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl px-2.5 py-2.5 text-xs font-semibold transition md:min-h-0 md:rounded-lg md:py-2"
           :class="
             chats.filter === f.id ? 'bg-brand-soft text-brand' : 'text-muted hover:bg-surface'
           "
@@ -563,11 +565,11 @@ onUnmounted(() => {
         <button
           v-if="canCreateOutbound"
           type="button"
-          class="shrink-0 rounded-lg p-2 text-brand transition hover:bg-brand-soft"
+          class="flex size-11 shrink-0 items-center justify-center rounded-xl text-brand transition hover:bg-brand-soft md:size-auto md:rounded-lg md:p-2"
           title="Новое исходящее"
           @click="openCreateOutbound"
         >
-          <Plus class="size-4" />
+          <Plus class="size-5 md:size-4" />
         </button>
       </div>
       <div
@@ -577,7 +579,7 @@ onUnmounted(() => {
         <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
           <input
             type="checkbox"
-            class="size-3.5 rounded border-line accent-brand"
+            class="size-4 rounded border-line accent-brand md:size-3.5"
             :checked="allNewSelected"
             @change="toggleSelectAllNew"
           />
@@ -649,7 +651,7 @@ onUnmounted(() => {
           >
             <input
               type="checkbox"
-              class="size-3.5 rounded border-line accent-brand"
+              class="size-4 rounded border-line accent-brand md:size-3.5"
               :checked="selectedNew.has(d.id)"
               @change="toggleNewSelect(d.id)"
             />
@@ -727,15 +729,17 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <section v-if="chats.activeDialog" class="flex min-w-0 flex-1 flex-col bg-surface">
-      <header class="flex items-center gap-2 border-b border-line bg-panel px-3 py-3 md:gap-3 md:px-5">
+    <section v-if="chats.activeDialog" class="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
+      <header
+        class="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-2 pb-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] md:gap-3 md:px-5 md:py-3"
+      >
         <button
           type="button"
-          class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand md:hidden"
+          class="flex size-11 shrink-0 items-center justify-center rounded-xl text-ink transition hover:bg-surface md:hidden"
           title="К списку диалогов"
           @click="backToDialogList"
         >
-          <ArrowLeft class="size-4" />
+          <ArrowLeft class="size-5" />
         </button>
         <ContactAvatar
           :name="chats.activeDialog.contactName"
@@ -744,7 +748,7 @@ onUnmounted(() => {
         />
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-2">
-            <div class="truncate text-sm font-semibold">{{ chats.activeDialog.contactName }}</div>
+            <div class="truncate text-[15px] font-semibold md:text-sm">{{ chats.activeDialog.contactName }}</div>
             <span
               v-if="chats.activeDialog.transport"
               class="hidden shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:inline"
@@ -782,7 +786,7 @@ onUnmounted(() => {
         </div>
         <div
           v-if="canWrite"
-          class="flex shrink-0 items-center gap-1"
+          class="hidden shrink-0 items-center gap-1 sm:flex"
         >
           <span
             class="mr-1 hidden max-w-[7rem] truncate text-[10px] text-muted lg:inline"
@@ -793,7 +797,7 @@ onUnmounted(() => {
           <button
             v-if="canClaim"
             type="button"
-            class="inline-flex h-8 items-center gap-1 rounded-lg bg-ok px-2 text-[11px] font-semibold text-white transition hover:brightness-105 disabled:opacity-50"
+            class="inline-flex h-9 items-center gap-1 rounded-lg bg-ok px-2.5 text-[11px] font-semibold text-white transition hover:brightness-105 disabled:opacity-50"
             title="Забрать обращение"
             :disabled="claimBusy"
             @click="claimDialog"
@@ -804,7 +808,7 @@ onUnmounted(() => {
           <button
             v-if="canTransfer"
             type="button"
-            class="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+            class="inline-flex h-9 items-center gap-1 rounded-lg border border-line px-2.5 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
             title="Передать другому менеджеру"
             @click="transferOpen = true"
           >
@@ -814,7 +818,7 @@ onUnmounted(() => {
           <button
             v-if="chats.canCompose"
             type="button"
-            class="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2 text-[11px] font-semibold text-muted transition hover:border-ok/40 hover:bg-ok/10 hover:text-ok disabled:opacity-50"
+            class="inline-flex h-9 items-center gap-1 rounded-lg border border-line px-2.5 text-[11px] font-semibold text-muted transition hover:border-ok/40 hover:bg-ok/10 hover:text-ok disabled:opacity-50"
             :disabled="chats.closing"
             title="Закрыть обращение"
             @click="closeOpen = true"
@@ -823,23 +827,69 @@ onUnmounted(() => {
             <span class="hidden sm:inline">{{ chats.closing ? '…' : 'Закрыть' }}</span>
           </button>
         </div>
-        <button
-          type="button"
-          class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
-          title="Карточка клиента / обращения"
-          @click="chats.openSidePanel()"
-        >
-          <PanelRight class="size-3.5" />
-        </button>
+        <div class="relative flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <button
+            type="button"
+            class="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-brand sm:size-9 sm:rounded-lg sm:border sm:border-line"
+            title="Карточка клиента / обращения"
+            @click="chats.openSidePanel()"
+          >
+            <PanelRight class="size-5 sm:size-3.5" />
+          </button>
+          <button
+            v-if="canWrite"
+            type="button"
+            class="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink sm:hidden"
+            title="Действия"
+            :aria-expanded="threadActionsOpen"
+            @click="threadActionsOpen = !threadActionsOpen"
+          >
+            <EllipsisVertical class="size-5" />
+          </button>
+          <div
+            v-if="threadActionsOpen"
+            class="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-xl sm:hidden"
+          >
+            <button
+              v-if="canClaim"
+              type="button"
+              class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-ink hover:bg-surface disabled:opacity-50"
+              :disabled="claimBusy"
+              @click="threadActionsOpen = false; claimDialog()"
+            >
+              <Hand class="size-4 text-ok" />
+              {{ claimBusy ? '…' : 'Забрать' }}
+            </button>
+            <button
+              v-if="canTransfer"
+              type="button"
+              class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-ink hover:bg-surface"
+              @click="threadActionsOpen = false; transferOpen = true"
+            >
+              <ArrowRightLeft class="size-4 text-muted" />
+              Передать
+            </button>
+            <button
+              v-if="chats.canCompose"
+              type="button"
+              class="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-ink hover:bg-surface disabled:opacity-50"
+              :disabled="chats.closing"
+              @click="threadActionsOpen = false; closeOpen = true"
+            >
+              <CircleCheckBig class="size-4 text-ok" />
+              {{ chats.closing ? '…' : 'Закрыть' }}
+            </button>
+          </div>
+        </div>
       </header>
 
       <p
         v-if="transferNotice"
-        class="border-b border-line bg-ok/10 px-5 py-2 text-xs font-medium text-ok"
+        class="border-b border-line bg-ok/10 px-3 py-2 text-xs font-medium text-ok md:px-5"
       >
         {{ transferNotice }}
       </p>
-      <p v-if="chats.error" class="border-b border-line bg-panel px-5 py-2 text-xs text-danger">
+      <p v-if="chats.error" class="border-b border-line bg-panel px-3 py-2 text-xs text-danger md:px-5">
         {{ chats.error }}
       </p>
 
@@ -851,8 +901,11 @@ onUnmounted(() => {
       />
 
       <div class="relative min-h-0 flex-1">
-      <div ref="threadEl" class="h-full space-y-3 overflow-auto px-5 py-4" @scroll="onThreadScroll">
-        <div v-if="chats.hasMoreMessages" class="flex justify-center py-1">
+      <div
+        ref="threadEl"
+        class="h-full space-y-2.5 overflow-auto overscroll-contain px-3 py-3 md:space-y-3 md:px-5 md:py-4"
+        @scroll="onThreadScroll"
+      >        <div v-if="chats.hasMoreMessages" class="flex justify-center py-1">
           <button
             type="button"
             class="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:opacity-50"
@@ -885,7 +938,7 @@ onUnmounted(() => {
             />
 
             <div
-              class="max-w-[min(70%,420px)] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm shadow-sm"
+              class="max-w-[min(86%,420px)] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm shadow-sm md:max-w-[min(70%,420px)]"
               :class="[
                 row.message.isInternal
                   ? 'rounded-br-md border border-dashed border-bubble-note-border bg-bubble-note text-bubble-note-ink'
@@ -1046,31 +1099,31 @@ onUnmounted(() => {
                     <button
                       v-if="!row.message.isInternal"
                       type="button"
-                      class="rounded p-0.5 opacity-50 transition hover:opacity-100"
+                      class="flex size-8 items-center justify-center rounded-lg opacity-80 transition hover:opacity-100 md:size-auto md:rounded md:p-0.5 md:opacity-50"
                       :class="row.message.direction === 'out' ? 'hover:bg-white/15' : 'hover:bg-surface hover:text-brand'"
                       title="Ответить"
                       @click="chats.setReplyTo(row.message)"
                     >
-                      <Reply class="size-3.5" />
+                      <Reply class="size-4 md:size-3.5" />
                     </button>
                     <template v-if="row.message.direction === 'out'">
                       <button
                         type="button"
-                        class="rounded p-0.5 opacity-50 transition hover:opacity-100"
+                        class="flex size-8 items-center justify-center rounded-lg opacity-80 transition hover:opacity-100 md:size-auto md:rounded md:p-0.5 md:opacity-50"
                         :class="row.message.isInternal ? 'hover:bg-black/5' : 'hover:bg-white/15'"
                         title="Изменить"
                         @click="startEdit(row.message)"
                       >
-                        <Pencil class="size-3.5" />
+                        <Pencil class="size-4 md:size-3.5" />
                       </button>
                       <button
                         type="button"
-                        class="rounded p-0.5 opacity-50 transition hover:opacity-100"
+                        class="flex size-8 items-center justify-center rounded-lg opacity-80 transition hover:opacity-100 md:size-auto md:rounded md:p-0.5 md:opacity-50"
                         :class="row.message.isInternal ? 'hover:bg-black/5' : 'hover:bg-white/15'"
                         title="Удалить"
                         @click="confirmDelete(row.message)"
                       >
-                        <Trash2 class="size-3.5" />
+                        <Trash2 class="size-4 md:size-3.5" />
                       </button>
                     </template>
                   </template>
@@ -1114,7 +1167,7 @@ onUnmounted(() => {
 
       <div
         v-if="chats.isViewingPastAppeal"
-        class="border-t border-line bg-panel px-5 py-3 text-center text-xs text-muted"
+        class="shrink-0 border-t border-line bg-panel px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-xs text-muted md:px-5 md:pb-3"
       >
         Просмотр предыдущего обращения. Чтобы ответить, откройте текущее
         <button
@@ -1128,7 +1181,7 @@ onUnmounted(() => {
       </div>
       <div
         v-else-if="chats.activeDialog.appealStatus === 'closed'"
-        class="border-t border-line bg-panel px-5 py-3 text-center text-xs text-muted"
+        class="shrink-0 border-t border-line bg-panel px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-xs text-muted md:px-5 md:pb-3"
       >
         Обращение закрыто. Новое откроется, когда клиент напишет снова.
       </div>
@@ -1150,7 +1203,7 @@ onUnmounted(() => {
       />
       <div
         v-else
-        class="border-t border-line bg-panel px-5 py-3 text-center text-xs text-muted"
+        class="shrink-0 border-t border-line bg-panel px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-xs text-muted md:px-5 md:pb-3"
       >
         Режим просмотра — отправка недоступна
       </div>

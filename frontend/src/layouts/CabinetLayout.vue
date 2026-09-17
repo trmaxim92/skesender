@@ -274,6 +274,23 @@ watch(
   { immediate: true },
 )
 
+const hideChromeForMobileChat = computed(
+  () =>
+    !isMdUp.value &&
+    route.name === 'chats' &&
+    typeof route.query.dialog === 'string' &&
+    Boolean(route.query.dialog),
+)
+
+watch(
+  hideChromeForMobileChat,
+  (immersive) => {
+    if (typeof document === 'undefined') return
+    document.documentElement.classList.toggle('oe-chat-immersive', immersive)
+  },
+  { immediate: true },
+)
+
 const showInstallBanner = ref(false)
 const installPromptReady = ref(false)
 const iosInstallHint = computed(() => isIosDevice() && !isStandaloneDisplay())
@@ -598,6 +615,7 @@ onUnmounted(() => {
   }
   if (inAppToastTimer != null) window.clearTimeout(inAppToastTimer)
   if (notificationsPollTimer) window.clearInterval(notificationsPollTimer)
+  document.documentElement.classList.remove('oe-chat-immersive')
   stopInstallWatch?.()
   chats.disconnectRealtime()
   document.title = BASE_TITLE
@@ -844,7 +862,7 @@ onUnmounted(() => {
 
     <div class="flex min-w-0 flex-1 flex-col">
       <div
-        v-if="showInstallBanner"
+        v-if="showInstallBanner && !hideChromeForMobileChat"
         class="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#0b4fd9] via-[#1a6dff] to-[#4aa3ff] px-3 py-3 text-white shadow-sm md:px-5"
         role="region"
         aria-label="Установка приложения"
@@ -918,7 +936,10 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <header class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6">
+      <header
+        v-if="!hideChromeForMobileChat"
+        class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6"
+      >
         <div class="flex min-w-0 items-center gap-2">
           <button
             type="button"

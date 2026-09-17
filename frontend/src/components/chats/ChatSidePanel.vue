@@ -128,9 +128,11 @@ function linkHref(value: string | undefined) {
         @click="$emit('close')"
       />
       <aside
-        class="relative z-10 flex h-full w-full max-w-[360px] flex-col border-l border-line bg-panel shadow-xl"
+        class="relative z-10 flex h-full w-full max-w-none flex-col border-l border-line bg-panel shadow-xl md:max-w-[360px]"
       >
-        <header class="flex items-center justify-between border-b border-line px-4 py-3">
+        <header
+          class="flex items-center justify-between border-b border-line px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:py-3"
+        >
           <div class="flex gap-1 rounded-lg bg-surface p-0.5">
             <button
               type="button"
@@ -151,10 +153,10 @@ function linkHref(value: string | undefined) {
           </div>
           <button
             type="button"
-            class="rounded-lg p-1.5 text-muted hover:bg-surface hover:text-ink"
+            class="flex size-10 items-center justify-center rounded-xl text-muted hover:bg-surface hover:text-ink"
             @click="$emit('close')"
           >
-            <X class="size-4" />
+            <X class="size-5" />
           </button>
         </header>
 
