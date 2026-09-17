@@ -315,15 +315,8 @@ export async function importContactsRequest(file: File) {
 }
 
 export async function syncContactsFromFleetRequest(options?: { purge?: boolean }) {
-  const purge = options?.purge ? 'true' : 'false'
-  return api<{
-    fetched: number
-    created: number
-    updated: number
-    skipped: number
-    purged: number
-    errors: string[]
-  }>(`/api/contacts/sync/fleet?purge=${purge}`, { method: 'POST' })
+  const { fleetSyncRequest } = await import('@/api/fleet')
+  return fleetSyncRequest(options)
 }
 
 export async function sendContactMessageRequest(

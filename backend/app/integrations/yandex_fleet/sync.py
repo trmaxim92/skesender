@@ -154,11 +154,14 @@ async def sync_fleet_drivers_to_contacts(
         result.purged = await purge_all_contacts(db)
 
     from app.departments import ensure_system_client_fields
+    from app.integrations.yandex_fleet.state import load_runtime_settings
 
     await ensure_system_client_fields(db)
+    runtime = await load_runtime_settings(db)
+    statuses = [s.strip() for s in runtime.work_statuses.split(",") if s.strip()]
 
     try:
-        rows = await iter_all_driver_profiles()
+        rows = await iter_all_driver_profiles(work_statuses=statuses or None)
     except FleetApiError as exc:
         logger.warning("Fleet sync fetch failed: %s", exc)
         result.errors.append(str(exc))

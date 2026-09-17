@@ -8,6 +8,7 @@ from app.api import (
     chats,
     contacts,
     departments,
+    fleet,
     mailing,
     me_templates,
     notifications,
@@ -31,6 +32,7 @@ api_router.include_router(channels.router)
 api_router.include_router(chats.router)
 api_router.include_router(appeals.router)
 api_router.include_router(contacts.router)
+api_router.include_router(fleet.router)
 api_router.include_router(mailing.router)
 api_router.include_router(users.router)
 api_router.include_router(roles.router)

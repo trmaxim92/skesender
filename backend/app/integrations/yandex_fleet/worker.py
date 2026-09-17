@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.config import get_settings
 from app.db import SessionLocal
 from app.integrations.yandex_fleet.client import fleet_configured
+from app.integrations.yandex_fleet.state import load_runtime_settings, record_sync_result
 from app.integrations.yandex_fleet.sync import sync_fleet_drivers_to_contacts
+from app.models import utcnow
 
 logger = logging.getLogger(__name__)
 
-# Default: hourly pull from Fleet into CRM contacts.
 _DEFAULT_INTERVAL_SEC = 3600.0
 
 
@@ -40,28 +40,37 @@ class FleetSyncWorker:
             self._task = None
         logger.info("Fleet sync worker stopped")
 
-    def _interval(self) -> float:
-        raw = get_settings().fleet_sync_interval_sec
+    async def _interval(self) -> float:
         try:
-            sec = float(raw)
-        except (TypeError, ValueError):
-            sec = _DEFAULT_INTERVAL_SEC
-        return max(sec, 60.0)
+            async with SessionLocal() as session:
+                runtime = await load_runtime_settings(session)
+                await session.commit()
+                if not runtime.sync_enabled:
+                    return max(_DEFAULT_INTERVAL_SEC, 60.0)
+                return float(max(runtime.interval_sec, 60))
+        except Exception:
+            logger.exception("Failed to load Fleet sync interval")
+            return _DEFAULT_INTERVAL_SEC
 
     async def _run(self) -> None:
-        # Small delay so startup / migrations finish first.
         await self._sleep_interruptible(15.0)
         while not self._stop.is_set():
             try:
                 async with SessionLocal() as session:
-                    result = await sync_fleet_drivers_to_contacts(session)
-                if result.errors:
-                    logger.warning("Fleet periodic sync errors: %s", result.errors[:3])
+                    runtime = await load_runtime_settings(session)
+                    if not runtime.sync_enabled:
+                        await session.commit()
+                    else:
+                        started = utcnow()
+                        result = await sync_fleet_drivers_to_contacts(session)
+                        await record_sync_result(session, result, started_at=started)
+                        if result.errors:
+                            logger.warning("Fleet periodic sync errors: %s", result.errors[:3])
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Fleet sync worker tick failed")
-            await self._sleep_interruptible(self._interval())
+            await self._sleep_interruptible(await self._interval())
 
     async def _sleep_interruptible(self, seconds: float) -> None:
         try:

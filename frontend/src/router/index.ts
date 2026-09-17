@@ -144,6 +144,12 @@ const router = createRouter({
           meta: { permission: 'section.webhooks' },
         },
         {
+          path: 'settings/yandex-fleet',
+          name: 'settings-yandex-fleet',
+          component: () => import('@/views/settings/YandexFleetView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'settings/appeal-fields',
           name: 'settings-appeal-fields',
           component: () => import('@/views/settings/AppealFieldsView.vue'),

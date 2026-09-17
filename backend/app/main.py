@@ -557,6 +557,28 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
+                """
+                CREATE TABLE IF NOT EXISTS fleet_sync_state (
+                    id INTEGER PRIMARY KEY,
+                    sync_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    interval_sec INTEGER NOT NULL DEFAULT 3600,
+                    work_statuses VARCHAR(128) NOT NULL DEFAULT 'working,not_working',
+                    last_started_at TIMESTAMPTZ,
+                    last_finished_at TIMESTAMPTZ,
+                    last_ok BOOLEAN,
+                    last_fetched INTEGER NOT NULL DEFAULT 0,
+                    last_created INTEGER NOT NULL DEFAULT 0,
+                    last_updated INTEGER NOT NULL DEFAULT 0,
+                    last_skipped INTEGER NOT NULL DEFAULT 0,
+                    last_purged INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS department_id "
                 "INTEGER REFERENCES departments(id) ON DELETE SET NULL"
             )

@@ -7,6 +7,7 @@ import {
   CircleDot,
   Webhook,
   Newspaper,
+  Truck,
 } from 'lucide-vue-next'
 import type { PermissionCode } from '@/types'
 
@@ -30,7 +31,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     id: 'integrations',
     title: 'Интеграции',
-    description: 'Подключение мессенджеров и исходящие события',
+    description: 'Каналы, webhooks и внешние сервисы',
     items: [
       {
         to: '/channels',
@@ -45,6 +46,13 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         description: 'Уведомления во внешние системы',
         icon: Webhook,
         permission: 'section.webhooks',
+      },
+      {
+        to: '/settings/yandex-fleet',
+        label: 'Яндекс Fleet',
+        description: 'Исполнители парка → контакты CRM',
+        icon: Truck,
+        permission: 'section.settings',
       },
     ],
   },

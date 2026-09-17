@@ -921,3 +921,24 @@ class ContactCallResult(Base):
 
     contact: Mapped[Contact] = relationship(back_populates="call_results")
     author: Mapped[User] = relationship()
+
+
+class FleetSyncState(Base):
+    """Singleton row for Yandex Fleet integration settings + last sync result."""
+
+    __tablename__ = "fleet_sync_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_sec: Mapped[int] = mapped_column(Integer, default=3600)
+    work_statuses: Mapped[str] = mapped_column(String(128), default="working,not_working")
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    last_created: Mapped[int] = mapped_column(Integer, default=0)
+    last_updated: Mapped[int] = mapped_column(Integer, default=0)
+    last_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    last_purged: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

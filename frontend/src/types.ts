@@ -325,6 +325,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/employees': 'section.chats',
   '/webhooks': 'section.webhooks',
   '/settings': 'section.settings',
+  '/settings/yandex-fleet': 'section.settings',
   '/settings/appeal-fields': 'section.settings',
   '/settings/client-fields': 'section.settings',
   '/settings/close-template': 'section.settings',

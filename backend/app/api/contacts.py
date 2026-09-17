@@ -768,6 +768,10 @@ async def sync_contacts_from_fleet(
     result = await sync_fleet_drivers_to_contacts(
         db, changed_by_id=user.id, purge_before=purge
     )
+    from app.integrations.yandex_fleet.state import record_sync_result
+    from app.models import utcnow
+
+    await record_sync_result(db, result, started_at=utcnow())
     if result.errors and result.fetched == 0 and result.created == 0 and result.updated == 0:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

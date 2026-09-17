@@ -881,6 +881,42 @@ class ContactFleetSyncResult(BaseModel):
     errors: list[str] = []
 
 
+class FleetSyncResultOut(BaseModel):
+    fetched: int
+    created: int
+    updated: int
+    skipped: int
+    purged: int = 0
+    errors: list[str] = []
+
+
+class FleetSettingsUpdateRequest(BaseModel):
+    sync_enabled: bool | None = None
+    interval_sec: int | None = Field(default=None, ge=60, le=86400 * 7)
+    work_statuses: str | None = Field(default=None, max_length=128)
+
+
+class FleetStatusOut(BaseModel):
+    configured: bool
+    client_id: str = ""
+    park_id: str = ""
+    api_key_masked: str = ""
+    credentials_source: str = "env"
+    sync_enabled: bool = True
+    interval_sec: int = 3600
+    work_statuses: str = "working,not_working"
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_ok: bool | None = None
+    last_fetched: int = 0
+    last_created: int = 0
+    last_updated: int = 0
+    last_skipped: int = 0
+    last_purged: int = 0
+    last_error: str = ""
+
+
+
 class ContactClaimBatchRequest(BaseModel):
     contact_ids: list[int] = Field(min_length=1, max_length=200)
 

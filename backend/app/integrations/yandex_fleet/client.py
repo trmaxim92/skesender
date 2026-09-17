@@ -44,6 +44,7 @@ async def list_driver_profiles_page(
     *,
     offset: int = 0,
     limit: int = _PAGE_SIZE,
+    work_statuses: list[str] | None = None,
 ) -> dict[str, Any]:
     """POST /v1/parks/driver-profiles/list — one page."""
     if not fleet_configured():
@@ -51,12 +52,14 @@ async def list_driver_profiles_page(
 
     settings = get_settings()
     park_id = (settings.fleet_park_id or "").strip()
-    # Skip fired roster by default — park can have 10k+ historical profiles.
-    statuses = [
-        s.strip()
-        for s in (settings.fleet_work_statuses or "working,not_working").split(",")
-        if s.strip()
-    ]
+    if work_statuses is None:
+        statuses = [
+            s.strip()
+            for s in (settings.fleet_work_statuses or "working,not_working").split(",")
+            if s.strip()
+        ]
+    else:
+        statuses = [s.strip() for s in work_statuses if s and str(s).strip()]
     park_query: dict[str, Any] = {"id": park_id}
     if statuses:
         park_query["driver_profile"] = {"work_status": statuses}
@@ -120,12 +123,17 @@ async def list_driver_profiles_page(
     raise last_error
 
 
-async def iter_all_driver_profiles() -> list[dict[str, Any]]:
+async def iter_all_driver_profiles(
+    *,
+    work_statuses: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Fetch all driver profiles for the configured park (paginated)."""
     items: list[dict[str, Any]] = []
     offset = 0
     while True:
-        page = await list_driver_profiles_page(offset=offset, limit=_PAGE_SIZE)
+        page = await list_driver_profiles_page(
+            offset=offset, limit=_PAGE_SIZE, work_statuses=work_statuses
+        )
         batch = page.get("driver_profiles") or []
         if not isinstance(batch, list):
             break
