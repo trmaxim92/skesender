@@ -1,7 +1,7 @@
 /** Dynamic unread count on the browser tab favicon. */
 
-const DEFAULT_HREF = '/favicon.svg'
-const DEFAULT_TYPE = 'image/svg+xml'
+const DEFAULT_HREF = '/favicon.png'
+const DEFAULT_TYPE = 'image/png'
 
 let basePromise: Promise<HTMLImageElement> | null = null
 let lastApplied: number | null = null
