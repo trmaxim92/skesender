@@ -131,7 +131,8 @@ const sourceLabel = computed(() => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl space-y-6 p-6">
+  <div class="h-full overflow-auto p-6">
+  <div class="mx-auto max-w-3xl space-y-6">
     <div>
       <h2 class="text-lg font-semibold tracking-tight">Яндекс Fleet</h2>
       <p class="mt-1 text-sm text-muted">
@@ -297,5 +298,6 @@ const sourceLabel = computed(() => {
         {{ saving ? 'Сохранение…' : 'Сохранить' }}
       </button>
     </section>
+  </div>
   </div>
 </template>
