@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.integrations.yandex_fleet.credentials import FleetCredentials
 from app.integrations.base import IntegrationError
 
 FLEET_API_BASE = "https://fleet-api.taxi.yandex.net"
@@ -20,7 +21,9 @@ class FleetApiError(IntegrationError):
         self.payload = payload
 
 
-def fleet_configured() -> bool:
+def fleet_configured(credentials: FleetCredentials | None = None) -> bool:
+    if credentials is not None:
+        return bool(credentials.client_id and credentials.api_key and credentials.park_id)
     s = get_settings()
     return bool(
         (s.fleet_client_id or "").strip()
@@ -29,30 +32,29 @@ def fleet_configured() -> bool:
     )
 
 
-def _headers() -> dict[str, str]:
-    s = get_settings()
+def _headers(credentials: FleetCredentials) -> dict[str, str]:
     return {
         "Accept-Language": "ru",
         "Content-Type": "application/json",
-        "X-Client-ID": (s.fleet_client_id or "").strip(),
-        "X-API-Key": (s.fleet_api_key or "").strip(),
-        "X-Park-ID": (s.fleet_park_id or "").strip(),
+        "X-Client-ID": credentials.client_id,
+        "X-API-Key": credentials.api_key,
+        "X-Park-ID": credentials.park_id,
     }
 
 
 async def list_driver_profiles_page(
     *,
+    credentials: FleetCredentials,
     offset: int = 0,
     limit: int = _PAGE_SIZE,
     work_statuses: list[str] | None = None,
 ) -> dict[str, Any]:
     """POST /v1/parks/driver-profiles/list — one page."""
-    if not fleet_configured():
-        raise FleetApiError("Fleet API не настроен (FLEET_CLIENT_ID / FLEET_API_KEY / FLEET_PARK_ID)")
+    if not fleet_configured(credentials):
+        raise FleetApiError("Fleet API не настроен (Client-ID / API-Key / Park ID)")
 
-    settings = get_settings()
-    park_id = (settings.fleet_park_id or "").strip()
     if work_statuses is None:
+        settings = get_settings()
         statuses = [
             s.strip()
             for s in (settings.fleet_work_statuses or "working,not_working").split(",")
@@ -60,7 +62,7 @@ async def list_driver_profiles_page(
         ]
     else:
         statuses = [s.strip() for s in work_statuses if s and str(s).strip()]
-    park_query: dict[str, Any] = {"id": park_id}
+    park_query: dict[str, Any] = {"id": credentials.park_id}
     if statuses:
         park_query["driver_profile"] = {"work_status": statuses}
     body: dict[str, Any] = {
@@ -91,7 +93,7 @@ async def list_driver_profiles_page(
             async with httpx.AsyncClient(base_url=FLEET_API_BASE, timeout=60.0) as client:
                 response = await client.post(
                     "/v1/parks/driver-profiles/list",
-                    headers=_headers(),
+                    headers=_headers(credentials),
                     json=body,
                 )
         except httpx.HTTPError as exc:
@@ -125,6 +127,7 @@ async def list_driver_profiles_page(
 
 async def iter_all_driver_profiles(
     *,
+    credentials: FleetCredentials,
     work_statuses: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all driver profiles for the configured park (paginated)."""
@@ -132,7 +135,10 @@ async def iter_all_driver_profiles(
     offset = 0
     while True:
         page = await list_driver_profiles_page(
-            offset=offset, limit=_PAGE_SIZE, work_statuses=work_statuses
+            credentials=credentials,
+            offset=offset,
+            limit=_PAGE_SIZE,
+            work_statuses=work_statuses,
         )
         batch = page.get("driver_profiles") or []
         if not isinstance(batch, list):

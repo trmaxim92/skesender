@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.integrations.yandex_fleet.client import fleet_configured
 from app.integrations.yandex_fleet.state import (
+    credentials_public,
     get_or_create_state,
+    load_runtime_settings,
     record_sync_result,
     update_runtime_settings,
 )
@@ -35,16 +36,15 @@ def _require_write(user: User) -> None:
 
 
 async def _status_out(db: AsyncSession) -> FleetStatusOut:
-    from app.integrations.yandex_fleet.state import credentials_public
-
     row = await get_or_create_state(db)
     await db.commit()
-    creds = credentials_public()
+    creds = credentials_public(row)
     return FleetStatusOut(
         configured=bool(creds["configured"]),
         client_id=str(creds["client_id"]),
         park_id=str(creds["park_id"]),
         api_key_masked=str(creds["api_key_masked"]),
+        has_api_key=bool(creds["has_api_key"]),
         credentials_source=str(creds["credentials_source"]),
         sync_enabled=bool(row.sync_enabled),
         interval_sec=int(row.interval_sec or 3600),
@@ -87,6 +87,9 @@ async def fleet_update_settings(
         sync_enabled=body.sync_enabled,
         interval_sec=body.interval_sec,
         work_statuses=body.work_statuses,
+        client_id=body.client_id,
+        park_id=body.park_id,
+        api_key=body.api_key,
     )
     return await _status_out(db)
 
@@ -101,10 +104,11 @@ async def fleet_sync(
     _require_write(loaded)
     if not (user_can(loaded, SECTION_CONTACTS) or user_can(loaded, SECTION_SETTINGS)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    if not fleet_configured():
+    runtime = await load_runtime_settings(db)
+    if not runtime.credentials:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Fleet API не настроен (FLEET_CLIENT_ID / FLEET_API_KEY / FLEET_PARK_ID)",
+            detail="Fleet API не настроен — укажите Client-ID, API-Key и Park ID в настройках",
         )
     started = utcnow()
     result = await sync_fleet_drivers_to_contacts(

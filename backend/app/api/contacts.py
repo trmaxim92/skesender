@@ -28,7 +28,7 @@ from app.fields import (
     migrate_contact_appeal_values_to_appeal,
     upsert_field_value,
 )
-from app.integrations.yandex_fleet.client import fleet_configured
+from app.integrations.yandex_fleet.state import load_runtime_settings, record_sync_result
 from app.integrations.yandex_fleet.sync import sync_fleet_drivers_to_contacts
 from app.models import (
     Appeal,
@@ -760,18 +760,17 @@ async def sync_contacts_from_fleet(
 ) -> ContactFleetSyncResult:
     """Pull Yandex Fleet driver profiles into Contacts (create/update by Fleet id / phone)."""
     _require_write(user)
-    if not fleet_configured():
+    runtime = await load_runtime_settings(db)
+    if not runtime.credentials:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Fleet API не настроен (FLEET_CLIENT_ID / FLEET_API_KEY / FLEET_PARK_ID)",
+            detail="Fleet API не настроен — укажите ключи в Настройки → Яндекс Fleet",
         )
+    started = utcnow()
     result = await sync_fleet_drivers_to_contacts(
         db, changed_by_id=user.id, purge_before=purge
     )
-    from app.integrations.yandex_fleet.state import record_sync_result
-    from app.models import utcnow
-
-    await record_sync_result(db, result, started_at=utcnow())
+    await record_sync_result(db, result, started_at=started)
     if result.errors and result.fetched == 0 and result.created == 0 and result.updated == 0:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

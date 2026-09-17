@@ -929,6 +929,10 @@ class FleetSyncState(Base):
     __tablename__ = "fleet_sync_state"
 
     id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    # Credentials: DB overrides env when set. api_key stored encrypted.
+    client_id: Mapped[str] = mapped_column(String(255), default="")
+    park_id: Mapped[str] = mapped_column(String(64), default="")
+    api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     interval_sec: Mapped[int] = mapped_column(Integer, default=3600)
     work_statuses: Mapped[str] = mapped_column(String(128), default="working,not_working")

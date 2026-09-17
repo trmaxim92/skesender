@@ -894,6 +894,9 @@ class FleetSettingsUpdateRequest(BaseModel):
     sync_enabled: bool | None = None
     interval_sec: int | None = Field(default=None, ge=60, le=86400 * 7)
     work_statuses: str | None = Field(default=None, max_length=128)
+    client_id: str | None = Field(default=None, max_length=255)
+    park_id: str | None = Field(default=None, max_length=64)
+    api_key: str | None = Field(default=None, max_length=512)
 
 
 class FleetStatusOut(BaseModel):
@@ -901,7 +904,8 @@ class FleetStatusOut(BaseModel):
     client_id: str = ""
     park_id: str = ""
     api_key_masked: str = ""
-    credentials_source: str = "env"
+    has_api_key: bool = False
+    credentials_source: str = "none"
     sync_enabled: bool = True
     interval_sec: int = 3600
     work_statuses: str = "working,not_working"

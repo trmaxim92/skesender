@@ -4,7 +4,6 @@ import asyncio
 import logging
 
 from app.db import SessionLocal
-from app.integrations.yandex_fleet.client import fleet_configured
 from app.integrations.yandex_fleet.state import load_runtime_settings, record_sync_result
 from app.integrations.yandex_fleet.sync import sync_fleet_drivers_to_contacts
 from app.models import utcnow
@@ -21,9 +20,6 @@ class FleetSyncWorker:
 
     def start(self) -> None:
         if self._task and not self._task.done():
-            return
-        if not fleet_configured():
-            logger.info("Fleet sync worker not started (credentials missing)")
             return
         self._stop.clear()
         self._task = asyncio.create_task(self._run(), name="fleet-sync-worker")
@@ -45,8 +41,6 @@ class FleetSyncWorker:
             async with SessionLocal() as session:
                 runtime = await load_runtime_settings(session)
                 await session.commit()
-                if not runtime.sync_enabled:
-                    return max(_DEFAULT_INTERVAL_SEC, 60.0)
                 return float(max(runtime.interval_sec, 60))
         except Exception:
             logger.exception("Failed to load Fleet sync interval")
@@ -58,7 +52,7 @@ class FleetSyncWorker:
             try:
                 async with SessionLocal() as session:
                     runtime = await load_runtime_settings(session)
-                    if not runtime.sync_enabled:
+                    if not runtime.sync_enabled or not runtime.credentials:
                         await session.commit()
                     else:
                         started = utcnow()

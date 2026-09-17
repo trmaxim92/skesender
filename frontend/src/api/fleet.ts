@@ -5,6 +5,7 @@ export interface FleetStatus {
   clientId: string
   parkId: string
   apiKeyMasked: string
+  hasApiKey: boolean
   credentialsSource: string
   syncEnabled: boolean
   intervalSec: number
@@ -34,6 +35,7 @@ interface ApiFleetStatus {
   client_id: string
   park_id: string
   api_key_masked: string
+  has_api_key: boolean
   credentials_source: string
   sync_enabled: boolean
   interval_sec: number
@@ -55,7 +57,8 @@ function mapStatus(s: ApiFleetStatus): FleetStatus {
     clientId: s.client_id || '',
     parkId: s.park_id || '',
     apiKeyMasked: s.api_key_masked || '',
-    credentialsSource: s.credentials_source || 'env',
+    hasApiKey: Boolean(s.has_api_key),
+    credentialsSource: s.credentials_source || 'none',
     syncEnabled: s.sync_enabled,
     intervalSec: s.interval_sec,
     workStatuses: s.work_statuses || '',
@@ -80,6 +83,9 @@ export async function fleetUpdateSettingsRequest(payload: {
   sync_enabled?: boolean
   interval_sec?: number
   work_statuses?: string
+  client_id?: string
+  park_id?: string
+  api_key?: string
 }) {
   const s = await api<ApiFleetStatus>('/api/fleet/settings', {
     method: 'PATCH',

@@ -560,6 +560,9 @@ async def ensure_schema() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS fleet_sync_state (
                     id INTEGER PRIMARY KEY,
+                    client_id VARCHAR(255) NOT NULL DEFAULT '',
+                    park_id VARCHAR(64) NOT NULL DEFAULT '',
+                    api_key_enc TEXT,
                     sync_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     interval_sec INTEGER NOT NULL DEFAULT 3600,
                     work_statuses VARCHAR(128) NOT NULL DEFAULT 'working,not_working',
@@ -576,6 +579,21 @@ async def ensure_schema() -> None:
                 )
                 """
             )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE fleet_sync_state ADD COLUMN IF NOT EXISTS client_id "
+                "VARCHAR(255) NOT NULL DEFAULT ''"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE fleet_sync_state ADD COLUMN IF NOT EXISTS park_id "
+                "VARCHAR(64) NOT NULL DEFAULT ''"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE fleet_sync_state ADD COLUMN IF NOT EXISTS api_key_enc TEXT")
         )
         await conn.execute(
             text(

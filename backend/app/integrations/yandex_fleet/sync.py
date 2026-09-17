@@ -8,8 +8,9 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.fields import upsert_field_value
-from app.integrations.yandex_fleet.client import FleetApiError, fleet_configured, iter_all_driver_profiles
+from app.integrations.yandex_fleet.client import FleetApiError, iter_all_driver_profiles
 from app.integrations.yandex_fleet.roles import infer_performer_role
+from app.integrations.yandex_fleet.state import load_runtime_settings
 from app.models import (
     Appeal,
     Contact,
@@ -146,22 +147,24 @@ async def sync_fleet_drivers_to_contacts(
 ) -> FleetSyncResult:
     """Pull Fleet driver profiles → upsert Contact by external_id, else phone."""
     result = FleetSyncResult()
-    if not fleet_configured():
-        result.errors.append("Fleet API не настроен")
+    from app.departments import ensure_system_client_fields
+
+    await ensure_system_client_fields(db)
+    runtime = await load_runtime_settings(db)
+    if not runtime.credentials:
+        result.errors.append("Fleet API не настроен (укажите Client-ID, API-Key и Park ID)")
         return result
 
     if purge_before:
         result.purged = await purge_all_contacts(db)
 
-    from app.departments import ensure_system_client_fields
-    from app.integrations.yandex_fleet.state import load_runtime_settings
-
-    await ensure_system_client_fields(db)
-    runtime = await load_runtime_settings(db)
     statuses = [s.strip() for s in runtime.work_statuses.split(",") if s.strip()]
 
     try:
-        rows = await iter_all_driver_profiles(work_statuses=statuses or None)
+        rows = await iter_all_driver_profiles(
+            credentials=runtime.credentials,
+            work_statuses=statuses or None,
+        )
     except FleetApiError as exc:
         logger.warning("Fleet sync fetch failed: %s", exc)
         result.errors.append(str(exc))
