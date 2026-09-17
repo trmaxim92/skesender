@@ -46,10 +46,10 @@ async function submit() {
       <div class="mb-6 flex flex-col items-center text-center">
         <img
           src="/logo-skayskel.png"
-          alt="СкайСкел"
-          class="mb-4 h-auto w-44 max-w-full"
-          width="176"
-          height="176"
+          alt="СкайСкейл"
+          class="mb-4 h-auto w-48 max-w-full"
+          width="192"
+          height="192"
           decoding="async"
           fetchpriority="high"
         />
