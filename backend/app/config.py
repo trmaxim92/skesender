@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     vapid_public_key: str = ""
     vapid_private_key: str = ""
     vapid_mailto: str = "mailto:admin@skysender.local"
+    # Yandex Fleet (Taxi Park) → CRM contacts pull sync
+    fleet_client_id: str = ""
+    fleet_api_key: str = ""
+    fleet_park_id: str = ""
+    fleet_sync_interval_sec: int = 3600
+    # Comma-separated Fleet work_status filter (empty = all, including fired)
+    fleet_work_statuses: str = "working,not_working"
 
     @property
     def cors_origin_list(self) -> list[str]:

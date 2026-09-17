@@ -741,6 +741,7 @@ async def lifespan(app: FastAPI):
             raise
 
     from app.integrations.webchat.visitor_hub import visitor_hub
+    from app.integrations.yandex_fleet.worker import worker as fleet_sync_worker
     from app.leader import BackgroundLeader
     from app.mailing.worker import worker as mailing_worker
     from app.realtime.hub import hub
@@ -760,6 +761,7 @@ async def lifespan(app: FastAPI):
                 logger.exception("Failed to start worker for %s", adapter.transport)
         mailing_worker.start()
         webhook_outbox_worker.start()
+        fleet_sync_worker.start()
         workers_running["value"] = True
         logger.info("Background workers started (leader)")
 
@@ -780,6 +782,10 @@ async def lifespan(app: FastAPI):
             await mailing_worker.stop()
         except Exception:
             logger.exception("Failed to stop mailing worker")
+        try:
+            await fleet_sync_worker.stop()
+        except Exception:
+            logger.exception("Failed to stop fleet sync worker")
         for adapter in reversed(adapters):
             try:
                 await adapter.stop_worker()

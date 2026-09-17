@@ -872,6 +872,15 @@ class ContactImportResult(BaseModel):
     errors: list[str] = []
 
 
+class ContactFleetSyncResult(BaseModel):
+    fetched: int
+    created: int
+    updated: int
+    skipped: int
+    purged: int = 0
+    errors: list[str] = []
+
+
 class ContactClaimBatchRequest(BaseModel):
     contact_ids: list[int] = Field(min_length=1, max_length=200)
 

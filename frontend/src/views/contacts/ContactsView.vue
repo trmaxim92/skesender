@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Hand, Phone, Plus, Search, SkipForward, Upload, X } from 'lucide-vue-next'
+import { Hand, Phone, Plus, RefreshCw, Search, SkipForward, Upload, X } from 'lucide-vue-next'
 import {
   claimContactsBatchRequest,
   claimNextContactRequest,
@@ -9,6 +9,7 @@ import {
   createContactRequest,
   importContactsRequest,
   listContactsRequest,
+  syncContactsFromFleetRequest,
   telHref,
   type Contact,
   type ContactFilter,
@@ -43,6 +44,7 @@ const createError = ref('')
 const importInput = ref<HTMLInputElement | null>(null)
 const importBusy = ref(false)
 const importMsg = ref('')
+const fleetBusy = ref(false)
 const actionError = ref('')
 const actionOk = ref('')
 
@@ -253,6 +255,30 @@ async function onImportFile(ev: Event) {
   }
 }
 
+async function onFleetSync() {
+  if (!canWrite.value || fleetBusy.value) return
+  const ok = window.confirm(
+    'Удалить ВСЕ текущие контакты и загрузить водителей из Яндекс Fleet?\n\nДиалоги в чатах не удаляются.',
+  )
+  if (!ok) return
+  fleetBusy.value = true
+  actionError.value = ''
+  actionOk.value = ''
+  try {
+    const res = await syncContactsFromFleetRequest({ purge: true })
+    actionOk.value =
+      `Fleet: удалено ${res.purged}, получено ${res.fetched}, создано ${res.created}` +
+      (res.updated ? `, обновлено ${res.updated}` : '') +
+      (res.skipped ? `, пропущено ${res.skipped}` : '')
+    filter.value = 'all'
+    await loadList()
+  } catch (e) {
+    actionError.value = e instanceof ApiError ? e.detail : 'Ошибка синхронизации Fleet'
+  } finally {
+    fleetBusy.value = false
+  }
+}
+
 function clearFilters() {
   q.value = ''
   filter.value = 'all'
@@ -301,6 +327,16 @@ const subtitle = computed(() => {
             @click="triggerImport"
           >
             <Upload class="size-4" />
+          </button>
+          <button
+            v-if="canWrite"
+            type="button"
+            class="inline-flex size-10 items-center justify-center rounded-xl border border-line bg-surface text-ink transition hover:bg-brand-soft/50 disabled:opacity-50"
+            title="Синхронизировать водителей из Яндекс Fleet"
+            :disabled="fleetBusy"
+            @click="onFleetSync"
+          >
+            <RefreshCw class="size-4" :class="fleetBusy ? 'animate-spin' : ''" />
           </button>
           <button
             v-if="canWrite"

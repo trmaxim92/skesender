@@ -314,6 +314,18 @@ export async function importContactsRequest(file: File) {
   })
 }
 
+export async function syncContactsFromFleetRequest(options?: { purge?: boolean }) {
+  const purge = options?.purge ? 'true' : 'false'
+  return api<{
+    fetched: number
+    created: number
+    updated: number
+    skipped: number
+    purged: number
+    errors: string[]
+  }>(`/api/contacts/sync/fleet?purge=${purge}`, { method: 'POST' })
+}
+
 export async function sendContactMessageRequest(
   id: number,
   payload: { channel_id: number; text: string },

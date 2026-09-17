@@ -28,6 +28,8 @@ from app.fields import (
     migrate_contact_appeal_values_to_appeal,
     upsert_field_value,
 )
+from app.integrations.yandex_fleet.client import fleet_configured
+from app.integrations.yandex_fleet.sync import sync_fleet_drivers_to_contacts
 from app.models import (
     Appeal,
     AppealStatus,
@@ -62,6 +64,7 @@ from app.schemas import (
     ContactCommentOut,
     ContactCreateRequest,
     ContactFieldsUpdateRequest,
+    ContactFleetSyncResult,
     ContactImportResult,
     ContactMessageRequest,
     ContactOut,
@@ -747,6 +750,37 @@ async def import_contacts(
 
     await db.commit()
     return ContactImportResult(created=created, skipped=skipped, errors=errors[:20])
+
+
+@router.post("/sync/fleet", response_model=ContactFleetSyncResult)
+async def sync_contacts_from_fleet(
+    purge: bool = Query(False, description="Удалить все контакты перед загрузкой из Fleet"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CONTACTS)),
+) -> ContactFleetSyncResult:
+    """Pull Yandex Fleet driver profiles into Contacts (create/update by Fleet id / phone)."""
+    _require_write(user)
+    if not fleet_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Fleet API не настроен (FLEET_CLIENT_ID / FLEET_API_KEY / FLEET_PARK_ID)",
+        )
+    result = await sync_fleet_drivers_to_contacts(
+        db, changed_by_id=user.id, purge_before=purge
+    )
+    if result.errors and result.fetched == 0 and result.created == 0 and result.updated == 0:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.errors[0],
+        )
+    return ContactFleetSyncResult(
+        fetched=result.fetched,
+        created=result.created,
+        updated=result.updated,
+        skipped=result.skipped,
+        purged=result.purged,
+        errors=result.errors[:20],
+    )
 
 
 @router.get("/{contact_id}", response_model=ContactOut)
