@@ -281,6 +281,12 @@ function onSent(dialogId: number) {
         <template v-else-if="detail">
           <div class="flex flex-wrap items-center gap-2">
             <span
+              v-if="(fieldsDraft.fleet_role || '').trim()"
+              class="inline-flex items-center rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand"
+            >
+              {{ fieldsDraft.fleet_role }}
+            </span>
+            <span
               v-if="detail.currentAppeal?.statusDef"
               class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold"
               :style="{
@@ -363,7 +369,7 @@ function onSent(dialogId: number) {
                 v-model="fieldsDraft[f.key]"
                 :type="fieldInputType(f)"
                 class="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink outline-none ring-brand focus:ring-2"
-                :readonly="!canWrite"
+                :readonly="!canWrite || f.key === 'external_id' || f.key.startsWith('fleet_')"
               />
             </div>
           </section>

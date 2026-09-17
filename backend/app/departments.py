@@ -23,6 +23,7 @@ SYSTEM_CLIENT_FIELDS: tuple[tuple[str, str, str, int], ...] = (
     ("full_name", "ФИО", FieldType.TEXT.value, 0),
     ("phone", "Телефон", FieldType.PHONE.value, 1),
     ("external_id", "ID", FieldType.TEXT.value, 2),
+    ("fleet_role", "Роль исполнителя", FieldType.TEXT.value, 3),
 )
 
 
@@ -69,6 +70,15 @@ async def ensure_system_client_fields(session: AsyncSession) -> None:
                     is_active=True,
                 )
             )
+        else:
+            # Keep system metadata in sync (e.g. new fleet_role field label/order).
+            existing.label = label
+            existing.field_type = field_type
+            existing.sort_order = sort_order
+            existing.is_system = True
+            existing.is_active = True
+            if existing.department_id is not None:
+                existing.department_id = None
 
 
 async def backfill_department_ids(session: AsyncSession, dept: Department) -> None:

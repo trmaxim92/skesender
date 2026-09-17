@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.fields import upsert_field_value
 from app.integrations.yandex_fleet.client import FleetApiError, fleet_configured, iter_all_driver_profiles
+from app.integrations.yandex_fleet.roles import infer_performer_role
 from app.models import (
     Appeal,
     Contact,
@@ -152,6 +153,10 @@ async def sync_fleet_drivers_to_contacts(
     if purge_before:
         result.purged = await purge_all_contacts(db)
 
+    from app.departments import ensure_system_client_fields
+
+    await ensure_system_client_fields(db)
+
     try:
         rows = await iter_all_driver_profiles()
     except FleetApiError as exc:
@@ -202,6 +207,7 @@ async def sync_fleet_drivers_to_contacts(
         ext = _external_id(driver_id)
         work_status = str(profile.get("work_status") or "").strip()
         employment = str(profile.get("employment_type") or "").strip()
+        role = infer_performer_role(row if isinstance(row, dict) else {})
 
         contact: Contact | None = None
         cid = by_external.get(ext)
@@ -262,6 +268,16 @@ async def sync_fleet_drivers_to_contacts(
         )
         by_external[ext] = contact.id
 
+        if role:
+            await upsert_field_value(
+                db,
+                scope=FieldScope.CONTACT.value,
+                owner_id=contact.id,
+                field_key="fleet_role",
+                value=role,
+                changed_by_id=changed_by_id,
+                source="yandex_fleet",
+            )
         if work_status:
             await upsert_field_value(
                 db,
