@@ -267,3 +267,73 @@ input[type='checkbox']:indeterminate {
   background: color-mix(in srgb, var(--color-brand) 88%, #000);
   color: #fff;
 }
+
+/* Soft filter controls (appeals / tables) */
+.oe-filter-label {
+  margin-bottom: 0.35rem;
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+.oe-filter-field {
+  width: 100%;
+  height: 2.625rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: #eef1f5;
+  padding: 0 0.875rem;
+  color: var(--color-ink);
+  font-size: 0.875rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+.oe-filter-field:hover {
+  background: #e8ecf2;
+}
+.oe-filter-field:focus {
+  border-color: color-mix(in srgb, var(--color-brand) 35%, transparent);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--color-brand-soft);
+}
+.oe-filter-field[type='search']::-webkit-search-decoration,
+.oe-filter-field[type='search']::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.oe-filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.25rem;
+  cursor: pointer;
+}
+.oe-filter-date {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  padding-right: 2.35rem;
+  cursor: pointer;
+  color-scheme: light;
+}
+.oe-filter-date::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+.oe-filter-date[data-empty='1'] {
+  color: transparent;
+}
+.oe-filter-date[data-empty='1']::-webkit-datetime-edit {
+  color: transparent;
+}
+.oe-filter-date[data-empty='1']::-webkit-datetime-edit-fields-wrapper {
+  opacity: 0;
+}

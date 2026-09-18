@@ -2,7 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  Calendar,
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   MoreVertical,
@@ -233,70 +235,98 @@ async function onBulkDelete() {
       </div>
 
       <form
-        class="flex flex-col gap-3 rounded-2xl border border-line bg-panel p-3 shadow-sm md:flex-row md:flex-wrap md:items-end md:gap-3 md:p-4"
+        class="flex flex-col gap-3 rounded-2xl border border-line/80 bg-panel p-3 shadow-sm md:flex-row md:flex-wrap md:items-end md:gap-2.5 md:p-4"
         @submit.prevent="onSubmit"
       >
-        <div class="min-w-0 w-full md:min-w-[240px] md:flex-1">
+        <div class="min-w-0 w-full md:min-w-[220px] md:flex-1">
           <div class="relative">
             <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
             <input
               v-model="appeals.q"
               type="search"
               placeholder="Номер, имя, логин, текст сообщения…"
-              class="w-full rounded-xl border border-line bg-surface py-2.5 pl-9 pr-3 text-sm outline-none ring-brand/25 focus:ring-2"
+              class="oe-filter-field w-full pl-9 pr-3"
             />
           </div>
         </div>
 
-        <label class="block shrink-0">
-          <span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-            Статус
-          </span>
-          <select
-            v-model="appeals.status"
-            class="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm md:min-w-[8.5rem]"
-          >
-            <option value="open">Открытые</option>
-            <option value="closed">Закрытые</option>
-            <option value="all">Все</option>
-          </select>
+        <label class="block shrink-0 md:w-[9.5rem]">
+          <span class="oe-filter-label">Статус</span>
+          <div class="relative">
+            <select v-model="appeals.status" class="oe-filter-field oe-filter-select">
+              <option value="open">Открытые</option>
+              <option value="closed">Закрытые</option>
+              <option value="all">Все</option>
+            </select>
+            <ChevronDown
+              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
+          </div>
         </label>
 
-        <label class="block shrink-0">
-          <span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-            Оператор
-          </span>
-          <select
-            v-model="appeals.assignee"
-            class="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm md:min-w-[8.5rem]"
-          >
-            <option value="all">Все</option>
-            <option value="mine">Мои</option>
-            <option value="unassigned">Свободные</option>
-          </select>
+        <label class="block shrink-0 md:w-[9.5rem]">
+          <span class="oe-filter-label">Оператор</span>
+          <div class="relative">
+            <select v-model="appeals.assignee" class="oe-filter-field oe-filter-select">
+              <option value="all">Все</option>
+              <option value="mine">Мои</option>
+              <option value="unassigned">Свободные</option>
+            </select>
+            <ChevronDown
+              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
+          </div>
         </label>
 
-        <label class="block shrink-0">
-          <span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">С</span>
-          <input
-            v-model="appeals.dateFrom"
-            type="date"
-            class="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm md:w-[10.5rem]"
-          />
+        <label class="block shrink-0 md:w-[11rem]">
+          <span class="oe-filter-label">С</span>
+          <div class="relative">
+            <input
+              v-model="appeals.dateFrom"
+              type="date"
+              class="oe-filter-field oe-filter-date relative"
+              :data-empty="appeals.dateFrom ? '0' : '1'"
+            />
+            <span
+              v-if="!appeals.dateFrom"
+              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted"
+            >
+              ДД.ММ.ГГГГ
+            </span>
+            <Calendar
+              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
+          </div>
         </label>
 
-        <label class="block shrink-0">
-          <span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">По</span>
-          <input
-            v-model="appeals.dateTo"
-            type="date"
-            class="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm md:w-[10.5rem]"
-          />
+        <label class="block shrink-0 md:w-[11rem]">
+          <span class="oe-filter-label">По</span>
+          <div class="relative">
+            <input
+              v-model="appeals.dateTo"
+              type="date"
+              class="oe-filter-field oe-filter-date relative"
+              :data-empty="appeals.dateTo ? '0' : '1'"
+            />
+            <span
+              v-if="!appeals.dateTo"
+              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted"
+            >
+              ДД.ММ.ГГГГ
+            </span>
+            <Calendar
+              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
+          </div>
         </label>
 
         <button
           type="submit"
-          class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50 md:w-auto"
+          class="inline-flex h-[2.625rem] w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50 md:w-auto"
           :disabled="appeals.loading"
         >
           <Search class="size-4" />
