@@ -56,6 +56,7 @@ const threadEl = ref<HTMLElement | null>(null)
 const editingId = ref<string | null>(null)
 const editDraft = ref('')
 const actionBusy = ref(false)
+const failedDetailId = ref<string | null>(null)
 const transferOpen = ref(false)
 const transferBusy = ref(false)
 const transferNotice = ref('')
@@ -397,8 +398,14 @@ async function confirmDelete(m: Message) {
 async function retryFailed(m: Message) {
   if (actionBusy.value || m.status !== 'failed') return
   actionBusy.value = true
-  await chats.retryMessage(m.id)
+  const ok = await chats.retryMessage(m.id)
   actionBusy.value = false
+  if (ok && failedDetailId.value === m.id) failedDetailId.value = null
+}
+
+function toggleFailedDetail(m: Message) {
+  if (m.status !== 'failed') return
+  failedDetailId.value = failedDetailId.value === m.id ? null : m.id
 }
 
 function onThreadScroll() {
@@ -419,6 +426,7 @@ async function scrollThreadToBottom() {
 }
 
 async function selectDialog(id: string) {
+  failedDetailId.value = null
   await chats.selectDialog(id)
   syncingUrl = true
   await router.replace({ name: 'chats', query: { ...route.query, dialog: id } })
@@ -1092,23 +1100,24 @@ onUnmounted(() => {
                   :outgoing="row.message.direction === 'out' && !row.message.isInternal"
                 />
 
-                <button
-                  v-if="
-                    canWrite &&
-                    chats.canCompose &&
-                    row.message.direction === 'out' &&
-                    !row.message.isInternal &&
-                    row.message.status === 'failed' &&
-                    !row.message.pending
-                  "
-                  type="button"
-                  class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
-                  :disabled="actionBusy"
-                  @click="retryFailed(row.message)"
+                <div
+                  v-if="failedDetailId === row.message.id && row.message.status === 'failed'"
+                  class="mt-2 space-y-2 rounded-xl bg-black/20 px-2.5 py-2 text-[11px] leading-snug text-white/90"
                 >
-                  <RotateCcw class="size-3.5" :class="actionBusy ? 'animate-spin' : ''" />
-                  Повторить отправку
-                </button>
+                  <p class="whitespace-pre-wrap break-words">
+                    {{ row.message.deliveryError || 'Сообщение не доставлено' }}
+                  </p>
+                  <button
+                    v-if="canWrite && chats.canCompose && !row.message.pending"
+                    type="button"
+                    class="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
+                    :disabled="actionBusy"
+                    @click="retryFailed(row.message)"
+                  >
+                    <RotateCcw class="size-3.5" :class="actionBusy ? 'animate-spin' : ''" />
+                    Повторить
+                  </button>
+                </div>
 
                 <div
                   class="mt-1.5 flex items-center gap-1.5 text-[10px]"
@@ -1159,6 +1168,8 @@ onUnmounted(() => {
                     v-if="row.message.direction === 'out' && !row.message.isInternal"
                     :status="row.message.status"
                     tone="onBrand"
+                    :clickable="row.message.status === 'failed'"
+                    @click="toggleFailedDetail(row.message)"
                   />
                 </div>
               </template>

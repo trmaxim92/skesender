@@ -44,7 +44,14 @@ def user_to_out(user: User) -> UserOut:
         presence_status_id=user.presence_status_id,
         presence_status=presence_to_out(presence),
         can_write_chats=user_can_write_effective(user, perms),
+        send_mode=_normalize_send_mode(getattr(user, "send_mode", None)),
     )
+
+
+def _normalize_send_mode(raw: str | None) -> str:
+    if raw in {"ctrl_enter", "enter", "button"}:
+        return raw
+    return "ctrl_enter"
 
 
 def user_can_write_effective(user: User, perms: list[str] | set[str] | None = None) -> bool:

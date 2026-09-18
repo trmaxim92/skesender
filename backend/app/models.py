@@ -215,6 +215,8 @@ class User(Base):
         ForeignKey("presence_statuses.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Composer shortcut: ctrl_enter | enter | button
+    send_mode: Mapped[str] = mapped_column(String(16), default="ctrl_enter")
     # Bumped on password change / deactivation to invalidate existing JWTs.
     token_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -486,6 +488,8 @@ class ChatMessage(Base):
     direction: Mapped[str] = mapped_column(String(8))
     text: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default=MessageStatus.SENT.value)
+    # Last provider/send failure detail for failed outbound (cleared on success).
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Internal manager note — visible in CRM only, never sent to the client.
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

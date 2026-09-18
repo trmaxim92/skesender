@@ -742,6 +742,15 @@ async def ensure_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_channel_events_kind ON channel_events (kind)"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS send_mode "
+                "VARCHAR(16) NOT NULL DEFAULT 'ctrl_enter'"
+            )
+        )
+        await conn.execute(
+            text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_error TEXT")
+        )
 
 
 @asynccontextmanager

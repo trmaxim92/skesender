@@ -27,7 +27,7 @@ import {
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
 import { isSettingsPath, SETTINGS_NAV_GROUPS, settingsLeafTitle } from '@/navigation/settingsNav'
-import { useAuthStore } from '@/stores/auth'
+import { SESSION_REFRESHED_EVENT, useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
 import { useNotificationsStore } from '@/stores/notifications'
 import type { PresenceStatus } from '@/types'
@@ -608,10 +608,19 @@ async function choosePresence(statusId: number) {
 }
 
 function onAuthExpired() {
+  if (auth.isSessionRefreshing) return
   chats.disconnectRealtime()
   auth.logout()
   if (route.name !== 'login') {
     router.push({ name: 'login', query: { redirect: route.fullPath } })
+  }
+}
+
+function onSessionRefreshed() {
+  if (!auth.isAuthenticated) return
+  chats.disconnectRealtime()
+  if (auth.canSection('/chats')) {
+    chats.connectRealtime()
   }
 }
 
@@ -634,6 +643,7 @@ onMounted(() => {
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onKeydown)
   window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
+  window.addEventListener(SESSION_REFRESHED_EVENT, onSessionRefreshed)
   window.addEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.addEventListener('oe:in-app-toast', onInAppToast)
   window.addEventListener('resize', placeProfileMenu)
@@ -668,6 +678,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired)
+  window.removeEventListener(SESSION_REFRESHED_EVENT, onSessionRefreshed)
   window.removeEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.removeEventListener('oe:in-app-toast', onInAppToast)
   window.removeEventListener('resize', placeProfileMenu)

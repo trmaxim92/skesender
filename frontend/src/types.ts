@@ -61,7 +61,11 @@ export interface User {
   presenceStatusId?: number | null
   presenceStatus?: PresenceStatus | null
   canWriteChats?: boolean
+  /** Composer send shortcut: ctrl_enter | enter | button */
+  sendMode?: SendMode
 }
+
+export type SendMode = 'enter' | 'ctrl_enter' | 'button'
 
 export interface PresenceStatus {
   id: number
@@ -215,6 +219,8 @@ export interface Message {
   text: string
   at: string
   status: MessageStatus
+  /** Provider/send failure detail when status=failed */
+  deliveryError?: string | null
   operatorName?: string
   attachments?: MessageAttachment[]
   replyTo?: ReplyPreview | null

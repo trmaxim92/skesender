@@ -28,6 +28,7 @@ class LoginRequest(BaseModel):
 class MeUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     presence_status_id: int | None = None
+    send_mode: Literal["ctrl_enter", "enter", "button"] | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -130,6 +131,7 @@ class UserOut(BaseModel):
     presence_status_id: int | None = None
     presence_status: PresenceStatusOut | None = None
     can_write_chats: bool = True
+    send_mode: Literal["ctrl_enter", "enter", "button"] = "ctrl_enter"
 
     model_config = {"from_attributes": True}
 
@@ -549,6 +551,7 @@ class MessageOut(BaseModel):
     direction: MessageDirection
     text: str
     status: MessageStatus
+    delivery_error: str | None = None
     operator_name: str | None = None
     created_at: datetime
     edited_at: datetime | None = None

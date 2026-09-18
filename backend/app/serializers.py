@@ -59,6 +59,9 @@ def message_to_out(message: ChatMessage) -> MessageOut:
         direction=message.direction,  # type: ignore[arg-type]
         text="" if message.deleted_at else message.text,
         status=message.status,  # type: ignore[arg-type]
+        delivery_error=None
+        if message.deleted_at
+        else (getattr(message, "delivery_error", None) or None),
         operator_name=message.operator_name,
         created_at=message.created_at,
         edited_at=message.edited_at,

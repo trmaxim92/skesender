@@ -99,6 +99,11 @@ def presence_participates_in_routing(user: User) -> bool:
     return bool(status.participates_in_routing) and bool(status.is_active)
 
 
+def should_promote_to_online_on_login(current_slug: str | None) -> bool:
+    """Login sets Online only from Offline/unset — keep training and custom statuses."""
+    return current_slug in (None, PresenceStatusSlug.OFFLINE.value)
+
+
 async def set_user_presence(
     session: AsyncSession, user: User, status: PresenceStatus
 ) -> User:

@@ -27,6 +27,7 @@ interface ApiUser {
     on_duty: boolean
   } | null
   can_write_chats?: boolean
+  send_mode?: 'ctrl_enter' | 'enter' | 'button'
 }
 
 export type { ApiUser }
@@ -86,6 +87,10 @@ export function mapUser(u: ApiUser): User {
         }
       : null,
     canWriteChats: u.can_write_chats !== false,
+    sendMode:
+      u.send_mode === 'enter' || u.send_mode === 'button' || u.send_mode === 'ctrl_enter'
+        ? u.send_mode
+        : 'ctrl_enter',
   }
 }
 
@@ -118,15 +123,18 @@ export async function meRequest() {
   return api<ApiUser>('/api/auth/me')
 }
 
-export async function updateMeRequest(name: string) {
+export async function updateMeRequest(payload: {
+  name?: string
+  send_mode?: 'ctrl_enter' | 'enter' | 'button'
+}) {
   return api<ApiUser>('/api/auth/me', {
     method: 'PATCH',
-    json: { name },
+    json: payload,
   })
 }
 
 export async function changePasswordRequest(currentPassword: string, newPassword: string) {
-  return api<void>('/api/auth/me/password', {
+  return api<TokenResponse>('/api/auth/me/password', {
     method: 'POST',
     json: { current_password: currentPassword, new_password: newPassword },
   })

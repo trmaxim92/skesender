@@ -24,12 +24,7 @@ import {
   wasInstallDismissed,
 } from '@/utils/pwa'
 import { isWebPushSupported, subscribeWebPush, testServerWebPush, unsubscribeWebPush } from '@/utils/webPush'
-import {
-  SEND_MODE_OPTIONS,
-  getSendMode,
-  setSendMode,
-  type SendMode,
-} from '@/utils/composerPrefs'
+import { SEND_MODE_OPTIONS, normalizeSendMode, type SendMode } from '@/utils/composerPrefs'
 
 type TabId = 'profile' | 'security' | 'notifications' | 'input'
 
@@ -41,7 +36,7 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'profile', label: 'Профиль' },
   { id: 'security', label: 'Безопасность' },
   { id: 'notifications', label: 'Оповещения' },
-  { id: 'input', label: 'Ввод' },
+  { id: 'input', label: 'Ввод данных' },
 ]
 
 const tab = computed<TabId>(() => {
@@ -248,11 +243,39 @@ function hideInstallCard() {
 }
 
 // —— Input ——
-const sendMode = ref<SendMode>(getSendMode())
+const sendMode = ref<SendMode>(normalizeSendMode(auth.user?.sendMode))
+const inputSaving = ref(false)
+const inputMsg = ref('')
+const inputErr = ref('')
 
-function chooseSendMode(mode: SendMode) {
-  sendMode.value = mode
-  setSendMode(mode)
+watch(
+  () => auth.user?.sendMode,
+  (v) => {
+    if (!inputSaving.value) sendMode.value = normalizeSendMode(v)
+  },
+  { immediate: true },
+)
+
+async function onSendModeChange(event: Event) {
+  const next = normalizeSendMode((event.target as HTMLSelectElement).value)
+  if (next === normalizeSendMode(auth.user?.sendMode)) {
+    sendMode.value = next
+    return
+  }
+  inputMsg.value = ''
+  inputErr.value = ''
+  inputSaving.value = true
+  const prev = normalizeSendMode(auth.user?.sendMode)
+  sendMode.value = next
+  try {
+    await auth.updateSendMode(next)
+    inputMsg.value = 'Сохранено'
+  } catch (e) {
+    sendMode.value = prev
+    inputErr.value = e instanceof ApiError ? e.detail : 'Не удалось сохранить'
+  } finally {
+    inputSaving.value = false
+  }
 }
 </script>
 
@@ -260,7 +283,7 @@ function chooseSendMode(mode: SendMode) {
   <div class="h-full overflow-auto p-6">
     <div class="mx-auto max-w-2xl">
       <h1 class="text-lg font-bold tracking-tight">Профиль</h1>
-      <p class="mt-1 text-sm text-muted">Личные данные, пароль, оповещения и ввод.</p>
+      <p class="mt-1 text-sm text-muted">Личные данные, пароль, оповещения и ввод данных.</p>
 
       <div class="mt-5 flex gap-1 border-b border-line">
         <button
@@ -476,33 +499,27 @@ function chooseSendMode(mode: SendMode) {
       </div>
 
       <!-- Input -->
-      <div v-else-if="tab === 'input'" class="mt-5 space-y-3">
-        <p class="text-sm text-muted">
-          Как отправлять сообщения в чатах. Настройка хранится на этом устройстве.
-        </p>
-        <button
-          v-for="opt in SEND_MODE_OPTIONS"
-          :key="opt.id"
-          type="button"
-          class="flex w-full items-start gap-3 rounded-2xl border px-4 py-3.5 text-left transition"
-          :class="
-            sendMode === opt.id
-              ? 'border-brand/40 bg-brand-soft'
-              : 'border-line bg-panel hover:border-brand/30'
-          "
-          @click="chooseSendMode(opt.id)"
-        >
-          <span
-            class="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border"
-            :class="sendMode === opt.id ? 'border-brand bg-brand' : 'border-line'"
-          >
-            <span v-if="sendMode === opt.id" class="size-1.5 rounded-full bg-white" />
+      <div v-else-if="tab === 'input'" class="mt-5 space-y-4">
+        <label class="block">
+          <span class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+            Отправка сообщений
           </span>
-          <div class="min-w-0">
-            <div class="text-sm font-semibold text-ink">{{ opt.label }}</div>
-            <div class="mt-0.5 text-xs text-muted">{{ opt.hint }}</div>
-          </div>
-        </button>
+          <select
+            :value="sendMode"
+            class="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-sm outline-none ring-brand focus:ring-2 disabled:opacity-50"
+            :disabled="inputSaving"
+            @change="onSendModeChange"
+          >
+            <option v-for="opt in SEND_MODE_OPTIONS" :key="opt.id" :value="opt.id">
+              {{ opt.label }}
+            </option>
+          </select>
+        </label>
+        <p class="text-xs text-muted">
+          {{ SEND_MODE_OPTIONS.find((o) => o.id === sendMode)?.hint }}
+        </p>
+        <p v-if="inputErr" class="text-sm text-danger">{{ inputErr }}</p>
+        <p v-if="inputMsg" class="text-sm text-ok">{{ inputMsg }}</p>
       </div>
     </div>
   </div>

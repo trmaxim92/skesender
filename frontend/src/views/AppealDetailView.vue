@@ -59,6 +59,7 @@ function mapMessage(m: ApiMessage): Message {
     text: m.text,
     at: m.created_at,
     status: m.status,
+    deliveryError: m.delivery_error ?? null,
     operatorName: m.operator_name ?? undefined,
     editedAt: m.edited_at ?? null,
     deletedAt: m.deleted_at ?? null,

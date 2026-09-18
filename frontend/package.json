@@ -8,7 +8,9 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:notify": "node scripts/notify-gate.test.mjs",
-    "test:message-text": "node --experimental-strip-types scripts/message-text.test.mjs"
+    "test:message-text": "node --experimental-strip-types scripts/message-text.test.mjs",
+    "test:auth": "node --experimental-strip-types scripts/auth-can.test.mjs",
+    "test": "npm run test:notify && npm run test:message-text && npm run test:auth"
   },
   "dependencies": {
     "lucide-vue-next": "^1.0.0",

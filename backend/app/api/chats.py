@@ -238,6 +238,7 @@ async def _finalize_outbound(
     """Attach provider id after successful send; reuse row on unique race."""
     msg.external_id = external_id
     msg.status = MessageStatus.DELIVERED.value
+    msg.delivery_error = None
     try:
         async with db.begin_nested():
             await db.flush()
@@ -255,8 +256,12 @@ async def _finalize_outbound(
     return await _load_message(db, msg.id)
 
 
-async def _mark_outbound_failed(db: AsyncSession, msg: ChatMessage) -> ChatMessage:
+async def _mark_outbound_failed(
+    db: AsyncSession, msg: ChatMessage, *, error: str | None = None
+) -> ChatMessage:
     msg.status = MessageStatus.FAILED.value
+    detail = (error or "").strip()
+    msg.delivery_error = detail[:2000] if detail else None
     await db.flush()
     return await _load_message(db, msg.id)
 
@@ -306,7 +311,7 @@ async def _send_and_finalize_outbound(
     except ChannelNotReadyError as exc:
         msg = await db.get(ChatMessage, msg_id)
         if msg is not None:
-            await _mark_outbound_failed(db, msg)
+            await _mark_outbound_failed(db, msg, error=str(exc))
             await db.commit()
             raise OutboundDeliveryFailed(
                 str(exc), message_id=msg_id, retry_after=exc.retry_after
@@ -315,7 +320,7 @@ async def _send_and_finalize_outbound(
     except IntegrationError as exc:
         msg = await db.get(ChatMessage, msg_id)
         if msg is not None:
-            await _mark_outbound_failed(db, msg)
+            await _mark_outbound_failed(db, msg, error=str(exc))
             await db.commit()
             raise OutboundDeliveryFailed(str(exc), message_id=msg_id) from exc
         raise
@@ -342,6 +347,8 @@ async def _fail_remaining_drafts(
             continue
         if msg.status == MessageStatus.SENT.value and not msg.external_id:
             msg.status = MessageStatus.FAILED.value
+            if not msg.delivery_error:
+                msg.delivery_error = "Не отправлено (ошибка другой части)"
     await db.commit()
 
 
@@ -1808,6 +1815,7 @@ async def retry_failed_message(
             )
 
     msg.status = MessageStatus.SENT.value
+    msg.delivery_error = None
     await db.commit()
 
     loaded = await _load_message(db, message_id)
@@ -1827,7 +1835,7 @@ async def retry_failed_message(
     except IntegrationError as exc:
         failed = await db.get(ChatMessage, message_id)
         if failed is not None and failed.status != MessageStatus.FAILED.value:
-            await _mark_outbound_failed(db, failed)
+            await _mark_outbound_failed(db, failed, error=str(exc))
             await db.commit()
             await _publish_failed_outbound(db, dialog_id=dialog.id, message_id=message_id)
         raise _http_for_integration_error(exc) from exc

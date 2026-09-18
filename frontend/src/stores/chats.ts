@@ -24,7 +24,7 @@ import {
   type ApiDialogSidebar,
   type ApiMessage,
 } from '@/api/chats'
-import { ApiError } from '@/api/client'
+import { ApiError, AUTH_EXPIRED_EVENT } from '@/api/client'
 import { ChatsSocket, type ChatSocketEvent } from '@/api/ws'
 import type { Appeal, Dialog, DialogSidebar, Message, Template, User } from '@/types'
 import { useAuthStore } from '@/stores/auth'
@@ -116,6 +116,7 @@ function mapMessage(m: ApiMessage): Message {
     text: m.text,
     at: m.created_at,
     status: m.status,
+    deliveryError: m.delivery_error ?? null,
     operatorName: m.operator_name ?? undefined,
     editedAt: m.edited_at ?? null,
     deletedAt: m.deleted_at ?? null,
@@ -435,7 +436,7 @@ export const useChatsStore = defineStore('chats', () => {
         wsStatus.value = status
       },
       onAuthFailure: () => {
-        window.dispatchEvent(new CustomEvent('oe:auth-expired'))
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
       },
     })
     socket.connect()
@@ -885,10 +886,6 @@ export const useChatsStore = defineStore('chats', () => {
     dialog.lastAt = optimistic.at
     dialog.lastDirection = 'out'
     dialog.lastStatus = 'sent'
-    // Composer stays until success so a failed send can be retried without losing text/files.
-    const savedDraft = text
-    const savedFiles = files
-    const savedReply = reply
     draft.value = ''
     pendingFiles.value = []
     replyingTo.value = null
@@ -937,11 +934,17 @@ export const useChatsStore = defineStore('chats', () => {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось отправить'
       messages.value = messages.value.filter((m) => m.id !== tempId)
       for (const u of objectUrls) URL.revokeObjectURL(u)
-      draft.value = savedDraft
-      pendingFiles.value = savedFiles
-      if (savedReply) replyingTo.value = savedReply
+      // 502/503 = durable failed row in CRM; retry from the bubble. Other errors keep draft.
+      const deliveryFailed =
+        e instanceof ApiError && (e.status === 502 || e.status === 503)
+      if (deliveryFailed) {
+        clearDraftFor(dialog.id)
+      } else {
+        draft.value = text
+        pendingFiles.value = files
+        if (reply) replyingTo.value = reply
+      }
       dialog.lastStatus = 'failed'
-      // Failed row is durable in CRM (+ WS); refresh so the ! tick is visible even if WS raced.
       void fetchMessages(dialog.id, viewingAppealId.value)
       showInAppToast({
         text: error.value || 'Сообщение не доставлено',
@@ -1177,7 +1180,13 @@ export const useChatsStore = defineStore('chats', () => {
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось повторить отправку'
       const at = messages.value.findIndex((m) => m.id === messageId)
-      if (at >= 0) messages.value[at] = { ...messages.value[at]!, status: 'failed' }
+      if (at >= 0) {
+        messages.value[at] = {
+          ...messages.value[at]!,
+          status: 'failed',
+          deliveryError: error.value,
+        }
+      }
       dialog.lastStatus = 'failed'
       showInAppToast({
         text: error.value || 'Сообщение не доставлено',

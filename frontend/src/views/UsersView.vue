@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Pencil, Trash2 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -10,6 +10,7 @@ import type { Department, User } from '@/types'
 const auth = useAuthStore()
 const employees = useEmployeesStore()
 const departments = ref<Department[]>([])
+const canManageUsers = computed(() => auth.can('action.manage_users'))
 
 const name = ref('')
 const email = ref('')
@@ -179,7 +180,7 @@ function departmentLabel(user: User) {
   <div class="h-full overflow-auto p-4 md:p-6">
     <p v-if="employees.error" class="mb-3 text-sm text-danger">{{ employees.error }}</p>
 
-    <div class="mb-6 max-w-5xl rounded-2xl border border-line bg-panel p-4">
+    <div v-if="canManageUsers" class="mb-6 max-w-5xl rounded-2xl border border-line bg-panel p-4">
       <h2 class="mb-3 text-sm font-semibold">Добавить пользователя</h2>
       <form class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" @submit.prevent="add">
         <input
@@ -280,7 +281,7 @@ function departmentLabel(user: User) {
               </span>
             </td>
             <td class="px-2 py-3">
-              <div class="flex items-center gap-1">
+              <div v-if="canManageUsers" class="flex items-center gap-1">
                 <button
                   type="button"
                   class="inline-flex size-8 items-center justify-center rounded-lg border border-line text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"

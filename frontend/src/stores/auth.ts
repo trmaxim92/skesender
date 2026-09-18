@@ -2,16 +2,21 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { loginRequest, mapUser, meRequest, updateMeRequest, changePasswordRequest } from '@/api/auth'
 import { setMyPresenceRequest } from '@/api/presence'
-import { ApiError, setToken } from '@/api/client'
+import { ApiError, AUTH_EXPIRED_EVENT, setToken } from '@/api/client'
 import {
   FIRST_SECTION_PATHS,
   SECTION_BY_PATH,
   type PermissionCode,
   type PresenceStatus,
+  type SendMode,
   type User,
 } from '@/types'
+import { shouldLogoutOnHydrateError, userCan } from '@/utils/authCan'
 
 const USER_KEY = 'oe_auth_user'
+const TOKEN_KEY = 'oe_access_token'
+/** Other tabs / WS should re-auth after password rotate without full logout. */
+export const SESSION_REFRESHED_EVENT = 'oe:session-refreshed'
 
 function readStoredUser(): User | null {
   const stored = localStorage.getItem(USER_KEY)
@@ -26,34 +31,31 @@ function readStoredUser(): User | null {
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(readStoredUser())
-  const token = ref<string | null>(localStorage.getItem('oe_access_token'))
+  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const error = ref('')
   const loading = ref(false)
+  /** Ignore AUTH_EXPIRED while rotating password / applying a fresh token. */
+  const sessionRefreshDepth = ref(0)
+  let syncStarted = false
 
   const isAuthenticated = computed(() => !!user.value && !!token.value)
+  const isSessionRefreshing = computed(() => sessionRefreshDepth.value > 0)
 
   function persistUser(next: User) {
     user.value = next
     localStorage.setItem(USER_KEY, JSON.stringify(next))
   }
 
+  function beginSessionRefresh() {
+    sessionRefreshDepth.value += 1
+  }
+
+  function endSessionRefresh() {
+    sessionRefreshDepth.value = Math.max(0, sessionRefreshDepth.value - 1)
+  }
+
   function can(code: PermissionCode): boolean {
-    if (!user.value) return false
-    // Admin always has full access (covers stale cached permissions)
-    if (user.value.role === 'admin') return true
-    const perms = user.value.permissions
-    if (!perms?.length) {
-      if (user.value.role === 'viewer') {
-        return code === 'section.chats' || code === 'section.appeals'
-      }
-      return (
-        code === 'section.chats' ||
-        code === 'section.appeals' ||
-        code === 'section.mailing' ||
-        code === 'action.write'
-      )
-    }
-    return perms.includes(code)
+    return userCan(user.value, code)
   }
 
   function canSection(path: string): boolean {
@@ -98,7 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function hydrate() {
-    const stored = localStorage.getItem('oe_access_token')
+    const stored = localStorage.getItem(TOKEN_KEY)
     token.value = stored
     if (!stored) {
       user.value = null
@@ -107,30 +109,45 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const me = await meRequest()
       persistUser(mapUser(me))
-    } catch {
-      logout()
+    } catch (e) {
+      // Only clear session on definitive auth failure — keep cache on network/5xx.
+      if (e instanceof ApiError && shouldLogoutOnHydrateError(e.status)) {
+        logout()
+      }
     }
   }
 
   async function updateProfile(name: string) {
-    const me = await updateMeRequest(name.trim())
+    const me = await updateMeRequest({ name: name.trim() })
+    persistUser(mapUser(me))
+  }
+
+  async function updateSendMode(mode: SendMode) {
+    const me = await updateMeRequest({ send_mode: mode })
     persistUser(mapUser(me))
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
-    await changePasswordRequest(currentPassword, newPassword)
+    beginSessionRefresh()
+    try {
+      const result = await changePasswordRequest(currentPassword, newPassword)
+      setToken(result.access_token)
+      token.value = result.access_token
+      window.dispatchEvent(new CustomEvent(SESSION_REFRESHED_EVENT))
+    } finally {
+      // Allow in-flight WS close / 401 from old token to settle.
+      window.setTimeout(() => endSessionRefresh(), 1500)
+    }
   }
 
   async function setPresence(statusId: number, localStatus?: PresenceStatus | null) {
     const prev = user.value
     if (prev && localStatus) {
-      const canWriteByRole =
-        prev.role === 'admin' || (prev.permissions?.includes('action.write') ?? false)
       persistUser({
         ...prev,
         presenceStatusId: statusId,
         presenceStatus: { ...localStatus },
-        canWriteChats: canWriteByRole && localStatus.canWriteChats,
+        canWriteChats: can('action.write') && localStatus.canWriteChats,
       })
     }
     try {
@@ -170,12 +187,43 @@ export const useAuthStore = defineStore('auth', () => {
     logout()
   }
 
+  /** Cross-tab session sync (storage events fire only in *other* tabs). */
+  function startSessionSync() {
+    if (syncStarted || typeof window === 'undefined') return
+    syncStarted = true
+    window.addEventListener('storage', (e: StorageEvent) => {
+      if (e.key !== TOKEN_KEY && e.key !== USER_KEY) return
+      const nextToken = localStorage.getItem(TOKEN_KEY)
+      if (!nextToken) {
+        user.value = null
+        token.value = null
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+        return
+      }
+      if (nextToken !== token.value) {
+        token.value = nextToken
+        void hydrate().then(() => {
+          window.dispatchEvent(new CustomEvent(SESSION_REFRESHED_EVENT))
+        })
+        return
+      }
+      if (e.key === USER_KEY && e.newValue) {
+        try {
+          user.value = JSON.parse(e.newValue) as User
+        } catch {
+          /* ignore corrupt mirror */
+        }
+      }
+    })
+  }
+
   return {
     user,
     token,
     error,
     loading,
     isAuthenticated,
+    isSessionRefreshing,
     can,
     canSection,
     firstAllowedPath,
@@ -184,7 +232,11 @@ export const useAuthStore = defineStore('auth', () => {
     logoutWithOffline,
     hydrate,
     updateProfile,
+    updateSendMode,
     changePassword,
     setPresence,
+    startSessionSync,
+    beginSessionRefresh,
+    endSessionRefresh,
   }
 })

@@ -83,6 +83,7 @@ export interface ApiMessage {
   direction: 'in' | 'out'
   text: string
   status: 'sent' | 'delivered' | 'read' | 'failed'
+  delivery_error?: string | null
   operator_name: string | null
   created_at: string
   edited_at?: string | null

@@ -170,6 +170,7 @@ let hydrated = false
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
+  auth.startSessionSync()
   if (!hydrated) {
     hydrated = true
     await auth.hydrate()

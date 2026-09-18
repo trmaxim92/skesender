@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
@@ -14,8 +14,11 @@ import {
   X,
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
+import { useAuthStore } from '@/stores/auth'
 import type { Template, TemplateGroup } from '@/types'
-import { getSendMode, onSendModeChange, type SendMode } from '@/utils/composerPrefs'
+import { normalizeSendMode, type SendMode } from '@/utils/composerPrefs'
+
+const auth = useAuthStore()
 
 const props = defineProps<{
   modelValue: string
@@ -51,7 +54,7 @@ const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const accept = ref('image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')
 const dragDepth = ref(0)
 const collapsedCategories = ref<Record<string, boolean>>({})
-const sendMode = ref<SendMode>(getSendMode())
+const sendMode = computed<SendMode>(() => normalizeSendMode(auth.user?.sendMode))
 
 const canSend = computed(
   () =>
@@ -288,17 +291,8 @@ watch(
   },
 )
 
-let stopSendModeWatch: (() => void) | undefined
-
 onMounted(() => {
   resizeTextarea()
-  stopSendModeWatch = onSendModeChange((mode) => {
-    sendMode.value = mode
-  })
-})
-
-onUnmounted(() => {
-  stopSendModeWatch?.()
 })
 </script>
 
