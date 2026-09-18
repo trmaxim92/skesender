@@ -80,7 +80,7 @@ function step(ctx: CanvasRenderingContext2D, ts: number) {
       const d2 = dx * dx + dy * dy
       if (d2 > link2) continue
       const alpha = (1 - Math.sqrt(d2) / LINK) * 0.35
-      ctx.strokeStyle = `rgba(0, 110, 200, ${alpha})`
+      ctx.strokeStyle = `rgba(161, 13, 33, ${alpha})`
       ctx.beginPath()
       ctx.moveTo(a.x, a.y)
       ctx.lineTo(b.x, b.y)
@@ -91,7 +91,7 @@ function step(ctx: CanvasRenderingContext2D, ts: number) {
   for (const p of pts) {
     ctx.beginPath()
     ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(0, 120, 210, 0.55)'
+    ctx.fillStyle = 'rgba(161, 13, 33, 0.45)'
     ctx.fill()
   }
 }
