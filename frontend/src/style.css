@@ -284,7 +284,6 @@ input[type='checkbox']:indeterminate {
   border-radius: 0.75rem;
   border: 1px solid transparent;
   background: #eef1f5;
-  padding: 0 0.875rem;
   color: var(--color-ink);
   font-size: 0.875rem;
   outline: none;
@@ -301,6 +300,9 @@ input[type='checkbox']:indeterminate {
   background: #fff;
   box-shadow: 0 0 0 3px var(--color-brand-soft);
 }
+.oe-filter-search {
+  padding: 0 0.875rem 0 2.5rem;
+}
 .oe-filter-field[type='search']::-webkit-search-decoration,
 .oe-filter-field[type='search']::-webkit-search-cancel-button {
   -webkit-appearance: none;
@@ -309,14 +311,15 @@ input[type='checkbox']:indeterminate {
 .oe-filter-select {
   appearance: none;
   -webkit-appearance: none;
-  padding-right: 2.25rem;
+  position: relative;
+  padding: 0 2.25rem 0 0.875rem;
   cursor: pointer;
 }
 .oe-filter-date {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
-  padding-right: 2.35rem;
+  padding: 0 2.35rem 0 0.875rem;
   cursor: pointer;
   color-scheme: light;
 }

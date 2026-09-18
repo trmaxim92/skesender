@@ -3,11 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   MoreVertical,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-vue-next'
@@ -40,6 +42,16 @@ const deletingId = ref<number | null>(null)
 const bulkBusy = ref(false)
 const bulkMsg = ref('')
 const selected = ref<Set<number>>(new Set())
+const filtersOpen = ref(false)
+
+const filtersActiveCount = computed(() => {
+  let n = 0
+  if (appeals.status !== 'open') n += 1
+  if (appeals.assignee !== 'all') n += 1
+  if (appeals.dateFrom) n += 1
+  if (appeals.dateTo) n += 1
+  return n
+})
 
 const canCreate = computed(() => auth.can('section.chats') && auth.can('action.write'))
 const canWrite = computed(() => auth.can('section.appeals') && auth.can('action.write'))
@@ -246,53 +258,83 @@ async function onBulkDelete() {
       </div>
 
       <form
-        class="flex flex-col gap-3 rounded-2xl border border-line/80 bg-panel p-3 shadow-sm md:flex-row md:flex-wrap md:items-end md:gap-2.5 md:p-4"
+        class="rounded-2xl border border-line/80 bg-panel p-3 shadow-sm md:p-4"
         @submit.prevent="onSubmit"
       >
-        <div class="min-w-0 w-full md:min-w-[220px] md:flex-1">
-          <div class="relative">
-            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              v-model="appeals.q"
-              type="search"
-              placeholder="Номер, имя, логин, текст сообщения…"
-              class="oe-filter-field w-full pl-9 pr-3"
-            />
+        <div class="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:items-end md:gap-2.5">
+          <div class="min-w-0 w-full md:min-w-[220px] md:flex-1">
+            <div class="relative">
+              <Search
+                class="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted"
+                aria-hidden="true"
+              />
+              <input
+                v-model="appeals.q"
+                type="search"
+                placeholder="Номер, имя, логин…"
+                class="oe-filter-field oe-filter-search w-full"
+              />
+            </div>
           </div>
+
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] items-center justify-center gap-2 rounded-xl border border-line bg-surface px-3 text-sm font-semibold text-ink transition hover:bg-[#e8ecf2] md:hidden"
+            :aria-expanded="filtersOpen"
+            @click="filtersOpen = !filtersOpen"
+          >
+            <SlidersHorizontal class="size-4 text-muted" />
+            Фильтры
+            <span
+              v-if="filtersActiveCount"
+              class="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-bold text-white"
+            >
+              {{ filtersActiveCount }}
+            </span>
+            <ChevronDown
+              class="size-4 text-muted transition-transform"
+              :class="filtersOpen ? 'rotate-180' : ''"
+            />
+          </button>
+
+          <div
+            class="grid w-full grid-cols-2 gap-2.5 md:contents"
+            :class="filtersOpen ? '' : 'hidden md:contents'"
+          >
+            <label class="block min-w-0 md:w-[9.5rem]">
+              <span class="oe-filter-label">Статус</span>
+              <FilterSelect v-model="appeals.status" :options="statusOptions" aria-label="Статус" />
+            </label>
+
+            <label class="block min-w-0 md:w-[9.5rem]">
+              <span class="oe-filter-label">Оператор</span>
+              <FilterSelect
+                v-model="appeals.assignee"
+                :options="assigneeOptions"
+                aria-label="Оператор"
+              />
+            </label>
+
+            <label class="block min-w-0 md:w-[11rem]">
+              <span class="oe-filter-label">С</span>
+              <FilterDate v-model="appeals.dateFrom" aria-label="Дата с" />
+            </label>
+
+            <label class="block min-w-0 md:w-[11rem]">
+              <span class="oe-filter-label">По</span>
+              <FilterDate v-model="appeals.dateTo" aria-label="Дата по" />
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            class="inline-flex h-[2.625rem] w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50 md:w-auto"
+            :disabled="appeals.loading"
+          >
+            <Search class="size-4" />
+            Найти
+          </button>
         </div>
-
-        <label class="block shrink-0 md:w-[9.5rem]">
-          <span class="oe-filter-label">Статус</span>
-          <FilterSelect v-model="appeals.status" :options="statusOptions" aria-label="Статус" />
-        </label>
-
-        <label class="block shrink-0 md:w-[9.5rem]">
-          <span class="oe-filter-label">Оператор</span>
-          <FilterSelect
-            v-model="appeals.assignee"
-            :options="assigneeOptions"
-            aria-label="Оператор"
-          />
-        </label>
-
-        <label class="block shrink-0 md:w-[11rem]">
-          <span class="oe-filter-label">С</span>
-          <FilterDate v-model="appeals.dateFrom" aria-label="Дата с" />
-        </label>
-
-        <label class="block shrink-0 md:w-[11rem]">
-          <span class="oe-filter-label">По</span>
-          <FilterDate v-model="appeals.dateTo" aria-label="Дата по" />
-        </label>
-
-        <button
-          type="submit"
-          class="inline-flex h-[2.625rem] w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50 md:w-auto"
-          :disabled="appeals.loading"
-        >
-          <Search class="size-4" />
-          Найти
-        </button>
       </form>
       <p v-if="bulkMsg" class="mt-2 text-xs text-ok">{{ bulkMsg }}</p>
     </div>
