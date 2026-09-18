@@ -25,12 +25,12 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 0.85rem;
+        gap: 0.9rem;
         padding: env(safe-area-inset-top) env(safe-area-inset-right)
           env(safe-area-inset-bottom) env(safe-area-inset-left);
-        background: #0b4fd9;
+        background: #0f1623;
         color: #fff;
-        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-family: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
         overflow: hidden;
         transition:
@@ -40,11 +40,11 @@
           background 0.7s ease;
       }
       #oe-splash.oe-splash--animate {
-        background: linear-gradient(160deg, #0b4fd9 0%, #1a6dff 48%, #3d8bff 100%);
+        background: radial-gradient(120% 90% at 50% 18%, #7a0a18 0%, #a10d21 42%, #0f1623 100%);
       }
       #oe-splash.oe-splash--leave {
         opacity: 0;
-        transform: scale(1.06);
+        transform: scale(1.05);
         filter: blur(8px);
         pointer-events: none;
       }
@@ -70,7 +70,7 @@
       #oe-splash.oe-splash--animate .oe-splash__bar {
         animation-delay: 0.08s;
       }
-      #oe-splash.oe-splash--animate .oe-splash__icon {
+      #oe-splash.oe-splash--animate .oe-splash__mark {
         animation: oe-splash-float 2.1s ease-in-out infinite;
       }
       .oe-splash__glow {
@@ -78,39 +78,49 @@
         width: 22rem;
         height: 22rem;
         border-radius: 999px;
-        background: radial-gradient(circle, rgba(255, 255, 255, 0.28), transparent 68%);
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.2), transparent 68%);
         pointer-events: none;
       }
       .oe-splash__ring {
         position: absolute;
-        width: 9.5rem;
-        height: 9.5rem;
+        width: 9.75rem;
+        height: 9.75rem;
         border-radius: 999px;
-        border: 1.5px solid rgba(255, 255, 255, 0.28);
+        border: 1.5px solid rgba(255, 255, 255, 0.22);
         pointer-events: none;
       }
-      .oe-splash__icon {
+      .oe-splash__mark {
         position: relative;
+        display: flex;
         width: 5.5rem;
         height: 5.5rem;
+        align-items: center;
+        justify-content: center;
         border-radius: 1.35rem;
+        background: #a10d21;
         box-shadow:
-          0 12px 28px rgba(0, 0, 0, 0.22),
-          0 0 0 2px rgba(255, 255, 255, 0.22);
+          0 14px 32px rgba(0, 0, 0, 0.35),
+          0 0 0 2px rgba(255, 255, 255, 0.16);
+      }
+      .oe-splash__mark img {
+        width: 5.5rem;
+        height: 5.5rem;
+        border-radius: inherit;
+        display: block;
       }
       .oe-splash__brand {
         position: relative;
         margin: 0;
-        font-size: 1.35rem;
+        font-size: 1.4rem;
         font-weight: 700;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.03em;
       }
       .oe-splash__tag {
         position: relative;
-        margin: -0.2rem 0 0;
+        margin: -0.15rem 0 0;
         font-size: 0.8rem;
         font-weight: 500;
-        color: rgba(255, 255, 255, 0.82);
+        color: rgba(255, 255, 255, 0.72);
       }
       .oe-splash__bar {
         position: relative;
@@ -119,7 +129,7 @@
         margin-top: 0.55rem;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.18);
       }
       .oe-splash__bar-fill {
         width: 40%;
@@ -153,20 +163,20 @@
         0%,
         100% {
           transform: scale(0.92);
-          opacity: 0.7;
+          opacity: 0.55;
         }
         50% {
           transform: scale(1.08);
-          opacity: 1;
+          opacity: 0.95;
         }
       }
       @keyframes oe-splash-ring {
         0% {
           transform: scale(0.78);
-          opacity: 0.55;
+          opacity: 0.5;
         }
         70% {
-          opacity: 0.12;
+          opacity: 0.1;
         }
         100% {
           transform: scale(1.35);
@@ -183,7 +193,7 @@
       }
       html.oe-standalone,
       html.oe-standalone body {
-        background: #0b4fd9;
+        background: #0f1623;
       }
       html.oe-standalone #app {
         opacity: 0;
@@ -243,7 +253,9 @@
     <div id="oe-splash" data-started="" aria-hidden="true">
       <div class="oe-splash__glow" aria-hidden="true"></div>
       <div class="oe-splash__ring" aria-hidden="true"></div>
-      <img class="oe-splash__icon" src="/pwa-192.png" width="88" height="88" alt="" fetchpriority="high" />
+      <div class="oe-splash__mark" aria-hidden="true">
+        <img src="/pwa-192.png" width="88" height="88" alt="" fetchpriority="high" />
+      </div>
       <p class="oe-splash__brand">СкайСкейл</p>
       <p class="oe-splash__tag">Кабинет оператора</p>
       <div class="oe-splash__bar" aria-hidden="true">

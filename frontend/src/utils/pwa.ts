@@ -1,6 +1,8 @@
 /** PWA helpers: standalone detection, install prompt, app icon badge. */
 
 const DISMISS_INSTALL_KEY = 'oe_pwa_install_dismissed_v2'
+/** Set only after a real install (prompt accepted / appinstalled). */
+const INSTALL_DONE_KEY = 'oe_pwa_install_done_v1'
 
 export function isStandaloneDisplay(): boolean {
   if (typeof window === 'undefined') return false
@@ -32,6 +34,22 @@ function notifyPromptListeners() {
   for (const fn of promptListeners) fn(ready)
 }
 
+export function markPwaInstallCompleted() {
+  try {
+    localStorage.setItem(INSTALL_DONE_KEY, '1')
+  } catch {
+    // ignore
+  }
+}
+
+export function wasPwaInstallCompleted(): boolean {
+  try {
+    return localStorage.getItem(INSTALL_DONE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function initPwaInstallCapture() {
   if (typeof window === 'undefined') return
   window.addEventListener('beforeinstallprompt', (ev) => {
@@ -41,7 +59,7 @@ export function initPwaInstallCapture() {
   })
   window.addEventListener('appinstalled', () => {
     deferredPrompt = null
-    localStorage.setItem(DISMISS_INSTALL_KEY, '1')
+    markPwaInstallCompleted()
     notifyPromptListeners()
   })
 }
@@ -73,7 +91,7 @@ export async function promptPwaInstall(): Promise<'accepted' | 'dismissed' | 'un
   notifyPromptListeners()
   await ev.prompt()
   const { outcome } = await ev.userChoice
-  if (outcome === 'accepted') localStorage.setItem(DISMISS_INSTALL_KEY, '1')
+  if (outcome === 'accepted') markPwaInstallCompleted()
   return outcome
 }
 

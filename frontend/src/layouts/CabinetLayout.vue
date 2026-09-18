@@ -40,13 +40,12 @@ import {
 } from '@/utils/notify'
 import { resetFavicon, setFaviconUnread } from '@/utils/faviconBadge'
 import {
-  dismissInstallHint,
   isIosDevice,
   isStandaloneDisplay,
   onInstallPromptAvailable,
   promptPwaInstall,
   setAppBadgeCount,
-  wasInstallDismissed,
+  wasPwaInstallCompleted,
 } from '@/utils/pwa'
 
 const SIDEBAR_KEY = 'oe_sidebar_collapsed'
@@ -292,7 +291,6 @@ const initials = computed(() => {
 })
 
 const chatsUnread = computed(() => chats.totalUnread)
-const newAppealsBadge = computed(() => chats.unreadByTab?.new ?? 0)
 const appVersion = '2.8.1'
 const inAppToast = ref<{
   text: string
@@ -356,7 +354,8 @@ const installHelp = ref('')
 const iosInstallHint = computed(() => isIosDevice() && !isStandaloneDisplay())
 
 function refreshInstallBanner() {
-  if (isStandaloneDisplay() || wasInstallDismissed()) {
+  // Mobile only: keep until the app is actually installed / opened as PWA.
+  if (isMdUp.value || isStandaloneDisplay() || wasPwaInstallCompleted()) {
     showInstallBanner.value = false
     return
   }
@@ -382,18 +381,18 @@ async function onInstallApp() {
     'В меню браузера (⋮) выберите «Установить приложение» или «Добавить на главный экран»'
 }
 
-function onDismissInstall() {
-  dismissInstallHint()
-  showInstallBanner.value = false
-  installHelp.value = ''
-}
-
 let stopInstallWatch: (() => void) | null = null
 stopInstallWatch = onInstallPromptAvailable((ready) => {
   installPromptReady.value = ready
   refreshInstallBanner()
 })
 refreshInstallBanner()
+
+watch(isMdUp, () => refreshInstallBanner())
+
+function onAppInstalled() {
+  refreshInstallBanner()
+}
 
 function onInAppToast(ev: Event) {
   const detail = (ev as CustomEvent<{
@@ -651,6 +650,7 @@ onMounted(() => {
   window.addEventListener(SESSION_REFRESHED_EVENT, onSessionRefreshed)
   window.addEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.addEventListener('oe:in-app-toast', onInAppToast)
+  window.addEventListener('appinstalled', onAppInstalled)
   window.addEventListener('resize', placeProfileMenu)
   window.addEventListener('scroll', placeProfileMenu, true)
   window.addEventListener('resize', placeBellPanel)
@@ -686,6 +686,7 @@ onUnmounted(() => {
   window.removeEventListener(SESSION_REFRESHED_EVENT, onSessionRefreshed)
   window.removeEventListener('oe:open-dialog', onOpenDialogFromNotify)
   window.removeEventListener('oe:in-app-toast', onInAppToast)
+  window.removeEventListener('appinstalled', onAppInstalled)
   window.removeEventListener('resize', placeProfileMenu)
   window.removeEventListener('scroll', placeProfileMenu, true)
   window.removeEventListener('resize', placeBellPanel)
@@ -796,17 +797,6 @@ onUnmounted(() => {
             ]"
           >
             {{ chatsUnread > 99 ? '99+' : chatsUnread }}
-          </span>
-          <span
-            v-else-if="item.to === '/appeals' && newAppealsBadge > 0"
-            class="flex items-center justify-center rounded-full bg-brand font-semibold text-white"
-            :class="
-              expandedNav
-                ? 'h-5 min-w-5 px-1.5 text-[10px]'
-                : 'absolute right-1 top-1 h-4 min-w-4 text-[9px]'
-            "
-          >
-            {{ newAppealsBadge > 99 ? '99+' : newAppealsBadge }}
           </span>
         </RouterLink>
 
@@ -996,7 +986,7 @@ onUnmounted(() => {
           aria-hidden="true"
         />
         <div
-          class="pointer-events-none absolute -bottom-16 right-0 size-44 rounded-full bg-cyan-200/25 blur-3xl"
+          class="pointer-events-none absolute -bottom-16 right-0 size-44 rounded-full bg-white/10 blur-3xl"
           aria-hidden="true"
         />
         <div class="relative flex items-center gap-3 sm:gap-4">
@@ -1025,32 +1015,17 @@ onUnmounted(() => {
             <div class="mt-2.5 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-[#0b4fd9] shadow-sm transition hover:bg-white/95 active:scale-[0.98]"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-brand shadow-sm transition hover:bg-white/95 active:scale-[0.98]"
                 @click="onInstallApp"
               >
                 <Download class="size-3.5" />
                 Установить приложение
-              </button>
-              <button
-                type="button"
-                class="rounded-xl px-2.5 py-2 text-xs font-semibold text-white/80 transition hover:bg-white/10 hover:text-white"
-                @click="onDismissInstall"
-              >
-                Позже
               </button>
             </div>
             <p v-if="installHelp" class="mt-2 text-xs leading-snug text-white/90">
               {{ installHelp }}
             </p>
           </div>
-          <button
-            type="button"
-            class="shrink-0 self-start rounded-lg p-1.5 text-white/70 transition hover:bg-white/15 hover:text-white"
-            title="Закрыть"
-            @click="onDismissInstall"
-          >
-            <X class="size-4" />
-          </button>
         </div>
       </div>
 

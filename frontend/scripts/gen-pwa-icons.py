@@ -1,14 +1,26 @@
-from PIL import Image
+"""Generate favicon / PWA icons from sidebar brand mark."""
+from __future__ import annotations
+
 from pathlib import Path
 
-src = Path(__file__).resolve().parents[1] / "public" / "brand-icon.png"
-out = Path(__file__).resolve().parents[1] / "public"
-base = Image.open(src).convert("RGBA")
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1] / "public"
+SRC_ANY = ROOT / "brand-icon.png"
+SRC_MASK = ROOT / "brand-icon-maskable.png"
+BRAND = (161, 13, 33, 255)  # #a10d21
 
 
-def resize(size: int) -> Image.Image:
-    return base.resize((size, size), Image.Resampling.LANCZOS)
+def load(path: Path) -> Image.Image:
+    return Image.open(path).convert("RGBA")
 
+
+def resize(img: Image.Image, size: int) -> Image.Image:
+    return img.resize((size, size), Image.Resampling.LANCZOS)
+
+
+any_base = load(SRC_ANY)
+mask_base = load(SRC_MASK) if SRC_MASK.exists() else any_base
 
 for size, name in [
     (64, "favicon.png"),
@@ -16,22 +28,24 @@ for size, name in [
     (192, "pwa-192.png"),
     (512, "pwa-512.png"),
 ]:
-    resize(size).save(out / name, "PNG", optimize=True)
+    resize(any_base, size).save(ROOT / name, "PNG", optimize=True)
     print("wrote", name)
 
 
-def maskable(size: int, pad_ratio: float = 0.12) -> Image.Image:
-    canvas = Image.new("RGBA", (size, size), (13, 71, 161, 255))
-    inner = int(size * (1 - 2 * pad_ratio))
-    icon = resize(inner)
-    x = (size - inner) // 2
-    y = (size - inner) // 2
-    canvas.paste(icon, (x, y), icon)
+def maskable(size: int) -> Image.Image:
+    # Prefer dedicated full-bleed mark; fall back to padded any-icon on brand.
+    if SRC_MASK.exists():
+        return resize(mask_base, size)
+    canvas = Image.new("RGBA", (size, size), BRAND)
+    pad = int(size * 0.12)
+    inner = size - pad * 2
+    icon = resize(any_base, inner)
+    canvas.paste(icon, (pad, pad), icon)
     return canvas
 
 
 for size, name in [(192, "pwa-maskable-192.png"), (512, "pwa-maskable-512.png")]:
-    maskable(size).save(out / name, "PNG", optimize=True)
+    maskable(size).save(ROOT / name, "PNG", optimize=True)
     print("wrote", name)
 
 print("done")

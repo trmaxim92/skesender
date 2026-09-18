@@ -337,3 +337,35 @@ input[type='checkbox']:indeterminate {
 .oe-filter-date[data-empty='1']::-webkit-datetime-edit-fields-wrapper {
   opacity: 0;
 }
+.oe-filter-menu {
+  border-radius: 0.875rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+  box-shadow:
+    0 10px 28px color-mix(in srgb, var(--color-ink) 12%, transparent),
+    0 2px 8px color-mix(in srgb, var(--color-ink) 6%, transparent);
+}
+.oe-filter-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  text-align: left;
+  font-size: 0.875rem;
+  color: var(--color-ink);
+  transition: background-color 0.12s ease;
+}
+.oe-filter-menu-item:hover,
+.oe-filter-menu-item:focus-visible {
+  background: var(--color-surface);
+  outline: none;
+}
+.oe-filter-menu-item[aria-selected='true'] {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+  font-weight: 600;
+}
+.oe-filter-calendar {
+  min-width: 17.5rem;
+}

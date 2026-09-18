@@ -2,9 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Calendar,
   CheckSquare,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   MoreVertical,
@@ -14,6 +12,8 @@ import {
   X,
 } from 'lucide-vue-next'
 import CreateAppealModal from '@/components/appeals/CreateAppealModal.vue'
+import FilterDate from '@/components/ui/FilterDate.vue'
+import FilterSelect from '@/components/ui/FilterSelect.vue'
 import { useAppealsStore } from '@/stores/appeals'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
@@ -23,6 +23,17 @@ const appeals = useAppealsStore()
 const channels = useChannelsStore()
 const auth = useAuthStore()
 const router = useRouter()
+
+const statusOptions = [
+  { value: 'open', label: 'Открытые' },
+  { value: 'closed', label: 'Закрытые' },
+  { value: 'all', label: 'Все' },
+]
+const assigneeOptions = [
+  { value: 'all', label: 'Все' },
+  { value: 'mine', label: 'Мои' },
+  { value: 'unassigned', label: 'Свободные' },
+]
 
 const createOpen = ref(false)
 const deletingId = ref<number | null>(null)
@@ -252,76 +263,26 @@ async function onBulkDelete() {
 
         <label class="block shrink-0 md:w-[9.5rem]">
           <span class="oe-filter-label">Статус</span>
-          <div class="relative">
-            <select v-model="appeals.status" class="oe-filter-field oe-filter-select">
-              <option value="open">Открытые</option>
-              <option value="closed">Закрытые</option>
-              <option value="all">Все</option>
-            </select>
-            <ChevronDown
-              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
-              aria-hidden="true"
-            />
-          </div>
+          <FilterSelect v-model="appeals.status" :options="statusOptions" aria-label="Статус" />
         </label>
 
         <label class="block shrink-0 md:w-[9.5rem]">
           <span class="oe-filter-label">Оператор</span>
-          <div class="relative">
-            <select v-model="appeals.assignee" class="oe-filter-field oe-filter-select">
-              <option value="all">Все</option>
-              <option value="mine">Мои</option>
-              <option value="unassigned">Свободные</option>
-            </select>
-            <ChevronDown
-              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
-              aria-hidden="true"
-            />
-          </div>
+          <FilterSelect
+            v-model="appeals.assignee"
+            :options="assigneeOptions"
+            aria-label="Оператор"
+          />
         </label>
 
         <label class="block shrink-0 md:w-[11rem]">
           <span class="oe-filter-label">С</span>
-          <div class="relative">
-            <input
-              v-model="appeals.dateFrom"
-              type="date"
-              class="oe-filter-field oe-filter-date relative"
-              :data-empty="appeals.dateFrom ? '0' : '1'"
-            />
-            <span
-              v-if="!appeals.dateFrom"
-              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted"
-            >
-              ДД.ММ.ГГГГ
-            </span>
-            <Calendar
-              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
-              aria-hidden="true"
-            />
-          </div>
+          <FilterDate v-model="appeals.dateFrom" aria-label="Дата с" />
         </label>
 
         <label class="block shrink-0 md:w-[11rem]">
           <span class="oe-filter-label">По</span>
-          <div class="relative">
-            <input
-              v-model="appeals.dateTo"
-              type="date"
-              class="oe-filter-field oe-filter-date relative"
-              :data-empty="appeals.dateTo ? '0' : '1'"
-            />
-            <span
-              v-if="!appeals.dateTo"
-              class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted"
-            >
-              ДД.ММ.ГГГГ
-            </span>
-            <Calendar
-              class="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
-              aria-hidden="true"
-            />
-          </div>
+          <FilterDate v-model="appeals.dateTo" aria-label="Дата по" />
         </label>
 
         <button
