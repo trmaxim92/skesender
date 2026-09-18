@@ -20,6 +20,7 @@ import { useChatsStore } from '@/stores/chats'
 import { useMyTemplatesStore } from '@/stores/myTemplates'
 import { useTemplatesStore } from '@/stores/templates'
 import { attachmentPath, downloadAuthFile } from '@/utils/authMedia'
+import { userCanWriteChats } from '@/utils/authCan'
 import {
   appealStatusLabel,
   transportBadge,
@@ -44,7 +45,7 @@ const composerTemplates = computed(() => [
   ...myTemplates.forTransport(chats.activeDialog?.transport),
 ])
 
-const canWrite = computed(() => auth.can('action.write') && auth.user?.canWriteChats !== false)
+const canWrite = computed(() => userCanWriteChats(auth.user))
 const canCreateOutbound = computed(() => canWrite.value && auth.can('section.appeals'))
 
 const createOpen = ref(false)

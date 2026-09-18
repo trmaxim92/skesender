@@ -6,6 +6,7 @@ import type { DialogSidebar, FieldDefinition } from '@/types'
 import { appealStatusLabel, transportLabel } from '@/types'
 import { useAuthStore } from '@/stores/auth'
 import { useChatsStore } from '@/stores/chats'
+import { userCanWriteChats } from '@/utils/authCan'
 
 const props = defineProps<{
   open: boolean
@@ -24,7 +25,7 @@ const clientDraft = ref<Record<string, string>>({})
 const appealDraft = ref<Record<string, string>>({})
 const saving = ref(false)
 const saveError = ref('')
-const canWrite = computed(() => auth.can('action.write'))
+const canWrite = computed(() => userCanWriteChats(auth.user))
 
 const shownAppeal = computed(() => {
   if (!props.data) return null

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   createDepartmentRequest,
   deleteDepartmentRequest,
@@ -8,7 +8,11 @@ import {
   updateDepartmentRequest,
 } from '@/api/settings'
 import { ApiError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import type { Department } from '@/types'
+
+const auth = useAuthStore()
+const canWrite = computed(() => auth.can('action.write'))
 
 const departments = ref<Department[]>([])
 const loading = ref(false)
@@ -37,7 +41,7 @@ onMounted(() => {
 })
 
 async function create() {
-  if (!name.value.trim()) return
+  if (!canWrite.value || !name.value.trim()) return
   saving.value = true
   try {
     const created = await createDepartmentRequest({ name: name.value.trim() })
@@ -51,12 +55,13 @@ async function create() {
 }
 
 function openEdit(d: Department) {
+  if (!canWrite.value) return
   editId.value = d.id
   editName.value = d.name
 }
 
 async function saveEdit() {
-  if (editId.value == null || !editName.value.trim()) return
+  if (!canWrite.value || editId.value == null || !editName.value.trim()) return
   editSaving.value = true
   try {
     const updated = await updateDepartmentRequest(editId.value, {
@@ -74,7 +79,7 @@ async function saveEdit() {
 }
 
 async function remove(d: Department) {
-  if (d.slug === 'general') return
+  if (!canWrite.value || d.slug === 'general') return
   if (!confirm(`Удалить отдел «${d.name}»? Каналы перейдут в «Общий».`)) return
   try {
     await deleteDepartmentRequest(d.id)
@@ -97,7 +102,7 @@ async function remove(d: Department) {
     </div>
     <p v-if="error" class="mb-3 text-sm text-danger">{{ error }}</p>
 
-    <form class="mb-6 flex max-w-xl gap-2" @submit.prevent="create">
+    <form v-if="canWrite" class="mb-6 flex max-w-xl gap-2" @submit.prevent="create">
       <input
         v-model="name"
         required
@@ -127,7 +132,7 @@ async function remove(d: Department) {
               каналов: {{ d.channelCount }} · {{ d.isActive ? 'активен' : 'выкл.' }}
             </p>
           </div>
-          <div class="flex gap-1">
+          <div v-if="canWrite" class="flex gap-1">
             <button
               type="button"
               class="rounded-lg px-2 py-1 text-xs text-muted hover:bg-surface hover:text-ink"
@@ -147,7 +152,7 @@ async function remove(d: Department) {
         </div>
 
         <div
-          v-if="editId === d.id"
+          v-if="canWrite && editId === d.id"
           class="mt-3 space-y-2 border-t border-line pt-3"
         >
           <input

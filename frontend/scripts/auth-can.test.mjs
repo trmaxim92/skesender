@@ -2,7 +2,11 @@
  * Auth permission / hydrate-error gate (no browser).
  * Run: node --experimental-strip-types scripts/auth-can.test.mjs
  */
-import { shouldLogoutOnHydrateError, userCan } from '../src/utils/authCan.ts'
+import {
+  shouldLogoutOnHydrateError,
+  userCan,
+  userCanWriteChats,
+} from '../src/utils/authCan.ts'
 
 let failed = 0
 
@@ -48,6 +52,29 @@ assert(
 assert(
   'viewer without manage_users',
   userCan({ role: 'viewer', permissions: ['section.chats'] }, 'action.manage_users') === false,
+)
+
+assert(
+  'write + canWriteChats true → allow',
+  userCanWriteChats({ role: 'operator', permissions: ['action.write'], canWriteChats: true }) ===
+    true,
+)
+
+assert(
+  'write + canWriteChats false → deny',
+  userCanWriteChats({ role: 'operator', permissions: ['action.write'], canWriteChats: false }) ===
+    false,
+)
+
+assert(
+  'admin + canWriteChats false → deny compose',
+  userCanWriteChats({ role: 'admin', permissions: [], canWriteChats: false }) === false,
+)
+
+assert(
+  'no write perm → deny even if presence ok',
+  userCanWriteChats({ role: 'viewer', permissions: ['section.chats'], canWriteChats: true }) ===
+    false,
 )
 
 assert('hydrate 401 → logout', shouldLogoutOnHydrateError(401) === true)

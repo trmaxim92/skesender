@@ -3,6 +3,7 @@
 export type AuthUserLike = {
   role?: string
   permissions?: string[] | null
+  canWriteChats?: boolean
 }
 
 /** Match Pinia auth.can(): admin full access; empty ACL = deny-all. */
@@ -12,6 +13,14 @@ export function userCan(user: AuthUserLike | null | undefined, code: string): bo
   const perms = user.permissions
   if (!perms?.length) return false
   return perms.includes(code)
+}
+
+/**
+ * Chat write in UI: role write + presence allows chat write.
+ * `canWriteChats === false` locks compose (e.g. status «Обучение»).
+ */
+export function userCanWriteChats(user: AuthUserLike | null | undefined): boolean {
+  return userCan(user, 'action.write') && user?.canWriteChats !== false
 }
 
 /** Hydrate should wipe the session only on definitive auth failure. */

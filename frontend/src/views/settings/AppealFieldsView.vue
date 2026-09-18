@@ -11,7 +11,11 @@ import {
   updateFieldRequest,
 } from '@/api/settings'
 import { ApiError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import type { Department, FieldDefinition, FieldType } from '@/types'
+
+const auth = useAuthStore()
+const canWrite = computed(() => auth.can('action.write'))
 
 const departments = ref<Department[]>([])
 const departmentId = ref<number | null>(null)
@@ -94,7 +98,7 @@ watch(departmentId, () => {
 })
 
 async function addField() {
-  if (!label.value.trim() || departmentId.value == null) return
+  if (!canWrite.value || !label.value.trim() || departmentId.value == null) return
   saving.value = true
   try {
     const options =
@@ -129,6 +133,7 @@ async function addField() {
 }
 
 async function patchField(f: FieldDefinition, payload: Parameters<typeof updateFieldRequest>[1]) {
+  if (!canWrite.value) return
   try {
     const updated = await updateFieldRequest(f.id, payload)
     const mapped = mapFieldDefinition(updated)
@@ -140,6 +145,7 @@ async function patchField(f: FieldDefinition, payload: Parameters<typeof updateF
 }
 
 async function removeField(f: FieldDefinition) {
+  if (!canWrite.value) return
   if (!confirm(`Отключить поле «${f.label}»? Значения в обращениях сохранятся.`)) return
   try {
     await deleteFieldRequest(f.id)
@@ -151,6 +157,7 @@ async function removeField(f: FieldDefinition) {
 }
 
 async function moveField(f: FieldDefinition, dir: -1 | 1) {
+  if (!canWrite.value) return
   const ordered = visibleFields.value
   const idx = ordered.findIndex((x) => x.id === f.id)
   const swap = ordered[idx + dir]
@@ -186,7 +193,7 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
       </select>
     </div>
 
-    <form class="mb-6 grid max-w-3xl gap-2 sm:grid-cols-4" @submit.prevent="addField">
+    <form v-if="canWrite" class="mb-6 grid max-w-3xl gap-2 sm:grid-cols-4" @submit.prevent="addField">
       <input
         v-model="label"
         required
@@ -236,6 +243,7 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
               <input
                 class="w-full rounded-lg border border-transparent bg-transparent px-1 py-0.5 hover:border-line focus:border-line"
                 :value="f.label"
+                :readonly="!canWrite"
                 @change="patchField(f, { label: ($event.target as HTMLInputElement).value })"
               />
               <div class="mt-0.5 font-mono text-[10px] text-muted">{{ f.key }}</div>
@@ -245,6 +253,7 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
               <input
                 type="checkbox"
                 :checked="f.required"
+                :disabled="!canWrite"
                 @change="
                   patchField(f, {
                     required: ($event.target as HTMLInputElement).checked,
@@ -256,6 +265,7 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
               <input
                 type="checkbox"
                 :checked="f.isActive"
+                :disabled="!canWrite"
                 @change="
                   patchField(f, {
                     is_active: ($event.target as HTMLInputElement).checked,
@@ -264,7 +274,7 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
               />
             </td>
             <td class="px-4 py-3">
-              <div class="flex gap-1">
+              <div v-if="canWrite" class="flex gap-1">
                 <button
                   type="button"
                   class="rounded border border-line px-2 py-0.5 text-xs hover:bg-surface"
@@ -283,14 +293,14 @@ async function moveField(f: FieldDefinition, dir: -1 | 1) {
             </td>
             <td class="px-4 py-3 text-right">
               <button
-                v-if="f.isActive"
+                v-if="canWrite && f.isActive"
                 type="button"
                 class="text-xs text-danger hover:underline"
                 @click="removeField(f)"
               >
                 Отключить
               </button>
-              <span v-else class="text-[11px] text-muted">выкл.</span>
+              <span v-else-if="!f.isActive" class="text-[11px] text-muted">выкл.</span>
             </td>
           </tr>
           <tr v-if="!visibleFields.length">

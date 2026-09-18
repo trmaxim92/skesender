@@ -18,6 +18,7 @@ import MessageTicks from '@/components/chats/MessageTicks.vue'
 import VoiceMessage from '@/components/chats/VoiceMessage.vue'
 import { useAuthStore } from '@/stores/auth'
 import { attachmentPath, downloadAuthFile } from '@/utils/authMedia'
+import { userCanWriteChats } from '@/utils/authCan'
 import {
   appealStatusLabel,
   transportBadge,
@@ -41,7 +42,9 @@ const draft = ref('')
 const sending = ref(false)
 const threadEl = ref<HTMLElement | null>(null)
 
-const canWrite = computed(() => auth.can('action.write') && auth.can('section.chats'))
+const canWrite = computed(
+  () => userCanWriteChats(auth.user) && auth.can('section.chats'),
+)
 const appealId = computed(() => Number(route.params.appealId))
 
 const contactSubtitle = computed(() => {

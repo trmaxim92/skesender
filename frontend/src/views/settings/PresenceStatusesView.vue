@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   createPresenceStatusRequest,
   deletePresenceStatusRequest,
@@ -8,7 +8,11 @@ import {
   updatePresenceStatusRequest,
 } from '@/api/presence'
 import { ApiError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import type { PresenceStatus } from '@/types'
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('action.write'))
 
 const items = ref<PresenceStatus[]>([])
 const loading = ref(false)
@@ -47,7 +51,7 @@ onMounted(() => {
 })
 
 async function create() {
-  if (!name.value.trim()) return
+  if (!canManage.value || !name.value.trim()) return
   saving.value = true
   error.value = ''
   try {
@@ -73,6 +77,7 @@ async function create() {
 }
 
 function openEdit(s: PresenceStatus) {
+  if (!canManage.value) return
   editId.value = s.id
   editName.value = s.name
   editColor.value = s.color
@@ -83,7 +88,7 @@ function openEdit(s: PresenceStatus) {
 }
 
 async function saveEdit() {
-  if (editId.value == null || !editName.value.trim()) return
+  if (!canManage.value || editId.value == null || !editName.value.trim()) return
   editSaving.value = true
   error.value = ''
   try {
@@ -107,7 +112,7 @@ async function saveEdit() {
 }
 
 async function remove(s: PresenceStatus) {
-  if (s.isSystem) return
+  if (!canManage.value || s.isSystem) return
   if (!confirm(`Удалить статус «${s.name}»? Сотрудники перейдут в «Оффлайн».`)) return
   try {
     await deletePresenceStatusRequest(s.id)
@@ -128,7 +133,11 @@ async function remove(s: PresenceStatus) {
     </div>
     <p v-if="error" class="mb-3 text-sm text-danger">{{ error }}</p>
 
-    <form class="mb-6 max-w-2xl space-y-3 rounded-xl border border-line bg-panel p-4" @submit.prevent="create">
+    <form
+      v-if="canManage"
+      class="mb-6 max-w-2xl space-y-3 rounded-xl border border-line bg-panel p-4"
+      @submit.prevent="create"
+    >
       <div class="flex flex-wrap gap-2">
         <input
           v-model="name"
@@ -171,7 +180,7 @@ async function remove(s: PresenceStatus) {
         :key="s.id"
         class="rounded-xl border border-line bg-panel p-4"
       >
-        <div v-if="editId === s.id" class="space-y-3">
+        <div v-if="canManage && editId === s.id" class="space-y-3">
           <div class="flex gap-2">
             <input
               v-model="editName"
@@ -235,7 +244,7 @@ async function remove(s: PresenceStatus) {
                 <span v-if="!s.isActive">· выключен</span>
               </p>
             </div>
-            <div class="flex shrink-0 gap-1">
+            <div v-if="canManage" class="flex shrink-0 gap-1">
               <button
                 type="button"
                 class="rounded-lg px-2 py-1 text-xs text-brand hover:bg-brand-soft"

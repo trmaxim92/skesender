@@ -1,4 +1,4 @@
-import { api, ApiError, AUTH_EXPIRED_EVENT } from '@/api/client'
+import { api, ApiError, emitAuthExpired } from '@/api/client'
 import type { ChannelTransport, Role } from '@/types'
 
 export interface ApiAttachment {
@@ -169,7 +169,7 @@ export async function sendMessageRequest(
   }
   if (!response.ok) {
     if (response.status === 401) {
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+      emitAuthExpired()
     }
     const detail =
       typeof data === 'object' && data && 'detail' in data
@@ -259,7 +259,7 @@ export async function closeDialogRequest(
   }
   if (!response.ok) {
     if (response.status === 401) {
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+      emitAuthExpired()
     }
     const detail =
       typeof data === 'object' && data && 'detail' in data

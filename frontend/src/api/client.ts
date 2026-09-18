@@ -23,6 +23,10 @@ export function setToken(token: string | null) {
 /** Fired on authenticated 401 so the app can logout + redirect once. */
 export const AUTH_EXPIRED_EVENT = 'oe:auth-expired'
 
+export function emitAuthExpired() {
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+}
+
 export async function api<T>(
   path: string,
   options: RequestInit & { json?: unknown; auth?: boolean } = {},
@@ -55,7 +59,7 @@ export async function api<T>(
 
   if (!response.ok) {
     if (response.status === 401 && auth) {
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+      emitAuthExpired()
     }
     const detail =
       typeof data === 'object' && data && 'detail' in data

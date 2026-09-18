@@ -1,4 +1,4 @@
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, emitAuthExpired } from '@/api/client'
 import type {
   AccessRole,
   ChannelTransport,
@@ -205,6 +205,7 @@ export async function fetchMyTemplateMediaBlob(
       : `/api/me/templates/${templateId}/media`
   const response = await fetch(`${base}${path}`, { headers })
   if (!response.ok) {
+    if (response.status === 401) emitAuthExpired()
     throw new ApiError(response.status, `HTTP ${response.status}`)
   }
   return response.blob()

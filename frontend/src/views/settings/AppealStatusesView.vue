@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   createAppealStatusRequest,
   deleteAppealStatusRequest,
@@ -8,7 +8,11 @@ import {
   updateAppealStatusRequest,
 } from '@/api/appealStatuses'
 import { ApiError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import type { AppealStatusDef } from '@/types'
+
+const auth = useAuthStore()
+const canWrite = computed(() => auth.can('action.write'))
 
 const items = ref<AppealStatusDef[]>([])
 const loading = ref(false)
@@ -47,7 +51,7 @@ onMounted(() => {
 })
 
 async function create() {
-  if (!name.value.trim()) return
+  if (!canWrite.value || !name.value.trim()) return
   saving.value = true
   error.value = ''
   try {
@@ -73,6 +77,7 @@ async function create() {
 }
 
 function openEdit(s: AppealStatusDef) {
+  if (!canWrite.value) return
   editId.value = s.id
   editName.value = s.name
   editColor.value = s.color
@@ -83,7 +88,7 @@ function openEdit(s: AppealStatusDef) {
 }
 
 async function saveEdit() {
-  if (editId.value == null || !editName.value.trim()) return
+  if (!canWrite.value || editId.value == null || !editName.value.trim()) return
   editSaving.value = true
   error.value = ''
   try {
@@ -107,7 +112,7 @@ async function saveEdit() {
 }
 
 async function remove(s: AppealStatusDef) {
-  if (s.slug === 'new') return
+  if (!canWrite.value || s.slug === 'new') return
   if (!confirm(`Удалить статус «${s.name}»? Обращения перейдут в «Новое».`)) return
   try {
     await deleteAppealStatusRequest(s.id)
@@ -128,8 +133,11 @@ async function remove(s: AppealStatusDef) {
     </div>
     <p v-if="error" class="mb-3 text-sm text-danger">{{ error }}</p>
 
-    <form class="mb-6 max-w-2xl space-y-3 rounded-xl border border-line bg-panel p-4" @submit.prevent="create">
-      <div class="flex flex-wrap gap-2">
+    <form
+      v-if="canWrite"
+      class="mb-6 max-w-2xl space-y-3 rounded-xl border border-line bg-panel p-4"
+      @submit.prevent="create"
+    >      <div class="flex flex-wrap gap-2">
         <input
           v-model="name"
           required
@@ -235,7 +243,7 @@ async function remove(s: AppealStatusDef) {
                 <span v-if="!s.isActive">· выключен</span>
               </p>
             </div>
-            <div class="flex shrink-0 gap-1">
+            <div v-if="canWrite" class="flex shrink-0 gap-1">
               <button
                 type="button"
                 class="rounded-lg px-2 py-1 text-xs text-brand hover:bg-brand-soft"

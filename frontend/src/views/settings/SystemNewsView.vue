@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   createSystemNewsRequest,
   deleteSystemNewsRequest,
@@ -7,6 +7,10 @@ import {
   type ApiSystemNews,
 } from '@/api/notifications'
 import { ApiError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const canWrite = computed(() => auth.can('action.write'))
 
 const items = ref<ApiSystemNews[]>([])
 const loading = ref(false)
@@ -34,7 +38,7 @@ onMounted(() => {
 })
 
 async function publish() {
-  if (!title.value.trim() || !body.value.trim()) return
+  if (!canWrite.value || !title.value.trim() || !body.value.trim()) return
   saving.value = true
   error.value = ''
   try {
@@ -55,6 +59,7 @@ async function publish() {
 }
 
 async function remove(id: number) {
+  if (!canWrite.value) return
   if (!confirm('Удалить новость у всех сотрудников?')) return
   error.value = ''
   try {
@@ -93,8 +98,11 @@ function formatAt(iso: string) {
       {{ error }}
     </p>
 
-    <form class="space-y-3 rounded-xl border border-line bg-panel p-4" @submit.prevent="publish">
-      <label class="block">
+    <form
+      v-if="canWrite"
+      class="space-y-3 rounded-xl border border-line bg-panel p-4"
+      @submit.prevent="publish"
+    >      <label class="block">
         <span class="mb-1 block text-xs font-medium text-mute">Заголовок</span>
         <input
           v-model="title"
@@ -147,6 +155,7 @@ function formatAt(iso: string) {
             </p>
           </div>
           <button
+            v-if="canWrite"
             type="button"
             class="shrink-0 rounded-lg border border-line px-2.5 py-1 text-xs text-mute transition hover:border-red-300 hover:text-red-600"
             @click="remove(n.id)"

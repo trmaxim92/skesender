@@ -1,5 +1,7 @@
 /** Authenticated media URLs without putting JWT in query strings. */
 
+import { emitAuthExpired } from '@/api/client'
+
 const blobCache = new Map<string, string>()
 const inflight = new Map<string, Promise<string>>()
 
@@ -26,6 +28,7 @@ export async function resolveAuthMediaUrl(path: string): Promise<string> {
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const response = await fetch(key, { headers })
     if (!response.ok) {
+      if (response.status === 401) emitAuthExpired()
       throw new Error(`Media HTTP ${response.status}`)
     }
     const blob = await response.blob()
