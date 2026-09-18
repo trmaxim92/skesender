@@ -277,6 +277,9 @@ const title = computed(() => {
   return all.find((n) => route.path.startsWith(n.to))?.label ?? 'Кабинет'
 })
 
+/** Page owns its own H1 (filters / table chrome). */
+const embedPageTitle = computed(() => route.name === 'appeals')
+
 const roleDisplay = computed(() => auth.user?.roleName || auth.user?.role || '')
 
 const initials = computed(() => {
@@ -1056,7 +1059,12 @@ onUnmounted(() => {
         class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <h1 class="truncate text-lg font-bold tracking-tight text-ink md:text-xl">{{ title }}</h1>
+          <h1
+            v-if="!embedPageTitle"
+            class="truncate text-lg font-bold tracking-tight text-ink md:text-xl"
+          >
+            {{ title }}
+          </h1>
         </div>
         <div class="flex shrink-0 items-center gap-2 sm:gap-3">
           <div ref="bellRoot" class="relative">
