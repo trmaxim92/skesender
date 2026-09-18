@@ -5,7 +5,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db import get_db
 from app.deps import get_current_user
 from app.models import AccessRole, Role, RoleChannel, RolePermission, User, UserChannel
 
@@ -165,12 +164,11 @@ async def load_user_rbac(db: AsyncSession, user: User) -> User:
 def require_permission(code: str):
     async def _dep(
         user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
     ) -> User:
-        loaded = await load_user_rbac(db, user)
-        if not user_can(loaded, code):
+        # get_current_user already ran load_user_rbac — no second SELECT.
+        if not user_can(user, code):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-        return loaded
+        return user
 
     return _dep
 

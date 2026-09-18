@@ -20,6 +20,7 @@ def _auth_settings(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "unit-test-secret-key-32chars!!")
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("DEBUG", "true")
+    monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -180,3 +181,93 @@ async def test_login_promotes_only_offline_to_online():
     await run_login(presence=offline, expect_promote=True)
     await run_login(presence=training, expect_promote=False)
     await run_login(presence=online, expect_promote=False)
+
+
+def test_default_access_token_ttl_is_24h():
+    from app.config import get_settings
+
+    assert get_settings().access_token_expire_minutes == 60 * 24
+
+
+def test_create_access_token_exp_respects_ttl():
+    from datetime import datetime, timezone
+
+    from app.security import create_access_token, decode_access_token
+
+    token = create_access_token("ops@example.com", "operator", token_version=1)
+    payload = decode_access_token(token)
+    assert payload is not None
+    exp = payload["exp"]
+    # jose may leave exp as unix int
+    if isinstance(exp, datetime):
+        exp_ts = exp.timestamp()
+    else:
+        exp_ts = float(exp)
+    remaining = exp_ts - datetime.now(timezone.utc).timestamp()
+    # Default 24h ± a few minutes of test slack
+    assert 23 * 3600 < remaining < 25 * 3600
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_keeps_ver_and_slides_exp():
+    from datetime import datetime, timezone
+
+    from app.api import auth as auth_api
+    from app.security import create_access_token, decode_access_token
+
+    user = SimpleNamespace(
+        id=7,
+        email="ops@example.com",
+        role="operator",
+        token_version=4,
+    )
+    request = MagicMock()
+    request.headers = {}
+    request.client = SimpleNamespace(host="127.0.0.1")
+
+    old = create_access_token(
+        user.email, user.role, token_version=user.token_version, expires_minutes=30
+    )
+    old_payload = decode_access_token(old)
+    assert old_payload is not None
+
+    with patch.object(auth_api, "limiter") as lim:
+        lim.check = AsyncMock()
+        result = await auth_api.refresh_token(request, user)  # type: ignore[arg-type]
+
+    lim.check.assert_awaited()
+    new_payload = decode_access_token(result.access_token)
+    assert new_payload is not None
+    assert new_payload["sub"] == "ops@example.com"
+    assert int(new_payload["ver"]) == 4
+    old_exp = old_payload["exp"]
+    new_exp = new_payload["exp"]
+    if isinstance(old_exp, datetime):
+        old_exp = old_exp.timestamp()
+    if isinstance(new_exp, datetime):
+        new_exp = new_exp.timestamp()
+    assert float(new_exp) > float(old_exp)
+    remaining = float(new_exp) - datetime.now(timezone.utc).timestamp()
+    assert remaining > 20 * 3600
+
+
+@pytest.mark.asyncio
+async def test_require_permission_uses_preloaded_user_without_db():
+    """require_permission must not take a DB session (RBAC already on user)."""
+    import inspect
+
+    from app.rbac import ACTION_WRITE, require_permission, user_can
+    from fastapi import HTTPException
+
+    dep = require_permission(ACTION_WRITE)
+    params = list(inspect.signature(dep).parameters)
+    assert params == ["user"]
+
+    allowed = SimpleNamespace(role="operator", access_role=None)
+    assert await dep(allowed) is allowed  # type: ignore[arg-type]
+
+    denied = SimpleNamespace(role="viewer", access_role=None)
+    with pytest.raises(HTTPException) as exc:
+        await dep(denied)  # type: ignore[arg-type]
+    assert exc.value.status_code == 403
+    assert user_can(denied, ACTION_WRITE) is False

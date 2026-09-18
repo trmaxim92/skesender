@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { loginRequest, mapUser, meRequest, updateMeRequest, changePasswordRequest } from '@/api/auth'
+import {
+  loginRequest,
+  mapUser,
+  meRequest,
+  updateMeRequest,
+  changePasswordRequest,
+  refreshTokenRequest,
+} from '@/api/auth'
 import { setMyPresenceRequest } from '@/api/presence'
 import { ApiError, AUTH_EXPIRED_EVENT, setToken } from '@/api/client'
 import {
@@ -12,6 +19,7 @@ import {
   type User,
 } from '@/types'
 import { shouldLogoutOnHydrateError, userCan } from '@/utils/authCan'
+import { msUntilTokenRefresh, shouldRefreshToken } from '@/utils/jwt'
 
 const USER_KEY = 'oe_auth_user'
 const TOKEN_KEY = 'oe_access_token'
@@ -37,6 +45,9 @@ export const useAuthStore = defineStore('auth', () => {
   /** Ignore AUTH_EXPIRED while rotating password / applying a fresh token. */
   const sessionRefreshDepth = ref(0)
   let syncStarted = false
+  let refreshTimer: number | null = null
+  let refreshInFlight: Promise<boolean> | null = null
+  let visibilityHooked = false
 
   const isAuthenticated = computed(() => !!user.value && !!token.value)
   const isSessionRefreshing = computed(() => sessionRefreshDepth.value > 0)
@@ -52,6 +63,101 @@ export const useAuthStore = defineStore('auth', () => {
 
   function endSessionRefresh() {
     sessionRefreshDepth.value = Math.max(0, sessionRefreshDepth.value - 1)
+  }
+
+  function clearRefreshTimer() {
+    if (refreshTimer != null) {
+      window.clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+  }
+
+  function scheduleTokenRefresh() {
+    clearRefreshTimer()
+    const current = token.value
+    if (!current || typeof window === 'undefined') return
+    const waitMs = msUntilTokenRefresh(current)
+    if (waitMs == null) return
+    // Cap sleep so clock skew / long TTL still get a check (~6h).
+    const delay = Math.min(Math.max(waitMs, 5_000), 6 * 60 * 60 * 1000)
+    refreshTimer = window.setTimeout(() => {
+      void refreshSession(true).then((ok) => {
+        if (ok) scheduleTokenRefresh()
+      })
+    }, delay)
+  }
+
+  function applyAccessToken(next: string, notify = true) {
+    setToken(next)
+    token.value = next
+    if (notify) {
+      window.dispatchEvent(new CustomEvent(SESSION_REFRESHED_EVENT))
+    }
+    scheduleTokenRefresh()
+  }
+
+  /**
+   * Quietly slide JWT expiry. Returns false on auth failure (caller may logout).
+   * Network/5xx: keep current token and retry on next schedule.
+   */
+  async function refreshSession(force = false): Promise<boolean> {
+    const current = token.value ?? localStorage.getItem(TOKEN_KEY)
+    if (!current) return false
+    if (!force && !shouldRefreshToken(current)) {
+      scheduleTokenRefresh()
+      return true
+    }
+    if (refreshInFlight) return refreshInFlight
+
+    refreshInFlight = (async () => {
+      beginSessionRefresh()
+      try {
+        const result = await refreshTokenRequest()
+        applyAccessToken(result.access_token, true)
+        return true
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          clearRefreshTimer()
+          endSessionRefresh()
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+          return false
+        }
+        // Transient: keep session, retry later.
+        scheduleTokenRefresh()
+        return true
+      } finally {
+        if (sessionRefreshDepth.value > 0) {
+          window.setTimeout(() => endSessionRefresh(), 1500)
+        }
+        refreshInFlight = null
+      }
+    })()
+
+    return refreshInFlight
+  }
+
+  function onVisibilityForRefresh() {
+    if (document.visibilityState !== 'visible') return
+    const current = token.value
+    if (!current) return
+    if (shouldRefreshToken(current)) {
+      void refreshSession(true)
+    } else {
+      scheduleTokenRefresh()
+    }
+  }
+
+  function startTokenRefresh() {
+    if (typeof window === 'undefined') return
+    if (!visibilityHooked) {
+      visibilityHooked = true
+      document.addEventListener('visibilitychange', onVisibilityForRefresh)
+    }
+    scheduleTokenRefresh()
+    const current = token.value
+    if (current && shouldRefreshToken(current)) {
+      void refreshSession(true)
+    }
   }
 
   function can(code: PermissionCode): boolean {
@@ -81,12 +187,13 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     try {
       const result = await loginRequest(email.trim(), password)
-      setToken(result.access_token)
-      token.value = result.access_token
+      applyAccessToken(result.access_token, false)
       const me = await meRequest()
       persistUser(mapUser(me))
+      startTokenRefresh()
       return true
     } catch (e) {
+      clearRefreshTimer()
       setToken(null)
       token.value = null
       user.value = null
@@ -104,15 +211,19 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = stored
     if (!stored) {
       user.value = null
+      clearRefreshTimer()
       return
     }
     try {
       const me = await meRequest()
       persistUser(mapUser(me))
+      startTokenRefresh()
     } catch (e) {
       // Only clear session on definitive auth failure — keep cache on network/5xx.
       if (e instanceof ApiError && shouldLogoutOnHydrateError(e.status)) {
         logout()
+      } else {
+        startTokenRefresh()
       }
     }
   }
@@ -131,9 +242,7 @@ export const useAuthStore = defineStore('auth', () => {
     beginSessionRefresh()
     try {
       const result = await changePasswordRequest(currentPassword, newPassword)
-      setToken(result.access_token)
-      token.value = result.access_token
-      window.dispatchEvent(new CustomEvent(SESSION_REFRESHED_EVENT))
+      applyAccessToken(result.access_token, true)
     } finally {
       // Allow in-flight WS close / 401 from old token to settle.
       window.setTimeout(() => endSessionRefresh(), 1500)
@@ -176,6 +285,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    clearRefreshTimer()
     user.value = null
     token.value = null
     setToken(null)
@@ -195,6 +305,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (e.key !== TOKEN_KEY && e.key !== USER_KEY) return
       const nextToken = localStorage.getItem(TOKEN_KEY)
       if (!nextToken) {
+        clearRefreshTimer()
         user.value = null
         token.value = null
         window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
@@ -202,6 +313,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
       if (nextToken !== token.value) {
         token.value = nextToken
+        scheduleTokenRefresh()
         void hydrate().then(() => {
           window.dispatchEvent(new CustomEvent(SESSION_REFRESHED_EVENT))
         })
@@ -236,6 +348,8 @@ export const useAuthStore = defineStore('auth', () => {
     changePassword,
     setPresence,
     startSessionSync,
+    startTokenRefresh,
+    refreshSession,
     beginSessionRefresh,
     endSessionRefresh,
   }

@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str
     database_url: str
-    access_token_expire_minutes: int = 60 * 24 * 7
+    access_token_expire_minutes: int = 60 * 24  # 24h; refresh extends the session
+
     cors_origins: str = "http://localhost:5173"
 
     seed_admin_email: str = "admin@order-elite.local"
@@ -110,9 +111,9 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
         logger.warning(
             "MAX_API_VERIFY_SSL=false while DEBUG=false — TLS to MAX API is not verified"
         )
-    if cfg.access_token_expire_minutes > 60 * 24 * 2:
+    if cfg.access_token_expire_minutes > 60 * 24:
         logger.warning(
-            "ACCESS_TOKEN_EXPIRE_MINUTES=%s is long for production; prefer ≤2880 (2d)",
+            "ACCESS_TOKEN_EXPIRE_MINUTES=%s is longer than 24h; prefer ≤1440 with /auth/refresh",
             cfg.access_token_expire_minutes,
         )
 

@@ -67,10 +67,29 @@ async def login(
 @router.get("/me", response_model=UserOut)
 async def me(
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ) -> UserOut:
-    loaded = await load_user_rbac(db, user)
-    return user_to_out(loaded)
+    return user_to_out(user)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> TokenResponse:
+    """Issue a fresh JWT (same token_version) to slide the session window."""
+    ip = client_ip(request)
+    await limiter.check(
+        f"refresh:ip:{ip}",
+        limit=60,
+        window_sec=300,
+        detail="Слишком много обновлений сессии",
+    )
+    token = create_access_token(
+        subject=user.email,
+        role=user.role,
+        token_version=user.token_version,
+    )
+    return TokenResponse(access_token=token)
 
 
 @router.patch("/me", response_model=UserOut)
@@ -79,7 +98,7 @@ async def update_me(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserOut:
-    loaded = await load_user_rbac(db, user)
+    loaded = user
     if body.name is not None:
         name = body.name.strip()
         if not name:

@@ -123,6 +123,10 @@ export async function meRequest() {
   return api<ApiUser>('/api/auth/me')
 }
 
+export async function refreshTokenRequest() {
+  return api<TokenResponse>('/api/auth/refresh', { method: 'POST' })
+}
+
 export async function updateMeRequest(payload: {
   name?: string
   send_mode?: 'ctrl_enter' | 'enter' | 'button'
