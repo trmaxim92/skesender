@@ -42,13 +42,13 @@ class MaxBotMailingSender:
                     if template.media_kind == AttachmentKind.VIDEO.value
                     else "file"
                 )
-                media_token = await max_client.upload_and_get_token(
+                media_payload = await max_client.upload_attachment_payload(
                     token,
                     upload_type=upload_type,
                     data=media_bytes,
                     filename=template.media_name or f"{upload_type}",
                 )
-                attachments = [{"type": upload_type, "payload": {"token": media_token}}]
+                attachments = [{"type": upload_type, "payload": media_payload}]
             if not body and not attachments:
                 return MailingSendResult(ok=False, error="Пустой шаблон")
             payload = await max_client.send_message(

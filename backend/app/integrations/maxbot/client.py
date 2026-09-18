@@ -146,21 +146,40 @@ async def create_upload(token: str, upload_type: str) -> dict[str, Any]:
     return response.json()
 
 
+def _extract_upload_token(created: dict[str, Any], uploaded: dict[str, Any]) -> str | None:
+    """Token may come from create step (video/audio), body, nested payload, or photos map."""
+    for source in (uploaded, created):
+        token = source.get("token")
+        if token:
+            return str(token)
+        nested = source.get("payload")
+        if isinstance(nested, dict) and nested.get("token"):
+            return str(nested["token"])
+    photos = uploaded.get("photos")
+    if isinstance(photos, dict):
+        for photo in photos.values():
+            if isinstance(photo, dict) and photo.get("token"):
+                return str(photo["token"])
+    return None
+
+
 async def upload_file_bytes(
     upload_url: str,
     *,
     data: bytes,
     filename: str,
-    token: str | None = None,
+    content_type: str | None = None,
 ) -> dict[str, Any]:
-    headers: dict[str, str] = {}
-    if token:
-        headers["Authorization"] = token
-    files = {"data": (filename, data)}
+    """POST multipart to the CDN upload URL.
+
+    Do not send the bot Authorization header — the URL already carries apiToken/photoIds.
+    """
+    mime = content_type or "application/octet-stream"
+    files = {"data": (filename or "file", data, mime)}
     settings = get_settings()
     try:
         async with httpx.AsyncClient(timeout=120.0, verify=settings.max_api_verify_ssl) as client:
-            response = await client.post(upload_url, headers=headers, files=files)
+            response = await client.post(upload_url, files=files)
     except httpx.HTTPError as exc:
         raise MaxApiError(f"MAX upload error: {exc}") from exc
 
@@ -173,9 +192,49 @@ async def upload_file_bytes(
     if not response.content:
         return {}
     try:
-        return response.json()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {"raw": parsed}
     except Exception:
-        return {"raw": response.text}
+        # video/audio often return tiny non-JSON bodies (e.g. retval); caller uses early token
+        text = (response.text or "").strip()
+        return {"raw": text} if text else {}
+
+
+async def upload_attachment_payload(
+    token: str,
+    *,
+    upload_type: str,
+    data: bytes,
+    filename: str,
+    content_type: str | None = None,
+) -> dict[str, Any]:
+    """Two-step Max upload → attachment payload for POST /messages.
+
+    Images preferably use ``{"photos": {...}}``; other types use ``{"token": "..."}``.
+    """
+    created = await create_upload(token, upload_type)
+    upload_url = created.get("url")
+    if not upload_url:
+        raise MaxApiError("MAX /uploads did not return url", payload=created)
+
+    uploaded = await upload_file_bytes(
+        str(upload_url),
+        data=data,
+        filename=filename,
+        content_type=content_type,
+    )
+
+    photos = uploaded.get("photos") if isinstance(uploaded, dict) else None
+    if upload_type == "image" and isinstance(photos, dict) and photos:
+        return {"photos": photos}
+
+    media_token = _extract_upload_token(created, uploaded if isinstance(uploaded, dict) else {})
+    if not media_token:
+        raise MaxApiError(
+            "MAX upload did not return token",
+            payload={"created": created, "uploaded": uploaded, "type": upload_type},
+        )
+    return {"token": media_token}
 
 
 async def upload_and_get_token(
@@ -184,20 +243,24 @@ async def upload_and_get_token(
     upload_type: str,
     data: bytes,
     filename: str,
+    content_type: str | None = None,
 ) -> str:
-    created = await create_upload(token, upload_type)
-    upload_url = created.get("url")
-    if not upload_url:
-        raise MaxApiError("MAX /uploads did not return url", payload=created)
-
-    # video/audio may already include token at create step
-    early_token = created.get("token")
-    uploaded = await upload_file_bytes(str(upload_url), data=data, filename=filename, token=token)
-    payload = uploaded.get("payload") if isinstance(uploaded.get("payload"), dict) else {}
-    final_token = uploaded.get("token") or early_token or payload.get("token")
-    if not final_token:
-        raise MaxApiError("MAX upload did not return token", payload={"created": created, "uploaded": uploaded})
-    return str(final_token)
+    payload = await upload_attachment_payload(
+        token,
+        upload_type=upload_type,
+        data=data,
+        filename=filename,
+        content_type=content_type,
+    )
+    media_token = payload.get("token")
+    if media_token:
+        return str(media_token)
+    photos = payload.get("photos")
+    if isinstance(photos, dict):
+        for photo in photos.values():
+            if isinstance(photo, dict) and photo.get("token"):
+                return str(photo["token"])
+    raise MaxApiError("MAX upload did not return token", payload=payload)
 
 
 async def send_message(

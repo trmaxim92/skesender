@@ -81,13 +81,14 @@ class MaxBotAdapter:
             raise MaxApiError("Channel has no credentials")
         token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
         upload_type = kind if kind in {"image", "video", "audio", "file"} else "file"
-        media_token = await max_client.upload_and_get_token(
+        attachment_payload = await max_client.upload_attachment_payload(
             token,
             upload_type=upload_type,
             data=data,
             filename=filename,
+            content_type=mime_type,
         )
-        attachments = [{"type": upload_type, "payload": {"token": media_token}}]
+        attachments = [{"type": upload_type, "payload": attachment_payload}]
         user_id, chat_id = self._destination(dialog)
         if user_id is not None:
             payload = await max_client.send_message(
