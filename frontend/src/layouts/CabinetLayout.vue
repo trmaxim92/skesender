@@ -289,6 +289,8 @@ const initials = computed(() => {
 })
 
 const chatsUnread = computed(() => chats.totalUnread)
+const newAppealsBadge = computed(() => chats.unreadByTab?.new ?? 0)
+const appVersion = '2.8.1'
 const inAppToast = ref<{
   text: string
   kind: 'ok' | 'warn' | 'err' | 'message'
@@ -711,47 +713,67 @@ onUnmounted(() => {
     />
 
     <aside
-      class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width,transform] duration-300 ease-out max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:shadow-xl"
+      class="flex shrink-0 flex-col overflow-hidden bg-sidebar text-white transition-[width,transform] duration-300 ease-out max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:shadow-xl"
       :class="[
-        isMdUp ? (collapsed ? 'w-[4.25rem]' : 'w-60') : 'w-72',
+        isMdUp ? (collapsed ? 'w-[4.25rem]' : 'w-64') : 'w-72',
         !isMdUp && !mobileNavOpen ? '-translate-x-full pointer-events-none' : 'translate-x-0',
       ]"
     >
       <div
-        class="flex shrink-0 items-center gap-2 border-b border-line"
-        :class="expandedNav ? 'h-[4.25rem] px-3' : 'h-14 justify-center px-2'"
+        class="flex shrink-0 items-center gap-2.5"
+        :class="expandedNav ? 'h-[4.5rem] px-4' : 'h-14 justify-center px-2'"
       >
         <button
           type="button"
-          class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-white transition hover:brightness-105"
-          :title="!isMdUp ? 'Закрыть меню' : collapsed ? 'Развернуть меню' : 'Свернуть меню'"
+          class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-white transition hover:brightness-110 md:hidden"
+          title="Закрыть меню"
           @click="toggleSidebar"
         >
-          <X v-if="!isMdUp" class="size-4" />
-          <Menu v-else class="size-4" />
+          <X class="size-4" />
+        </button>
+        <button
+          v-if="isMdUp"
+          type="button"
+          class="flex size-9 shrink-0 items-center justify-center rounded-lg text-white/70 transition hover:bg-sidebar-hover hover:text-white"
+          :title="collapsed ? 'Развернуть меню' : 'Свернуть меню'"
+          @click="toggleSidebar"
+        >
+          <Menu class="size-4" />
         </button>
         <div
           class="min-w-0 overflow-hidden transition-opacity duration-200"
           :class="expandedNav ? 'flex-1 opacity-100' : 'pointer-events-none w-0 opacity-0'"
         >
-          <img
-            src="/logo-skayskel.png"
-            alt="СкайСкейл"
-            class="h-11 w-auto max-w-full object-contain object-left"
-            width="140"
-            height="44"
-          />
-          <p class="mt-0.5 truncate text-[11px] text-mute">Кабинет оператора</p>
+          <div class="flex items-center gap-2.5">
+            <span
+              class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand shadow-sm shadow-black/20"
+              aria-hidden="true"
+            >
+              <svg width="22" height="18" viewBox="0 0 22 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d="M5.5 13.5h9.2c2.1 0 3.8-1.6 3.8-3.5S16.8 6.5 14.7 6.5c-.3-2.1-2.1-3.7-4.3-3.7-1.8 0-3.4 1.1-4 2.7-.3-.1-.6-.2-1-.2C3.7 5.3 2 6.9 2 8.9c0 2 1.7 3.6 3.5 3.6Z"
+                  stroke="#fff"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                />
+                <path d="M11.2 8.2 17 5.4l-1.1 6.2-1.9-2.3-2.8 1.1.9-2.2Z" fill="#fff" />
+              </svg>
+            </span>
+            <div class="min-w-0 leading-tight">
+              <p class="truncate text-[15px] font-bold tracking-tight text-white">СкайСкейл</p>
+              <p class="truncate text-[11px] text-white/45">ООО СкайСкейл</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+      <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-3">
         <RouterLink
           v-for="item in navStartVisible"
           :key="item.to"
           :to="item.to"
-          class="group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-mute transition hover:bg-surface hover:text-ink"
-          :class="route.path.startsWith(item.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+          class="oe-nav-link relative"
+          :class="route.path.startsWith(item.to) ? 'is-active' : ''"
           :title="item.label"
           @click="closeMobileNav"
         >
@@ -762,14 +784,26 @@ onUnmounted(() => {
           >{{ item.label }}</span>
           <span
             v-if="item.to === '/chats' && chatsUnread > 0"
-            class="absolute flex items-center justify-center rounded-full bg-brand font-semibold text-white"
-            :class="
+            class="flex items-center justify-center rounded-full font-semibold"
+            :class="[
               expandedNav
-                ? 'right-2 top-1/2 h-5 min-w-5 -translate-y-1/2 px-1.5 text-[10px]'
-                : 'right-1 top-1 size-4 text-[9px]'
-            "
+                ? 'h-5 min-w-5 px-1.5 text-[10px]'
+                : 'absolute right-1 top-1 h-4 min-w-4 text-[9px]',
+              route.path.startsWith('/chats') ? 'bg-white/20 text-white' : 'bg-brand text-white',
+            ]"
           >
             {{ chatsUnread > 99 ? '99+' : chatsUnread }}
+          </span>
+          <span
+            v-else-if="item.to === '/appeals' && newAppealsBadge > 0"
+            class="flex items-center justify-center rounded-full bg-brand font-semibold text-white"
+            :class="
+              expandedNav
+                ? 'h-5 min-w-5 px-1.5 text-[10px]'
+                : 'absolute right-1 top-1 h-4 min-w-4 text-[9px]'
+            "
+          >
+            {{ newAppealsBadge > 99 ? '99+' : newAppealsBadge }}
           </span>
         </RouterLink>
 
@@ -777,27 +811,27 @@ onUnmounted(() => {
           <button
             v-if="expandedNav"
             type="button"
-            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
-            :class="onClientsSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            class="oe-nav-link w-full"
+            :class="onClientsSection ? 'text-white' : ''"
             @click="toggleClientsGroup"
           >
             <ContactRound class="size-[18px] shrink-0 opacity-90" />
             <span class="min-w-0 flex-1 truncate text-left">Клиенты</span>
             <ChevronDown
-              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              class="size-4 shrink-0 opacity-60 transition-transform duration-200"
               :class="clientsGroupExpanded ? 'rotate-180' : ''"
             />
           </button>
           <div
             v-if="expandedNav && clientsGroupExpanded"
-            class="mt-0.5 space-y-0.5 border-l border-line ml-4 pl-2"
+            class="mt-0.5 space-y-0.5 border-l border-white/10 ml-4 pl-2"
           >
             <RouterLink
               v-for="child in clientsChildrenVisible"
               :key="child.to"
               :to="child.to"
-              class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
-              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+              class="oe-nav-link py-2 text-[13px]"
+              :class="route.path.startsWith(child.to) ? 'is-active' : ''"
               :title="child.label"
               @click="closeMobileNav"
             >
@@ -810,8 +844,8 @@ onUnmounted(() => {
               v-for="child in clientsChildrenVisible"
               :key="'rail-clients-' + child.to"
               :to="child.to"
-              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
-              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              class="oe-nav-link justify-center px-2.5"
+              :class="route.path.startsWith(child.to) ? 'is-active' : ''"
               :title="child.label"
             >
               <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
@@ -823,8 +857,8 @@ onUnmounted(() => {
           v-for="item in navEndVisible"
           :key="item.to"
           :to="item.to"
-          class="group relative flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium text-mute transition hover:bg-surface hover:text-ink"
-          :class="route.path.startsWith(item.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+          class="oe-nav-link"
+          :class="route.path.startsWith(item.to) ? 'is-active' : ''"
           :title="item.label"
           @click="closeMobileNav"
         >
@@ -839,27 +873,27 @@ onUnmounted(() => {
           <button
             v-if="expandedNav"
             type="button"
-            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
-            :class="onUsersSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            class="oe-nav-link w-full"
+            :class="onUsersSection ? 'text-white' : ''"
             @click="toggleUsersGroup"
           >
             <Users class="size-[18px] shrink-0 opacity-90" />
             <span class="min-w-0 flex-1 truncate text-left">Пользователи</span>
             <ChevronDown
-              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              class="size-4 shrink-0 opacity-60 transition-transform duration-200"
               :class="usersGroupExpanded ? 'rotate-180' : ''"
             />
           </button>
           <div
             v-if="expandedNav && usersGroupExpanded"
-            class="mt-0.5 space-y-0.5 border-l border-line ml-4 pl-2"
+            class="mt-0.5 space-y-0.5 border-l border-white/10 ml-4 pl-2"
           >
             <RouterLink
               v-for="child in usersChildren"
               :key="child.to"
               :to="child.to"
-              class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
-              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+              class="oe-nav-link py-2 text-[13px]"
+              :class="route.path.startsWith(child.to) ? 'is-active' : ''"
               :title="child.label"
               @click="closeMobileNav"
             >
@@ -872,8 +906,8 @@ onUnmounted(() => {
               v-for="child in usersChildren"
               :key="'rail-' + child.to"
               :to="child.to"
-              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
-              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              class="oe-nav-link justify-center px-2.5"
+              :class="route.path.startsWith(child.to) ? 'is-active' : ''"
               :title="child.label"
             >
               <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
@@ -885,23 +919,23 @@ onUnmounted(() => {
           <button
             v-if="expandedNav"
             type="button"
-            class="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-medium transition hover:bg-surface"
-            :class="onSettingsSection ? 'text-brand' : 'text-mute hover:text-ink'"
+            class="oe-nav-link w-full"
+            :class="onSettingsSection ? 'text-white' : ''"
             @click="toggleSettingsGroup"
           >
             <Settings class="size-[18px] shrink-0 opacity-90" />
             <span class="min-w-0 flex-1 truncate text-left">Настройки</span>
             <ChevronDown
-              class="size-4 shrink-0 text-mute transition-transform duration-200"
+              class="size-4 shrink-0 opacity-60 transition-transform duration-200"
               :class="settingsGroupExpanded ? 'rotate-180' : ''"
             />
           </button>
           <div
             v-if="expandedNav && settingsGroupExpanded"
-            class="mt-0.5 space-y-2 border-l border-line ml-4 pl-2"
+            class="mt-0.5 space-y-2 border-l border-white/10 ml-4 pl-2"
           >
             <div v-for="group in settingsGroupsVisible" :key="group.id">
-              <p class="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-mute/80">
+              <p class="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-white/35">
                 {{ group.title }}
               </p>
               <div class="space-y-0.5">
@@ -909,8 +943,8 @@ onUnmounted(() => {
                   v-for="child in group.items"
                   :key="child.to"
                   :to="child.to"
-                  class="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-mute transition hover:bg-surface hover:text-ink"
-                  :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand' : ''"
+                  class="oe-nav-link py-2 text-[13px]"
+                  :class="route.path.startsWith(child.to) ? 'is-active' : ''"
                   :title="child.label"
                   @click="closeMobileNav"
                 >
@@ -925,8 +959,8 @@ onUnmounted(() => {
               v-for="child in settingsFlatLeaves"
               :key="'rail-settings-' + child.to"
               :to="child.to"
-              class="flex items-center justify-center rounded-lg px-2.5 py-2.5 text-mute transition hover:bg-surface hover:text-ink"
-              :class="route.path.startsWith(child.to) ? 'bg-brand-soft text-brand' : ''"
+              class="oe-nav-link justify-center px-2.5"
+              :class="route.path.startsWith(child.to) ? 'is-active' : ''"
               :title="child.label"
             >
               <component :is="child.icon" class="size-[18px] shrink-0 opacity-90" />
@@ -934,12 +968,23 @@ onUnmounted(() => {
           </template>
         </div>
       </nav>
+
+      <div
+        v-if="expandedNav"
+        class="shrink-0 border-t border-white/10 px-4 py-3"
+      >
+        <div class="flex items-center gap-2 text-[12px] text-sidebar-muted">
+          <span class="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden="true" />
+          <span class="min-w-0 flex-1 truncate">Система работает</span>
+          <span class="shrink-0 text-[11px] text-white/30">v{{ appVersion }}</span>
+        </div>
+      </div>
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
       <div
         v-if="showInstallBanner && !hideChromeForMobileChat"
-        class="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#0b4fd9] via-[#1a6dff] to-[#4aa3ff] px-3 py-3 text-white shadow-sm md:px-5"
+        class="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#7a0a18] via-brand to-[#c41e34] px-3 py-3 text-white shadow-sm md:px-5"
         role="region"
         aria-label="Установка приложения"
       >
@@ -1008,29 +1053,27 @@ onUnmounted(() => {
 
       <header
         v-if="!hideChromeForMobileChat"
-        class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 backdrop-blur-md md:h-14 md:px-6"
+        class="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-line bg-panel px-3 md:px-6"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <h1 class="truncate text-[15px] font-semibold tracking-tight text-ink md:text-lg">{{ title }}</h1>
+          <h1 class="truncate text-lg font-bold tracking-tight text-ink md:text-xl">{{ title }}</h1>
         </div>
-        <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <div class="flex shrink-0 items-center gap-2 sm:gap-3">
           <div ref="bellRoot" class="relative">
             <button
               type="button"
-              class="relative flex size-9 items-center justify-center rounded-full border border-line bg-surface text-ink transition hover:border-brand/40 hover:bg-brand-soft/40"
-              :class="bellOpen ? 'border-brand/40 bg-brand-soft/40' : ''"
+              class="relative flex size-9 items-center justify-center rounded-full text-ink/70 transition hover:bg-surface hover:text-ink"
+              :class="bellOpen ? 'bg-surface text-ink' : ''"
               title="Оповещения"
               :aria-expanded="bellOpen"
               aria-haspopup="dialog"
               @click.stop="toggleBell"
             >
-              <Bell class="size-4" />
+              <Bell class="size-[18px]" />
               <span
                 v-if="notifications.unreadCount > 0"
-                class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white"
-              >
-                {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-              </span>
+                class="absolute right-1.5 top-1.5 size-2 rounded-full bg-brand ring-2 ring-panel"
+              />
             </button>
 
             <Teleport to="body">
@@ -1119,21 +1162,16 @@ onUnmounted(() => {
           <div ref="profileRoot" class="relative shrink-0">
           <button
             type="button"
-            class="flex max-w-[min(100%,18rem)] items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-2.5 transition hover:border-brand/40 hover:bg-brand-soft/40 sm:max-w-xs sm:gap-2.5 sm:pr-3"
+            class="flex max-w-[min(100%,18rem)] items-center gap-2.5 rounded-full py-1 pl-1 pr-2 transition hover:bg-surface sm:max-w-xs sm:pr-2.5"
             :aria-expanded="profileOpen"
             aria-haspopup="menu"
             @click.stop="toggleProfileMenu"
           >
-            <span class="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white">
+            <span class="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-[12px] font-bold text-white">
               {{ initials }}
-              <span
-                v-if="currentPresence"
-                class="absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-surface"
-                :style="{ background: currentPresence.color }"
-              />
             </span>
             <span class="hidden min-w-0 text-left sm:block">
-              <span class="block truncate text-sm font-medium text-ink">{{ auth.user?.name }}</span>
+              <span class="block truncate text-sm font-semibold text-ink">{{ auth.user?.name }}</span>
               <span class="flex items-center gap-1.5 truncate text-[11px] text-mute">
                 <span
                   v-if="currentPresence"

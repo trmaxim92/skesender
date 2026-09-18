@@ -18,7 +18,8 @@ if str(_BACKEND) not in sys.path:
 def _auth_settings(monkeypatch):
     """Stable SECRET_KEY for JWT encode/decode in unit tests."""
     monkeypatch.setenv("SECRET_KEY", "unit-test-secret-key-32chars!!")
-    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    # Avoid aiosqlite worker threads (they are non-daemon and hang pytest exit).
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
     monkeypatch.setenv("DEBUG", "true")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
     from app.config import get_settings

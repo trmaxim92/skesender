@@ -553,9 +553,9 @@ onUnmounted(() => {
   <div class="flex h-full min-h-0">
     <aside
       class="flex shrink-0 flex-col border-r border-line bg-panel"
-      :class="chats.activeDialog ? 'hidden w-full md:flex md:w-80' : 'w-full md:w-80'"
+      :class="chats.activeDialog ? 'hidden w-full md:flex md:w-[22rem]' : 'w-full md:w-[22rem]'"
     >
-      <div class="flex items-center gap-1 border-b border-line p-3">
+      <div class="flex items-end gap-1 border-b border-line px-3 pt-1">
         <button
           v-for="f in [
             { id: 'new', label: 'Новые' },
@@ -564,16 +564,18 @@ onUnmounted(() => {
           ] as const"
           :key="f.id"
           type="button"
-          class="relative flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl px-2.5 py-2.5 text-xs font-semibold transition md:min-h-0 md:rounded-lg md:py-2"
+          class="relative flex min-h-11 flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-3 text-sm font-semibold transition md:min-h-0"
           :class="
-            chats.filter === f.id ? 'bg-brand-soft text-brand' : 'text-muted hover:bg-surface'
+            chats.filter === f.id
+              ? 'border-brand text-ink'
+              : 'border-transparent text-muted hover:text-ink'
           "
           @click="chats.setFilter(f.id)"
         >
           {{ f.label }}
           <span
             v-if="chats.unreadByTab[f.id] > 0"
-            class="unread-badge inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-ok px-1 text-[9px] font-bold leading-none text-white"
+            class="unread-badge inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold leading-none text-white"
           >
             {{ chats.unreadByTab[f.id] > 99 ? '99+' : chats.unreadByTab[f.id] }}
           </span>
@@ -581,11 +583,11 @@ onUnmounted(() => {
         <button
           v-if="canCreateOutbound"
           type="button"
-          class="flex size-11 shrink-0 items-center justify-center rounded-xl text-brand transition hover:bg-brand-soft md:size-auto md:rounded-lg md:p-2"
+          class="mb-2 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-brand"
           title="Новое исходящее"
           @click="openCreateOutbound"
         >
-          <Plus class="size-5 md:size-4" />
+          <Plus class="size-5" />
         </button>
       </div>
       <div
@@ -613,7 +615,7 @@ onUnmounted(() => {
       <p v-if="bulkCloseMsg" class="border-b border-line px-3 py-1.5 text-[11px] text-ok">
         {{ bulkCloseMsg }}
       </p>
-      <div class="border-b border-line px-3 py-2.5">
+      <div class="border-b border-line px-3 py-3">
         <div class="relative">
           <Search
             class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted/70"
@@ -624,14 +626,14 @@ onUnmounted(() => {
             inputmode="search"
             autocomplete="off"
             placeholder="Поиск по всем чатам…"
-            class="w-full rounded-xl border border-line bg-panel py-2.5 pl-10 pr-10 text-sm text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] outline-none transition placeholder:text-muted/70 ring-brand/30 focus:border-brand/40 focus:ring-2"
+            class="w-full rounded-xl border-0 bg-surface py-2.5 pl-10 pr-10 text-sm text-ink outline-none transition placeholder:text-muted/70 ring-brand/25 focus:ring-2"
             @input="onSearchInput"
             @keydown.escape.prevent="clearSearch"
           />
           <button
             v-if="searchInput"
             type="button"
-            class="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-ink"
+            class="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted transition hover:bg-panel hover:text-ink"
             title="Очистить"
             @click="clearSearch"
           >
@@ -653,9 +655,11 @@ onUnmounted(() => {
           v-for="d in chats.filteredDialogs"
           :key="d.id"
           type="button"
-          class="flex w-full gap-2 border-b border-line px-3 py-3 text-left transition hover:bg-[#eceff3]"
+          class="flex w-full gap-3 border-b border-line/80 px-3 py-3 text-left transition"
           :class="[
-            chats.activeDialogId === d.id ? 'bg-[#e5e8ed]' : '',
+            chats.activeDialogId === d.id
+              ? 'border-l-[3px] border-l-brand bg-brand-soft/70 pl-[9px]'
+              : 'border-l-[3px] border-l-transparent hover:bg-surface',
             selectedNew.has(d.id) ? 'bg-brand-soft/40' : '',
           ]"
           @click="selectDialog(d.id)"
@@ -675,8 +679,8 @@ onUnmounted(() => {
           <ContactAvatar :name="d.contactName" :url="d.contactAvatarUrl" size="md" />
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-2">
-              <span class="truncate text-sm font-semibold">{{ d.contactName }}</span>
-              <span class="shrink-0 text-[10px] text-muted">
+              <span class="truncate text-sm font-semibold text-ink">{{ d.contactName }}</span>
+              <span class="shrink-0 text-[11px] text-muted">
                 <MessageTicks
                   v-if="d.lastDirection === 'out' && d.lastStatus"
                   :status="d.lastStatus"
@@ -694,7 +698,7 @@ onUnmounted(() => {
                 >
                   {{ chats.typingDialogId === d.id ? typingLabel : d.lastMessage || '—' }}
                 </div>
-                <div class="mt-1 flex items-center gap-1.5">
+                <div class="mt-1.5 flex items-center gap-1.5">
                   <span
                     v-if="d.transport"
                     class="rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
@@ -718,7 +722,7 @@ onUnmounted(() => {
               </div>
               <span
                 v-if="d.unread && d.lastDirection !== 'out'"
-                class="unread-badge mt-0.5 flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-ok px-1.5 text-[10px] font-bold text-white shadow-sm"
+                class="unread-badge mt-0.5 flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-bold text-white shadow-sm"
               >
                 {{ d.unread > 99 ? '99+' : d.unread }}
               </span>
@@ -1248,16 +1252,38 @@ onUnmounted(() => {
 
     <div
       v-else
-      class="hidden flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted md:flex"
+      class="hidden flex-1 flex-col items-center justify-center gap-4 bg-surface px-6 text-center md:flex"
     >
-      <p>Выберите диалог слева</p>
+      <div class="relative mb-1" aria-hidden="true">
+        <svg width="88" height="72" viewBox="0 0 88 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path
+            d="M52 14c14 0 26 9.5 26 22 0 7.2-3.8 13.6-9.8 17.6L72 66l-12.2-7.4C56.4 59.5 54.2 60 52 60c-14 0-26-9.5-26-22S38 14 52 14Z"
+            fill="#dbe3ef"
+          />
+          <path
+            d="M30 6c16 0 28 10.2 28 23.5 0 7.6-4 14.4-10.4 18.7L52 62 38.2 54.2C35.6 54.9 32.9 55.3 30 55.3 14 55.3 2 45.1 2 29.5S14 6 30 6Z"
+            fill="#1e3a5f"
+          />
+          <circle cx="20" cy="30" r="2.2" fill="#fff" />
+          <circle cx="30" cy="30" r="2.2" fill="#fff" />
+          <circle cx="40" cy="30" r="2.2" fill="#fff" />
+          <path d="M58 4l1.2 3.2L62.4 8.4l-3.2 1.2L58 12.8l-1.2-3.2L53.6 8.4l3.2-1.2L58 4Z" fill="#a10d21" />
+          <path d="M70 10l0.9 2.4L73.3 13.3l-2.4 0.9L70 16.6l-0.9-2.4L66.7 13.3l2.4-0.9L70 10Z" fill="#a10d21" />
+          <path d="M66 0l0.7 1.8L68.5 2.5l-1.8 0.7L66 5l-0.7-1.8L63.5 2.5l1.8-0.7L66 0Z" fill="#a10d21" />
+        </svg>
+      </div>
+      <div class="space-y-1.5">
+        <p class="text-base font-bold text-ink">Выберите диалог слева</p>
+        <p class="text-sm text-muted">или создайте исходящее обращение</p>
+      </div>
       <button
         v-if="canCreateOutbound"
         type="button"
-        class="text-xs font-semibold text-brand hover:underline"
+        class="mt-1 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
         @click="openCreateOutbound"
       >
-        Или создайте исходящее обращение
+        <Plus class="size-4" />
+        Создать обращение
       </button>
     </div>
 

@@ -4,22 +4,27 @@
   --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  --color-surface: #f3f5f8;
+  --color-surface: #f4f6f9;
   --color-panel: #ffffff;
   --color-ink: #152033;
-  --color-muted: #667085;
-  --color-line: #e4e8ef;
-  --color-brand: #1a6dff;
-  --color-brand-soft: #e8f0ff;
+  --color-muted: #6b7280;
+  --color-mute: #6b7280;
+  --color-line: #e6e9ef;
+  --color-brand: #a10d21;
+  --color-brand-soft: #fde8ec;
+  --color-sidebar: #0f1623;
+  --color-sidebar-muted: #8b93a7;
+  --color-sidebar-hover: #1a2436;
   --color-bubble-out: #6b7280;
   --color-bubble-note: #fff8e8;
   --color-bubble-note-border: #e8d5a8;
   --color-bubble-note-ink: #5c4a1f;
-  --color-read-tick: #8af0ff;
+  --color-read-tick: #3b82f6;
   --color-ok: #12b76a;
   --color-warn: #f79009;
   --color-danger: #f04438;
-  --color-max: #471aff;
+  --color-danger-soft: #fef3f2;
+  --color-max: #6d28d9;
   --color-tg: #2aabee;
   --color-vk: #0077ff;
   --color-wa: #25d366;
@@ -224,14 +229,41 @@ input[type='checkbox']:indeterminate {
   0%,
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgb(18 183 106 / 45%);
+    box-shadow: 0 0 0 0 rgb(161 13 33 / 40%);
   }
   50% {
     transform: scale(1.06);
-    box-shadow: 0 0 0 6px rgb(18 183 106 / 0%);
+    box-shadow: 0 0 0 6px rgb(161 13 33 / 0%);
   }
 }
 
 .unread-badge {
   animation: unread-pulse 1.8s ease-in-out infinite;
+}
+
+/* Sidebar nav helpers (dark navy rail) */
+.oe-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-sidebar-muted);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.oe-nav-link:hover {
+  background: var(--color-sidebar-hover);
+  color: #fff;
+}
+.oe-nav-link.is-active {
+  background: var(--color-brand);
+  color: #fff;
+}
+.oe-nav-link.is-active:hover {
+  background: color-mix(in srgb, var(--color-brand) 88%, #000);
+  color: #fff;
 }
