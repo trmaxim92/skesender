@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -392,6 +392,13 @@ async function confirmDelete(m: Message) {
   await chats.removeMessage(m.id)
   actionBusy.value = false
   if (editingId.value === m.id) cancelEdit()
+}
+
+async function retryFailed(m: Message) {
+  if (actionBusy.value || m.status !== 'failed') return
+  actionBusy.value = true
+  await chats.retryMessage(m.id)
+  actionBusy.value = false
 }
 
 function onThreadScroll() {
@@ -1084,6 +1091,24 @@ onUnmounted(() => {
                   :text="row.message.text"
                   :outgoing="row.message.direction === 'out' && !row.message.isInternal"
                 />
+
+                <button
+                  v-if="
+                    canWrite &&
+                    chats.canCompose &&
+                    row.message.direction === 'out' &&
+                    !row.message.isInternal &&
+                    row.message.status === 'failed' &&
+                    !row.message.pending
+                  "
+                  type="button"
+                  class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
+                  :disabled="actionBusy"
+                  @click="retryFailed(row.message)"
+                >
+                  <RotateCcw class="size-3.5" :class="actionBusy ? 'animate-spin' : ''" />
+                  Повторить отправку
+                </button>
 
                 <div
                   class="mt-1.5 flex items-center gap-1.5 text-[10px]"

@@ -218,6 +218,12 @@ export async function deleteMessageRequest(dialogId: number, messageId: number) 
   })
 }
 
+export async function retryMessageRequest(dialogId: number, messageId: number) {
+  return api<ApiMessage>(`/api/chats/dialogs/${dialogId}/messages/${messageId}/retry`, {
+    method: 'POST',
+  })
+}
+
 export async function assignDialogRequest(dialogId: number, assigneeId: number | null) {
   return api<ApiDialog>(`/api/chats/dialogs/${dialogId}/assign`, {
     method: 'PATCH',

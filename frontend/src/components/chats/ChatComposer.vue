@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
 import type { Template, TemplateGroup } from '@/types'
+import { getSendMode, onSendModeChange, type SendMode } from '@/utils/composerPrefs'
 
 const props = defineProps<{
   modelValue: string
@@ -50,12 +51,20 @@ const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const accept = ref('image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')
 const dragDepth = ref(0)
 const collapsedCategories = ref<Record<string, boolean>>({})
+const sendMode = ref<SendMode>(getSendMode())
 
 const canSend = computed(
   () =>
     (props.modelValue.trim().length > 0 || (!props.noteMode && props.files.length > 0)) &&
     !props.sending,
 )
+
+const sendButtonTitle = computed(() => {
+  if (props.noteMode) return 'Сохранить заметку'
+  if (sendMode.value === 'ctrl_enter') return 'Отправить (Ctrl+Enter)'
+  if (sendMode.value === 'button') return 'Отправить'
+  return 'Отправить (Enter)'
+})
 
 const groupedTemplates = computed(() => {
   if (props.templateGroups?.length) return props.templateGroups
@@ -217,6 +226,29 @@ function onPaste(event: ClipboardEvent) {
   emit('addFiles', files)
 }
 
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter') return
+  if (event.isComposing) return
+
+  if (sendMode.value === 'button') {
+    // Enter inserts newline (default textarea behaviour).
+    return
+  }
+
+  if (sendMode.value === 'ctrl_enter') {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault()
+      if (canSend.value) emit('send')
+    }
+    return
+  }
+
+  // enter: send on plain Enter; Shift+Enter = newline
+  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+  event.preventDefault()
+  if (canSend.value) emit('send')
+}
+
 function fileKindLabel(file: File) {
   if (file.type.startsWith('image/')) return 'Фото'
   if (file.type.startsWith('video/')) return 'Видео'
@@ -256,8 +288,17 @@ watch(
   },
 )
 
+let stopSendModeWatch: (() => void) | undefined
+
 onMounted(() => {
   resizeTextarea()
+  stopSendModeWatch = onSendModeChange((mode) => {
+    sendMode.value = mode
+  })
+})
+
+onUnmounted(() => {
+  stopSendModeWatch?.()
 })
 </script>
 
@@ -447,7 +488,7 @@ onMounted(() => {
           :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/80'"
           @input="onInput"
           @paste="onPaste"
-          @keydown.enter.exact.prevent="canSend && emit('send')"
+          @keydown="onKeydown"
         />
       </div>
 
@@ -456,7 +497,7 @@ onMounted(() => {
         class="flex size-11 shrink-0 items-center justify-center rounded-xl text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
         :class="noteMode ? 'bg-bubble-note-ink' : 'bg-brand'"
         :disabled="!canSend"
-        :title="noteMode ? 'Сохранить заметку' : 'Отправить'"
+        :title="sendButtonTitle"
       >
         <span v-if="sending" class="text-xs font-semibold">…</span>
         <NotebookPen v-else-if="noteMode" class="size-4" />

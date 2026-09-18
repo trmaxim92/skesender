@@ -24,8 +24,14 @@ import {
   wasInstallDismissed,
 } from '@/utils/pwa'
 import { isWebPushSupported, subscribeWebPush, testServerWebPush, unsubscribeWebPush } from '@/utils/webPush'
+import {
+  SEND_MODE_OPTIONS,
+  getSendMode,
+  setSendMode,
+  type SendMode,
+} from '@/utils/composerPrefs'
 
-type TabId = 'profile' | 'security' | 'notifications'
+type TabId = 'profile' | 'security' | 'notifications' | 'input'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -35,11 +41,12 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'profile', label: 'Профиль' },
   { id: 'security', label: 'Безопасность' },
   { id: 'notifications', label: 'Оповещения' },
+  { id: 'input', label: 'Ввод' },
 ]
 
 const tab = computed<TabId>(() => {
   const raw = String(route.query.tab || 'profile')
-  if (raw === 'security' || raw === 'notifications') return raw
+  if (raw === 'security' || raw === 'notifications' || raw === 'input') return raw
   return 'profile'
 })
 
@@ -239,13 +246,21 @@ function hideInstallCard() {
   dismissInstallHint()
   installDismissed.value = true
 }
+
+// —— Input ——
+const sendMode = ref<SendMode>(getSendMode())
+
+function chooseSendMode(mode: SendMode) {
+  sendMode.value = mode
+  setSendMode(mode)
+}
 </script>
 
 <template>
   <div class="h-full overflow-auto p-6">
     <div class="mx-auto max-w-2xl">
       <h1 class="text-lg font-bold tracking-tight">Профиль</h1>
-      <p class="mt-1 text-sm text-muted">Личные данные, пароль и оповещения.</p>
+      <p class="mt-1 text-sm text-muted">Личные данные, пароль, оповещения и ввод.</p>
 
       <div class="mt-5 flex gap-1 border-b border-line">
         <button
@@ -358,7 +373,7 @@ function hideInstallCard() {
       </div>
 
       <!-- Notifications -->
-      <div v-else class="mt-5 space-y-3">
+      <div v-else-if="tab === 'notifications'" class="mt-5 space-y-3">
         <div
           v-if="standalone"
           class="rounded-2xl border border-ok/30 bg-ok/10 px-4 py-3 text-sm text-ink"
@@ -458,6 +473,36 @@ function hideInstallCard() {
         >
           {{ pushTestHint }}
         </p>
+      </div>
+
+      <!-- Input -->
+      <div v-else-if="tab === 'input'" class="mt-5 space-y-3">
+        <p class="text-sm text-muted">
+          Как отправлять сообщения в чатах. Настройка хранится на этом устройстве.
+        </p>
+        <button
+          v-for="opt in SEND_MODE_OPTIONS"
+          :key="opt.id"
+          type="button"
+          class="flex w-full items-start gap-3 rounded-2xl border px-4 py-3.5 text-left transition"
+          :class="
+            sendMode === opt.id
+              ? 'border-brand/40 bg-brand-soft'
+              : 'border-line bg-panel hover:border-brand/30'
+          "
+          @click="chooseSendMode(opt.id)"
+        >
+          <span
+            class="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border"
+            :class="sendMode === opt.id ? 'border-brand bg-brand' : 'border-line'"
+          >
+            <span v-if="sendMode === opt.id" class="size-1.5 rounded-full bg-white" />
+          </span>
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-ink">{{ opt.label }}</div>
+            <div class="mt-0.5 text-xs text-muted">{{ opt.hint }}</div>
+          </div>
+        </button>
       </div>
     </div>
   </div>

@@ -6,6 +6,7 @@ import {
   closeDialogsBatchRequest,
   deleteMessageRequest,
   editMessageRequest,
+  retryMessageRequest,
   fetchSidebarRequest,
   listDialogAppealsRequest,
   listDialogsRequest,
@@ -1150,6 +1151,43 @@ export const useChatsStore = defineStore('chats', () => {
     }
   }
 
+  async function retryMessage(messageId: string) {
+    const dialog = activeDialog.value
+    if (!dialog || sending.value) return false
+    const idx = messages.value.findIndex((m) => m.id === messageId)
+    if (idx < 0) return false
+    const current = messages.value[idx]
+    if (!current || current.status !== 'failed' || current.isInternal) return false
+
+    error.value = ''
+    messages.value[idx] = { ...current, status: 'sending' }
+    try {
+      const msg = await retryMessageRequest(Number(dialog.id), Number(messageId))
+      const mapped = mapMessage(msg)
+      const at = messages.value.findIndex((m) => m.id === mapped.id)
+      if (at >= 0) messages.value[at] = mapped
+      else messages.value.push(mapped)
+      if (!mapped.isInternal) {
+        dialog.lastMessage = mapped.text || dialog.lastMessage
+        dialog.lastDirection = mapped.direction
+        dialog.lastStatus = mapped.status
+        dialog.lastAt = mapped.at
+      }
+      return true
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось повторить отправку'
+      const at = messages.value.findIndex((m) => m.id === messageId)
+      if (at >= 0) messages.value[at] = { ...messages.value[at]!, status: 'failed' }
+      dialog.lastStatus = 'failed'
+      showInAppToast({
+        text: error.value || 'Сообщение не доставлено',
+        kind: 'warn',
+        title: 'Повтор не удался',
+      })
+      return false
+    }
+  }
+
   return {
     dialogs,
     messages,
@@ -1211,6 +1249,7 @@ export const useChatsStore = defineStore('chats', () => {
     saveAppealFields,
     editMessage,
     removeMessage,
+    retryMessage,
     addFiles,
     removePendingFile,
     applyTemplate,

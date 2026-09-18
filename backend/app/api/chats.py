@@ -1709,6 +1709,141 @@ async def delete_dialog_message(
     return out
 
 
+@router.post("/dialogs/{dialog_id}/messages/{message_id}/retry", response_model=MessageOut)
+async def retry_failed_message(
+    dialog_id: int,
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(SECTION_CHATS)),
+) -> MessageOut:
+    """Re-attempt provider delivery for a failed outbound message."""
+    _require_write(user)
+
+    dialog = await db.get(Dialog, dialog_id)
+    if dialog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dialog not found")
+    await _require_dialog_access(user, dialog, db)
+
+    msg = await _load_message(db, message_id)
+    if msg.dialog_id != dialog.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if msg.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сообщение удалено")
+    if msg.direction != MessageDirection.OUT.value or msg.is_internal:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Повтор доступен только для исходящих сообщений клиенту",
+        )
+    if msg.status != MessageStatus.FAILED.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Повторить можно только недоставленное сообщение",
+        )
+    if msg.external_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сообщение уже доставлено в канал",
+        )
+
+    channel = await db.get(Channel, dialog.channel_id)
+    if channel is None or not channel.credentials_enc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Канал недоступен")
+    if channel.status != ChannelStatus.ONLINE.value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Канал не онлайн")
+
+    reply_external_id: str | None = None
+    if msg.reply_to_message_id:
+        parent = await db.get(ChatMessage, msg.reply_to_message_id)
+        if parent is not None and parent.external_id:
+            reply_external_id = parent.external_id
+
+    attachments = list(msg.attachments or [])
+    text = (msg.text or "").strip()
+    adapter = get_adapter(channel.transport)
+
+    if attachments:
+        att = attachments[0]
+        if not att.storage_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нет сохранённого файла для повтора",
+            )
+        path = absolute_path(att.storage_path)
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Файл вложения не найден на диске",
+            )
+        raw = path.read_bytes()
+        kind = (
+            att.kind
+            if att.kind in {"image", "video", "audio", "file"}
+            else guess_kind(att.mime_type, att.file_name or "file").value
+        )
+        caption = text or None
+        if caption in {"[медиа]", "[media]"}:
+            caption = None
+
+        async def _send():
+            return await adapter.send_media(
+                channel,
+                dialog,
+                kind=kind,
+                data=raw,
+                filename=att.file_name or "file",
+                mime_type=att.mime_type,
+                caption=caption,
+                reply_to_external_id=reply_external_id,
+            )
+    else:
+        if not text:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пустое сообщение")
+
+        async def _send():
+            return await adapter.send_text(
+                channel,
+                dialog,
+                text,
+                reply_to_external_id=reply_external_id,
+            )
+
+    msg.status = MessageStatus.SENT.value
+    await db.commit()
+
+    loaded = await _load_message(db, message_id)
+    result = await db.execute(
+        select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)
+    )
+    dialog_loaded = result.scalar_one()
+    await emit_event(message_updated_event(dialog_loaded, loaded))
+
+    try:
+        finalized = await _send_and_finalize_outbound(
+            db, msg_id=message_id, channel_id=channel.id, send=_send
+        )
+    except OutboundDeliveryFailed as exc:
+        await _publish_failed_outbound(db, dialog_id=dialog.id, message_id=exc.message_id)
+        raise _http_for_integration_error(exc) from exc
+    except IntegrationError as exc:
+        failed = await db.get(ChatMessage, message_id)
+        if failed is not None and failed.status != MessageStatus.FAILED.value:
+            await _mark_outbound_failed(db, failed)
+            await db.commit()
+            await _publish_failed_outbound(db, dialog_id=dialog.id, message_id=message_id)
+        raise _http_for_integration_error(exc) from exc
+
+    result = await db.execute(
+        select(Dialog).options(*_DIALOG_LOAD).where(Dialog.id == dialog.id)
+    )
+    dialog_loaded = result.scalar_one()
+    await _refresh_dialog_preview(db, dialog_loaded)
+    event = message_updated_event(dialog_loaded, finalized)
+    out = message_to_out(finalized)
+    await db.commit()
+    await emit_event(event)
+    return out
+
+
 @router.post("/messages/{message_id}/repair-media", response_model=MessageOut)
 async def repair_message_media_endpoint(
     message_id: int,
