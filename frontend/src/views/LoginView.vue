@@ -39,7 +39,7 @@ async function submit() {
     <PlexusBackground />
 
     <form
-      class="relative flex w-full max-w-md flex-col justify-center rounded-none border-0 bg-white/95 px-5 py-10 shadow-none md:rounded-2xl md:border md:border-[#0d223f]/10 md:bg-white/90 md:p-8 md:shadow-[0_16px 40px_rgba(13,34,63,0.08)]"
+      class="relative flex w-full max-w-md flex-col justify-center rounded-none border-0 bg-white/95 px-5 py-10 shadow-none md:rounded-2xl md:border md:border-[#0d223f]/10 md:bg-white/90 md:p-8 md:shadow-[0_16px_40px_rgba(13,34,63,0.08)]"
       autocomplete="off"
       @submit.prevent="submit"
     >

@@ -248,6 +248,28 @@ class ChannelConnectResult(BaseModel):
     bot: dict | None = None
 
 
+class ChannelTestRequest(BaseModel):
+    """Optional: clear Max webhook subscriptions that block long-poll."""
+
+    clear_webhooks: bool = True
+
+
+class ChannelTestResult(BaseModel):
+    ok: bool
+    transport: str
+    identity: str | None = None
+    bot: dict | None = None
+    poller_running: bool = False
+    poll_marker: int | None = None
+    updates_pending: int = 0
+    update_types: list[str] = []
+    webhook_subscriptions: list[str] = []
+    webhooks_cleared: list[str] = []
+    hint: str | None = None
+    error: str | None = None
+    last_error: str | None = None
+
+
 class MaxQrStartRequest(BaseModel):
     name: str | None = None
     department_id: int | None = None

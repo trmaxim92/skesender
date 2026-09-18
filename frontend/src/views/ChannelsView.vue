@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Copy, Pencil, Plus, Power, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Copy, Pencil, Plus, Power, RefreshCw, Trash2, Unplug } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useChannelsStore } from '@/stores/channels'
 import { transportLabel, type Channel, type Department } from '@/types'
@@ -39,6 +39,10 @@ const snippetCopied = ref(false)
 const toggleBusyId = ref<number | null>(null)
 const reconnectBusyId = ref<number | null>(null)
 const reconnectError = ref('')
+const testBusyId = ref<number | null>(null)
+const testResultOpen = ref(false)
+const testResultText = ref('')
+const testResultOk = ref(false)
 
 const diagEvents = ref<ChannelEvent[]>([])
 const diagLoading = ref(false)
@@ -57,6 +61,11 @@ const kindLabel: Record<string, string> = {
   reconnect_attempt: 'Попытка',
   gave_up: 'Сбой',
   manual_reconnect: 'Вручную',
+  connect: 'Подключение',
+  test: 'Тест',
+  poll_ok: 'Poll OK',
+  poll_updates: 'Апдейты',
+  poll_error: 'Poll ошибка',
   note: 'Заметка',
   status: 'Статус',
 }
@@ -210,6 +219,44 @@ async function reconnectChannel(ch: Channel) {
   if (!ok) {
     reconnectError.value = channels.loadError || 'Не удалось переподключить'
   }
+}
+
+function canTest(ch: Channel) {
+  return canManage.value && ch.hasCredentials && ch.transport === 'maxbot'
+}
+
+async function testChannel(ch: Channel) {
+  if (testBusyId.value != null || !canTest(ch)) return
+  testBusyId.value = ch.id
+  channels.loadError = ''
+  const result = await channels.testChannel(ch.id)
+  testBusyId.value = null
+  if (!result) {
+    testResultOk.value = false
+    testResultText.value = channels.loadError || 'Не удалось проверить подключение'
+    testResultOpen.value = true
+    return
+  }
+  testResultOk.value = result.ok
+  const lines = [
+    result.ok ? 'Подключение в порядке' : `Ошибка: ${result.error || '—'}`,
+    result.hint || '',
+    `Поллер: ${result.pollerRunning ? 'работает' : 'не запущен'}`,
+    `Marker: ${result.pollMarker ?? '—'}`,
+    `В очереди апдейтов: ${result.updatesPending}`,
+  ]
+  if (result.webhooksCleared.length) {
+    lines.push(`Сняты webhook: ${result.webhooksCleared.join(', ')}`)
+  }
+  if (result.webhookSubscriptions.length) {
+    lines.push(`Остались webhook: ${result.webhookSubscriptions.join(', ')}`)
+  }
+  if (result.updateTypes.length) {
+    lines.push(`Типы: ${result.updateTypes.join(', ')}`)
+  }
+  testResultText.value = lines.filter(Boolean).join('\n')
+  testResultOpen.value = true
+  if (tab.value === 'diagnostics') void loadDiagnostics()
 }
 
 function openEdit(ch: Channel) {
@@ -503,8 +550,22 @@ watch(
             }}
           </button>
         </div>
-        <div v-else-if="canReconnect(ch)" class="mt-3 flex flex-wrap gap-2">
+        <div v-else-if="canReconnect(ch) || canTest(ch)" class="mt-3 flex flex-wrap gap-2">
           <button
+            v-if="canTest(ch)"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+            :disabled="testBusyId === ch.id"
+            @click="testChannel(ch)"
+          >
+            <Unplug
+              class="size-3.5"
+              :class="testBusyId === ch.id ? 'animate-pulse' : ''"
+            />
+            {{ testBusyId === ch.id ? 'Проверка…' : 'Проверить подключение' }}
+          </button>
+          <button
+            v-if="canReconnect(ch)"
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold transition"
             :class="
@@ -529,6 +590,33 @@ watch(
     </template>
 
     <AddChannelModal v-if="channels.connectOpen && canManage" />
+
+    <Modal
+      v-if="testResultOpen"
+      title="Проверка подключения"
+      @close="testResultOpen = false"
+    >
+      <div class="space-y-3">
+        <p
+          class="text-sm font-semibold"
+          :class="testResultOk ? 'text-ok' : 'text-danger'"
+        >
+          {{ testResultOk ? 'Успешно' : 'Есть проблемы' }}
+        </p>
+        <pre
+          class="whitespace-pre-wrap rounded-xl border border-line bg-surface p-3 text-xs leading-relaxed text-ink"
+        >{{ testResultText }}</pre>
+        <div class="flex justify-end">
+          <button
+            type="button"
+            class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
+            @click="testResultOpen = false"
+          >
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </Modal>
 
     <Modal
       v-if="snippetOpen && snippetChannel"

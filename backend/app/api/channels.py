@@ -32,6 +32,8 @@ from app.schemas import (
     ChannelConnectResult,
     ChannelEventOut,
     ChannelOut,
+    ChannelTestRequest,
+    ChannelTestResult,
     ChannelUpdateRequest,
     MaxBotConnectRequest,
     MaxQr2FARequest,
@@ -245,7 +247,10 @@ async def connect_maxbot(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(ACTION_MANAGE_CHANNELS)),
 ) -> ChannelConnectResult:
+    from app.channel_events import record_channel_event
+
     adapter = get_adapter(ChannelTransport.MAXBOT)
+    cleared: list[str] = []
     try:
         channel, bot_info = await adapter.connect(
             db,
@@ -254,13 +259,180 @@ async def connect_maxbot(
             name=body.name,
         )
         channel.department_id = await _resolve_department_id(db, body.department_id)
+        cleared = list(getattr(channel, "_cleared_webhooks", []) or [])
         await db.commit()
         channel = await _load_channel(db, channel.id)
         assert channel is not None
     except IntegrationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    await record_channel_event(
+        channel.id,
+        kind="connect",
+        message=f"Подключён {channel.identity}",
+        detail=(
+            f"Сняты webhook-подписки: {', '.join(cleared)}"
+            if cleared
+            else "Webhook-подписок не было — long-poll активен"
+        ),
+        level="info",
+    )
     return ChannelConnectResult(channel=to_channel_out(channel), bot=bot_info)
+
+
+@router.post("/{channel_id}/test", response_model=ChannelTestResult)
+async def test_channel_connection(
+    channel_id: int,
+    body: ChannelTestRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(ACTION_MANAGE_CHANNELS)),
+) -> ChannelTestResult:
+    """Probe Max бот: /me, webhook subscriptions, short /updates, poller status."""
+    from app.channel_events import record_channel_event
+    from app.integrations.credentials_cache import decrypt_cached
+    from app.integrations.maxbot import client as max_client
+    from app.integrations.maxbot.poller import poller as maxbot_poller
+    from app.security import decrypt_secret
+
+    opts = body or ChannelTestRequest()
+    channel = await _load_channel(db, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    await ensure_channel_access(user, channel_id, db)
+
+    if channel.transport != ChannelTransport.MAXBOT.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Проверка подключения пока доступна только для MAX · бот",
+        )
+    if not channel.credentials_enc:
+        raise HTTPException(status_code=400, detail="У канала нет сохранённого токена")
+
+    try:
+        token = decrypt_cached(channel.id, channel.credentials_enc, decrypt=decrypt_secret)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Токен повреждён: {exc}") from exc
+
+    bot: dict | None = None
+    error: str | None = None
+    webhook_urls: list[str] = []
+    cleared: list[str] = []
+    updates_pending = 0
+    update_types: list[str] = []
+    hint: str | None = None
+
+    try:
+        bot = await max_client.get_me(token)
+    except IntegrationError as exc:
+        error = str(exc)
+        await record_channel_event(
+            channel.id,
+            kind="test",
+            message=f"Тест: /me ошибка — {exc}",
+            level="error",
+        )
+        return ChannelTestResult(
+            ok=False,
+            transport=channel.transport,
+            identity=channel.identity,
+            poller_running=maxbot_poller.is_running,
+            poll_marker=channel.poll_marker,
+            last_error=channel.last_error,
+            error=error,
+            hint="Токен отклонён Max API. Переподключите бота с новым токеном.",
+        )
+
+    try:
+        subs = await max_client.get_subscriptions(token)
+        webhook_urls = [str(s.get("url") or "") for s in subs if s.get("url")]
+    except IntegrationError as exc:
+        logger.warning("Channel %s subscriptions check failed: %s", channel_id, exc)
+
+    if webhook_urls and opts.clear_webhooks:
+        try:
+            cleared = await max_client.clear_subscriptions(token)
+            webhook_urls = []
+        except IntegrationError as exc:
+            error = f"Не удалось снять webhook: {exc}"
+            hint = (
+                "У бота активны webhook-подписки — Max отключает long-poll. "
+                "Снимите их вручную или повторите тест."
+            )
+
+    if not error:
+        try:
+            payload = await max_client.get_updates(
+                token,
+                marker=channel.poll_marker,
+                timeout=1,
+                limit=10,
+            )
+            raw_updates = payload.get("updates") or []
+            updates_pending = len(raw_updates) if isinstance(raw_updates, list) else 0
+            update_types = [
+                str(u.get("update_type") or u.get("updateType") or "?")
+                for u in (raw_updates if isinstance(raw_updates, list) else [])
+                if isinstance(u, dict)
+            ]
+            # Do not advance poll_marker here — leave that to the poller.
+        except IntegrationError as exc:
+            error = str(exc)
+            if webhook_urls:
+                hint = (
+                    "Long-poll недоступен из‑за активных webhook. "
+                    "Включите clear_webhooks или снимите подписки."
+                )
+
+    if not hint and not error:
+        if not maxbot_poller.is_running:
+            hint = "Поллер не запущен на этом инстансе (проверьте background leader)."
+        elif updates_pending:
+            hint = (
+                f"Есть {updates_pending} апдейт(ов) в очереди — поллер подхватит их в ближайшем цикле."
+            )
+        else:
+            hint = (
+                "Токен и long-poll в порядке. Напишите боту в Max (кнопка «Старт»), "
+                "диалог появится в CRM. Если сообщений нет — убедитесь, что токен "
+                "не используется другим сервисом."
+            )
+
+    ok = error is None and bot is not None
+    detail_parts = [
+        f"poller={'on' if maxbot_poller.is_running else 'off'}",
+        f"marker={channel.poll_marker}",
+        f"pending={updates_pending}",
+    ]
+    if cleared:
+        detail_parts.append(f"cleared_hooks={len(cleared)}")
+    if webhook_urls:
+        detail_parts.append(f"hooks={','.join(webhook_urls)}")
+    if update_types:
+        detail_parts.append(f"types={','.join(update_types)}")
+
+    await record_channel_event(
+        channel.id,
+        kind="test",
+        message=("Тест OK: " + (hint or "подключение в порядке")) if ok else f"Тест: {error}",
+        detail="; ".join(detail_parts),
+        level="info" if ok else "error",
+    )
+
+    return ChannelTestResult(
+        ok=ok,
+        transport=channel.transport,
+        identity=channel.identity,
+        bot=bot,
+        poller_running=maxbot_poller.is_running,
+        poll_marker=channel.poll_marker,
+        updates_pending=updates_pending,
+        update_types=update_types,
+        webhook_subscriptions=webhook_urls,
+        webhooks_cleared=cleared,
+        hint=hint,
+        error=error,
+        last_error=channel.last_error,
+    )
 
 
 @router.post("/telegram", response_model=ChannelConnectResult)

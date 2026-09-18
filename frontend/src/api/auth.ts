@@ -218,6 +218,63 @@ export async function reconnectChannelRequest(id: number) {
   return api<ApiChannel>(`/api/channels/${id}/reconnect`, { method: 'POST' })
 }
 
+export interface ApiChannelTestResult {
+  ok: boolean
+  transport: string
+  identity: string | null
+  bot: Record<string, unknown> | null
+  poller_running: boolean
+  poll_marker: number | null
+  updates_pending: number
+  update_types: string[]
+  webhook_subscriptions: string[]
+  webhooks_cleared: string[]
+  hint: string | null
+  error: string | null
+  last_error: string | null
+}
+
+export type ChannelTestResult = {
+  ok: boolean
+  transport: string
+  identity: string | null
+  bot: Record<string, unknown> | null
+  pollerRunning: boolean
+  pollMarker: number | null
+  updatesPending: number
+  updateTypes: string[]
+  webhookSubscriptions: string[]
+  webhooksCleared: string[]
+  hint: string | null
+  error: string | null
+  lastError: string | null
+}
+
+export function mapChannelTestResult(r: ApiChannelTestResult): ChannelTestResult {
+  return {
+    ok: r.ok,
+    transport: r.transport,
+    identity: r.identity,
+    bot: r.bot,
+    pollerRunning: r.poller_running,
+    pollMarker: r.poll_marker,
+    updatesPending: r.updates_pending,
+    updateTypes: r.update_types ?? [],
+    webhookSubscriptions: r.webhook_subscriptions ?? [],
+    webhooksCleared: r.webhooks_cleared ?? [],
+    hint: r.hint,
+    error: r.error,
+    lastError: r.last_error,
+  }
+}
+
+export async function testChannelRequest(id: number, clearWebhooks = true) {
+  return api<ApiChannelTestResult>(`/api/channels/${id}/test`, {
+    method: 'POST',
+    json: { clear_webhooks: clearWebhooks },
+  })
+}
+
 export interface ApiChannelEvent {
   id: number
   channel_id: number

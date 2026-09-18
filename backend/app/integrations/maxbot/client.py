@@ -68,6 +68,64 @@ async def get_updates(
     return response.json()
 
 
+async def get_subscriptions(token: str) -> list[dict[str, Any]]:
+    """List active Max webhook subscriptions (blocks long-poll while present)."""
+    try:
+        async with _client() as client:
+            response = await client.get("/subscriptions", headers={"Authorization": token})
+    except httpx.HTTPError as exc:
+        raise MaxApiError(f"MAX API /subscriptions error: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise MaxApiError(
+            f"MAX API /subscriptions failed: {response.status_code}",
+            status_code=response.status_code,
+            payload=_safe_json(response),
+        )
+    data = response.json()
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        subs = data.get("subscriptions") or []
+        return [item for item in subs if isinstance(item, dict)]
+    return []
+
+
+async def delete_subscription(token: str, url: str) -> dict[str, Any]:
+    try:
+        async with _client() as client:
+            response = await client.delete(
+                "/subscriptions",
+                headers={"Authorization": token},
+                params={"url": url},
+            )
+    except httpx.HTTPError as exc:
+        raise MaxApiError(f"MAX API DELETE /subscriptions error: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise MaxApiError(
+            f"MAX API DELETE /subscriptions failed: {response.status_code}",
+            status_code=response.status_code,
+            payload=_safe_json(response),
+        )
+    if not response.content:
+        return {"success": True}
+    payload = _safe_json(response)
+    return payload if isinstance(payload, dict) else {"raw": payload}
+
+
+async def clear_subscriptions(token: str) -> list[str]:
+    """Remove all webhook subscriptions so GET /updates (long-poll) works again."""
+    cleared: list[str] = []
+    for sub in await get_subscriptions(token):
+        url = sub.get("url")
+        if not url:
+            continue
+        await delete_subscription(token, str(url))
+        cleared.append(str(url))
+    return cleared
+
+
 async def create_upload(token: str, upload_type: str) -> dict[str, Any]:
     try:
         async with _client() as client:

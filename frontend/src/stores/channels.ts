@@ -12,6 +12,9 @@ import {
   reconnectChannelRequest,
   startMaxQrRequest,
   startTelegramQrRequest,
+  testChannelRequest,
+  mapChannelTestResult,
+  type ChannelTestResult,
 } from '@/api/auth'
 import { updateChannelRequest } from '@/api/settings'
 import { ApiError } from '@/api/client'
@@ -279,6 +282,16 @@ export const useChannelsStore = defineStore('channels', () => {
     }
   }
 
+  async function testChannel(id: number): Promise<ChannelTestResult | null> {
+    try {
+      const raw = await testChannelRequest(id, true)
+      return mapChannelTestResult(raw)
+    } catch (e) {
+      loadError.value = e instanceof ApiError ? e.detail : 'Не удалось проверить подключение'
+      return null
+    }
+  }
+
   async function removeChannel(id: number): Promise<boolean> {
     try {
       await deleteChannelRequest(id)
@@ -319,6 +332,7 @@ export const useChannelsStore = defineStore('channels', () => {
     submit2fa,
     updateChannel,
     reconnectChannel,
+    testChannel,
     removeChannel,
   }
 })

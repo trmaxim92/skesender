@@ -103,7 +103,7 @@ async def process_update(
     if update_type in {"bot_started", "message_callback"}:
         await _handle_bot_started(session, channel, update)
         return None
-    logger.debug("Skip update_type=%s channel=%s", update_type, channel.id)
+    logger.info("Skip update_type=%s channel=%s keys=%s", update_type, channel.id, list(update.keys()))
     return None
 
 

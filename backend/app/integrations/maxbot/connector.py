@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.maxbot.client import MaxApiError, get_me
+from app.integrations.maxbot.client import MaxApiError, clear_subscriptions, get_me
 from app.models import Channel, ChannelStatus, ChannelTransport, utcnow
 from app.security import encrypt_secret
 
@@ -18,11 +18,20 @@ async def connect_by_token(
     created_by_id: int | None,
     name: str | None = None,
 ) -> tuple[Channel, dict[str, Any]]:
-    bot_info = await get_me(token.strip())
+    token = token.strip()
+    bot_info = await get_me(token)
     external_id = str(bot_info.get("user_id") or "")
     username = bot_info.get("username")
     bot_name = name or bot_info.get("first_name") or bot_info.get("name") or "MAX бот"
     identity = f"@{username}" if username else bot_name
+
+    # Active Max webhook subscriptions disable GET /updates (long-poll).
+    cleared_hooks: list[str] = []
+    try:
+        cleared_hooks = await clear_subscriptions(token)
+    except MaxApiError:
+        # Non-fatal: test endpoint / poller diagnostics will surface this.
+        cleared_hooks = []
 
     result = await session.execute(
         select(Channel).where(
@@ -43,11 +52,16 @@ async def connect_by_token(
     channel.status = ChannelStatus.ONLINE.value
     channel.identity = identity
     channel.external_id = external_id or None
-    channel.credentials_enc = encrypt_secret(token.strip())
-    channel.meta_json = json.dumps({"bot": bot_info}, ensure_ascii=False)
+    channel.credentials_enc = encrypt_secret(token)
+    channel.meta_json = json.dumps(
+        {"bot": bot_info, "cleared_webhooks": cleared_hooks},
+        ensure_ascii=False,
+    )
     channel.last_error = None
     channel.connected_at = utcnow()
     await session.flush()
+    # Stash for API logging after commit (not a DB column).
+    setattr(channel, "_cleared_webhooks", cleared_hooks)
     return channel, bot_info
 
 
