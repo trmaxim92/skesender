@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, CircleCheckBig, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -122,13 +122,6 @@ async function onBulkCloseNew() {
     bulkCloseBusy.value = false
   }
 }
-
-const assigneeLabel = computed(() => {
-  const id = chats.activeDialog?.assigneeId
-  if (!id) return 'Не назначен'
-  if (id === auth.user?.id) return 'Вы'
-  return chats.operators.find((u) => u.id === id)?.name || `ID ${id}`
-})
 
 const canClaim = computed(
   () =>
@@ -767,30 +760,34 @@ onUnmounted(() => {
           size="md"
         />
         <div class="min-w-0 flex-1">
-          <div class="flex min-w-0 items-center gap-2">
-            <div class="truncate text-[15px] font-semibold md:text-sm">{{ chats.activeDialog.contactName }}</div>
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <div class="truncate text-[15px] font-semibold text-ink md:text-base">
+              {{ chats.activeDialog.contactName }}
+            </div>
             <span
               v-if="chats.activeDialog.transport"
-              class="hidden shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:inline"
+              class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
               :class="transportBadgeClass[chats.activeDialog.transport]"
             >
               {{ transportBadge[chats.activeDialog.transport] }}
             </span>
             <span
               v-if="headerAppealNumber"
-              class="hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold sm:inline"
+              class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
               :class="
                 headerAppealStatus === 'closed'
                   ? 'bg-muted/15 text-muted'
                   : 'bg-ok/15 text-ok'
               "
             >
-              #{{ headerAppealNumber }} ·
-              {{ headerAppealStatus ? appealStatusLabel[headerAppealStatus] : '' }}
+              #{{ headerAppealNumber }}
+              <span v-if="headerAppealStatus">
+                · {{ appealStatusLabel[headerAppealStatus] }}
+              </span>
             </span>
           </div>
           <div
-            class="text-xs"
+            class="mt-0.5 text-xs"
             :class="
               chats.typingDialogId === chats.activeDialog.id
                 ? 'italic text-brand'
@@ -806,55 +803,49 @@ onUnmounted(() => {
         </div>
         <div
           v-if="canWrite"
-          class="hidden shrink-0 items-center gap-1 sm:flex"
+          class="hidden shrink-0 items-center gap-1.5 sm:flex"
         >
-          <span
-            class="mr-1 hidden max-w-[7rem] truncate text-[10px] text-muted lg:inline"
-            :title="assigneeLabel"
-          >
-            {{ assigneeLabel }}
-          </span>
           <button
             v-if="canClaim"
             type="button"
-            class="inline-flex h-9 items-center gap-1 rounded-lg bg-ok px-2.5 text-[11px] font-semibold text-white transition hover:brightness-105 disabled:opacity-50"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-ok px-3 text-xs font-semibold text-white transition hover:brightness-105 disabled:opacity-50"
             title="Забрать обращение"
             :disabled="claimBusy"
             @click="claimDialog"
           >
             <Hand class="size-3.5" />
-            <span class="hidden sm:inline">{{ claimBusy ? '…' : 'Забрать' }}</span>
+            <span>{{ claimBusy ? '…' : 'Забрать' }}</span>
           </button>
           <button
             v-if="canTransfer"
             type="button"
-            class="inline-flex h-9 items-center gap-1 rounded-lg border border-line px-2.5 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-muted transition hover:bg-surface hover:text-ink"
             title="Передать другому менеджеру"
             @click="transferOpen = true"
           >
             <ArrowRightLeft class="size-3.5" />
-            <span class="hidden sm:inline">Передать</span>
+            <span>Передать</span>
           </button>
           <button
             v-if="chats.canCompose"
             type="button"
-            class="inline-flex h-9 items-center gap-1 rounded-lg border border-line px-2.5 text-[11px] font-semibold text-muted transition hover:border-ok/40 hover:bg-ok/10 hover:text-ok disabled:opacity-50"
+            class="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-muted transition hover:bg-surface hover:text-ink disabled:opacity-50"
             :disabled="chats.closing"
             title="Закрыть обращение"
             @click="closeOpen = true"
           >
-            <CircleCheckBig class="size-3.5" />
-            <span class="hidden sm:inline">{{ chats.closing ? '…' : 'Закрыть' }}</span>
+            <X class="size-3.5" />
+            <span>{{ chats.closing ? '…' : 'Закрыть' }}</span>
           </button>
         </div>
-        <div class="relative flex shrink-0 items-center gap-0.5 sm:gap-1">
+        <div class="relative flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            class="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-brand sm:size-9 sm:rounded-lg sm:border sm:border-line"
+            class="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink sm:size-9"
             title="Карточка клиента / обращения"
             @click="chats.openSidePanel()"
           >
-            <PanelRight class="size-5 sm:size-3.5" />
+            <PanelRight class="size-5 sm:size-4" />
           </button>
           <button
             v-if="canWrite"
@@ -896,7 +887,7 @@ onUnmounted(() => {
               :disabled="chats.closing"
               @click="threadActionsOpen = false; closeOpen = true"
             >
-              <CircleCheckBig class="size-4 text-ok" />
+              <X class="size-4 text-muted" />
               {{ chats.closing ? '…' : 'Закрыть' }}
             </button>
           </div>
@@ -923,12 +914,12 @@ onUnmounted(() => {
       <div class="relative min-h-0 flex-1">
       <div
         ref="threadEl"
-        class="h-full space-y-2.5 overflow-auto overscroll-contain px-3 py-3 md:space-y-3 md:px-5 md:py-4"
+        class="h-full space-y-3 overflow-auto overscroll-contain bg-surface px-3 py-4 md:px-6 md:py-5"
         @scroll="onThreadScroll"
       >        <div v-if="chats.hasMoreMessages" class="flex justify-center py-1">
           <button
             type="button"
-            class="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+            class="rounded-lg border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:opacity-50"
             :disabled="chats.loadingOlder"
             @click="chats.loadOlderMessages()"
           >
@@ -939,15 +930,15 @@ onUnmounted(() => {
         <template v-for="row in threadRows" :key="row.key">
           <div
             v-if="row.type === 'day'"
-            class="flex items-center justify-center py-2"
+            class="flex items-center justify-center py-1"
           >
-            <span class="rounded-full bg-panel px-3 py-1 text-[11px] font-semibold text-muted">
+            <span class="rounded-full bg-panel px-3.5 py-1 text-[11px] font-semibold text-muted shadow-sm ring-1 ring-line/80">
               {{ row.label }}
             </span>
           </div>
           <div
             v-else
-            class="group flex items-end gap-2"
+            class="group flex items-end gap-2.5"
             :class="row.message.direction === 'out' || row.message.isInternal ? 'justify-end' : 'justify-start'"
           >
             <ContactAvatar
@@ -958,13 +949,13 @@ onUnmounted(() => {
             />
 
             <div
-              class="max-w-[min(86%,420px)] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm shadow-sm md:max-w-[min(70%,420px)]"
+              class="max-w-[min(86%,440px)] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm shadow-sm md:max-w-[min(68%,440px)]"
               :class="[
                 row.message.isInternal
                   ? 'rounded-br-md border border-dashed border-bubble-note-border bg-bubble-note text-bubble-note-ink'
                   : row.message.direction === 'out'
                     ? 'rounded-br-md bg-bubble-out text-white'
-                    : 'rounded-bl-md border border-line bg-panel text-ink',
+                    : 'rounded-bl-md border border-line/80 bg-panel text-ink',
                 row.message.status === 'failed' ? 'opacity-80 ring-1 ring-danger/60' : '',
                 row.message.status === 'sending' ? 'opacity-90' : '',
               ]"
@@ -1182,11 +1173,11 @@ onUnmounted(() => {
 
             <div
               v-if="row.message.direction === 'out'"
-              class="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
+              class="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
               :class="
                 row.message.isInternal
                   ? 'border border-dashed border-bubble-note-border bg-bubble-note text-bubble-note-ink'
-                  : 'bg-bubble-out text-white'
+                  : 'bg-brand text-white'
               "
               :title="avatarLabel(row.message)"
             >

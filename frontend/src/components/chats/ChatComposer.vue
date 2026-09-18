@@ -69,6 +69,13 @@ const sendButtonTitle = computed(() => {
   return 'Отправить (Enter)'
 })
 
+const composerHint = computed(() => {
+  if (props.noteMode) return 'Заметка видна только менеджерам'
+  if (sendMode.value === 'ctrl_enter') return 'Ctrl + Enter — отправить · Enter — новая строка'
+  if (sendMode.value === 'button') return 'Отправка только кнопкой · Enter — новая строка'
+  return 'Shift + Enter — новая строка'
+})
+
 const groupedTemplates = computed(() => {
   if (props.templateGroups?.length) return props.templateGroups
   if (!props.templates?.length) return []
@@ -298,7 +305,7 @@ onMounted(() => {
 
 <template>
   <div
-    class="relative shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:py-3"
+    class="relative shrink-0 bg-surface px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:pb-4 md:pt-3"
     @dragenter="onDragEnter"
     @dragleave="onDragLeave"
     @dragover="onDragOver"
@@ -364,7 +371,7 @@ onMounted(() => {
       <div
         v-for="(file, idx) in files"
         :key="`${file.name}-${file.size}-${idx}`"
-        class="group flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-1.5"
+        class="group flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-line bg-panel px-2.5 py-1.5"
       >
         <div
           class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand"
@@ -382,7 +389,7 @@ onMounted(() => {
         </div>
         <button
           type="button"
-          class="rounded-md p-1 text-muted opacity-70 transition hover:bg-panel hover:text-danger hover:opacity-100"
+          class="rounded-md p-1 text-muted opacity-70 transition hover:bg-surface hover:text-danger hover:opacity-100"
           @click="emit('removeFile', idx)"
         >
           <X class="size-3.5" />
@@ -390,35 +397,10 @@ onMounted(() => {
       </div>
     </div>
 
-    <div
-      v-if="!notesOnly"
-      class="mb-2 flex gap-2 sm:hidden"
+    <form
+      class="rounded-2xl border border-line bg-panel p-2.5 shadow-sm md:p-3"
+      @submit.prevent="emit('send')"
     >
-      <button
-        type="button"
-        class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border text-xs font-semibold transition"
-        :class="
-          noteMode
-            ? 'border-bubble-note-border bg-bubble-note text-bubble-note-ink'
-            : 'border-line bg-surface text-muted'
-        "
-        @click="emit('update:noteMode', !noteMode)"
-      >
-        <NotebookPen class="size-3.5" />
-        Заметка
-      </button>
-      <button
-        type="button"
-        class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface text-xs font-semibold text-muted transition disabled:opacity-40"
-        :disabled="noteMode"
-        @click="templatesOpen = true"
-      >
-        <TextQuote class="size-3.5" />
-        Шаблон
-      </button>
-    </div>
-
-    <form class="flex items-end gap-2" @submit.prevent="emit('send')">
       <input
         ref="fileInput"
         type="file"
@@ -428,75 +410,118 @@ onMounted(() => {
         @change="onFileChange"
       />
 
-      <button
-        v-if="!notesOnly"
-        type="button"
-        class="hidden size-11 shrink-0 items-center justify-center rounded-xl border transition sm:flex"
-        :class="
-          noteMode
-            ? 'border-bubble-note-border bg-bubble-note text-bubble-note-ink'
-            : 'border-line bg-surface text-muted hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
-        "
-        :title="noteMode ? 'Режим заметки' : 'Внутренняя заметка'"
-        @click="emit('update:noteMode', !noteMode)"
-      >
-        <NotebookPen class="size-4" />
-      </button>
+      <div class="flex items-end gap-2">
+        <div v-if="!notesOnly" class="flex shrink-0 items-center gap-0.5 pb-0.5">
+          <button
+            type="button"
+            class="flex size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40"
+            title="Прикрепить"
+            :disabled="noteMode"
+            @click="attachOpen = true"
+          >
+            <Paperclip class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+            title="Фото"
+            :disabled="noteMode"
+            @click="openPicker('image/*')"
+          >
+            <ImageIcon class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+            title="Документ"
+            :disabled="noteMode"
+            @click="openPicker('.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')"
+          >
+            <FileText class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+            title="Аудио"
+            :disabled="noteMode"
+            @click="openPicker('audio/*')"
+          >
+            <Mic class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="hidden size-9 items-center justify-center rounded-xl transition sm:flex"
+            :class="
+              noteMode
+                ? 'bg-bubble-note text-bubble-note-ink'
+                : 'text-muted hover:bg-surface hover:text-ink'
+            "
+            :title="noteMode ? 'Режим заметки' : 'Внутренняя заметка'"
+            @click="emit('update:noteMode', !noteMode)"
+          >
+            <NotebookPen class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+            title="Шаблон"
+            :disabled="noteMode"
+            @click="templatesOpen = true"
+          >
+            <TextQuote class="size-4" />
+          </button>
+        </div>
 
-      <button
-        v-if="!notesOnly"
-        type="button"
-        class="hidden size-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:cursor-not-allowed disabled:opacity-40 sm:flex"
-        title="Шаблон"
-        :disabled="noteMode"
-        @click="templatesOpen = true"
-      >
-        <TextQuote class="size-4" />
-      </button>
+        <div
+          class="flex min-h-10 min-w-0 flex-1 items-end rounded-xl px-2 py-1.5 transition"
+          :class="noteMode ? 'bg-bubble-note/50' : 'bg-surface/80'"
+        >
+          <textarea
+            ref="textareaEl"
+            :value="modelValue"
+            rows="1"
+            :placeholder="noteMode ? 'Заметка для команды…' : 'Напишите сообщение…'"
+            class="composer-input max-h-[160px] min-h-[28px] w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-6 outline-none md:max-h-[280px]"
+            :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/70'"
+            @input="onInput"
+            @paste="onPaste"
+            @keydown="onKeydown"
+          />
+        </div>
 
-      <button
-        v-if="!notesOnly"
-        type="button"
-        class="flex size-11 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-muted transition hover:border-brand/40 hover:bg-brand-soft hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
-        title="Прикрепить"
-        :disabled="noteMode"
-        @click="attachOpen = true"
-      >
-        <Paperclip class="size-4" />
-      </button>
-
-      <div
-        class="flex min-h-11 min-w-0 flex-1 items-end rounded-2xl border px-3.5 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition focus-within:ring-2"
-        :class="
-          noteMode
-            ? 'border-bubble-note-border bg-bubble-note focus-within:ring-bubble-note-border/40'
-            : 'border-line bg-surface focus-within:border-brand/50 focus-within:ring-brand/20'
-        "
-      >
-        <textarea
-          ref="textareaEl"
-          :value="modelValue"
-          rows="1"
-          :placeholder="noteMode ? 'Заметка для команды…' : 'Сообщение…'"
-          class="composer-input max-h-[160px] min-h-[28px] w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-6 outline-none md:max-h-[280px]"
-          :class="noteMode ? 'text-bubble-note-ink placeholder:text-bubble-note-ink/50' : 'text-ink placeholder:text-muted/80'"
-          @input="onInput"
-          @paste="onPaste"
-          @keydown="onKeydown"
-        />
+        <button
+          type="submit"
+          class="mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          :class="noteMode ? 'bg-bubble-note-ink' : 'bg-brand'"
+          :disabled="!canSend"
+          :title="sendButtonTitle"
+        >
+          <span v-if="sending" class="text-xs font-semibold">…</span>
+          <NotebookPen v-else-if="noteMode" class="size-4" />
+          <SendHorizontal v-else class="size-4" />
+        </button>
       </div>
 
-      <button
-        type="submit"
-        class="flex size-11 shrink-0 items-center justify-center rounded-xl text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
-        :class="noteMode ? 'bg-bubble-note-ink' : 'bg-brand'"
-        :disabled="!canSend"
-        :title="sendButtonTitle"
-      >
-        <span v-if="sending" class="text-xs font-semibold">…</span>
-        <NotebookPen v-else-if="noteMode" class="size-4" />
-        <SendHorizontal v-else class="size-4" />
-      </button>
+      <div class="mt-2 flex items-center justify-between gap-2 px-1">
+        <p class="text-[11px] text-muted">{{ composerHint }}</p>
+        <div v-if="!notesOnly" class="flex gap-2 sm:hidden">
+          <button
+            type="button"
+            class="text-[11px] font-semibold text-muted"
+            @click="emit('update:noteMode', !noteMode)"
+          >
+            Заметка
+          </button>
+          <button
+            type="button"
+            class="text-[11px] font-semibold text-muted disabled:opacity-40"
+            :disabled="noteMode"
+            @click="templatesOpen = true"
+          >
+            Шаблон
+          </button>
+        </div>
+      </div>
     </form>
 
     <Modal v-if="templatesOpen" title="Шаблоны" @close="templatesOpen = false">
