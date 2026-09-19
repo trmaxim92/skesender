@@ -342,6 +342,15 @@ function isEmojiOnlyPreview(text: string) {
   return /^[📷🎬🎵📎]/.test(text)
 }
 
+function isSpecialMediaLabel(text: string | null | undefined) {
+  return (
+    text === '[стикер]' ||
+    text === '[контакт]' ||
+    text === '[геолокация]' ||
+    text === '[ссылка]'
+  )
+}
+
 function replyQuoteAuthor(preview: NonNullable<Message['replyTo']>) {
   if (preview.direction === 'out') return preview.operatorName || 'Вы'
   return chats.activeDialog?.contactName || 'Клиент'
@@ -1089,6 +1098,12 @@ onUnmounted(() => {
                   class="text-xs opacity-70"
                 >
                   Медиа недоступно (не сохранилось или удалено в MAX)
+                </div>
+                <div
+                  v-else-if="isSpecialMediaLabel(row.message.text) && !row.message.attachments?.length"
+                  class="text-xs opacity-80"
+                >
+                  {{ row.message.text }}
                 </div>
                 <MessageBody
                   v-else-if="row.message.text && !(row.message.attachments?.length && isEmojiOnlyPreview(row.message.text))"

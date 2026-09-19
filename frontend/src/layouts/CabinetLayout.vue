@@ -1152,6 +1152,12 @@ onUnmounted(() => {
           >
             <span class="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-[12px] font-bold text-white">
               {{ initials }}
+              <span
+                v-if="currentPresence"
+                class="absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-panel"
+                :style="{ background: currentPresence.color }"
+                aria-hidden="true"
+              />
             </span>
             <span class="hidden min-w-0 text-left sm:block">
               <span class="block truncate text-sm font-semibold text-ink">{{ auth.user?.name }}</span>
@@ -1209,15 +1215,16 @@ onUnmounted(() => {
                     >✓</span>
                   </button>
                 </div>
+              </div>
+              <div class="border-b border-line py-1">
                 <button
                   type="button"
                   class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-danger transition hover:bg-danger-soft"
                   role="menuitem"
                   @click="logout"
                 >
-                  <span class="size-2.5 shrink-0 rounded-full bg-[#9ca3af]" />
+                  <LogOut class="size-4 opacity-70" />
                   <span class="flex-1">Выход</span>
-                  <LogOut class="size-3.5 opacity-70" />
                 </button>
               </div>
               <RouterLink

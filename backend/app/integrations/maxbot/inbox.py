@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.appeals import ensure_open_appeal
-from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import (
+    bump_unread,
+    clear_unread,
+    ensure_dialog_crm_contact,
+    get_or_create_dialog,
+    try_insert_message,
+)
 from app.integrations.maxbot import client as max_client
 from app.models import (
     AttachmentKind,
@@ -209,7 +215,18 @@ async def _handle_message_created(
         download=download_media,
     )
     if not msg.text:
-        msg.text = message_preview_text("", stored) or "[медиа]"
+        msg.text = (
+            message_preview_text("", stored)
+            or _attachment_fallback_label(
+                raw_attachments if isinstance(raw_attachments, list) else []
+            )
+            or "[медиа]"
+        )
+
+    # Contact share → try to fill dialog phone / name from payload.
+    if direction == MessageDirection.IN.value and isinstance(raw_attachments, list):
+        if _apply_contact_attachment_to_dialog(dialog, raw_attachments):
+            await ensure_dialog_crm_contact(session, dialog)
 
     if dialog.last_at is None or created_at >= dialog.last_at:
         dialog.last_message = message_preview_text(msg.text, stored)
@@ -321,21 +338,30 @@ async def _persist_bot_attachments(
         if not isinstance(item, dict):
             continue
         att_type = str(item.get("type") or "").lower()
-        if att_type in {"inline_keyboard", "share", "sticker", "contact", "location"}:
+        if att_type in {"inline_keyboard", "share", "contact", "location"}:
             continue
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         url = payload.get("url") or item.get("url")
-        file_name = (
-            payload.get("file_name")
-            or payload.get("filename")
-            or payload.get("name")
-            or item.get("filename")
-            or ("voice.ogg" if att_type in {"audio", "voice"} else f"{att_type or 'file'}")
-        )
-        mime = payload.get("mime_type") or payload.get("content_type")
-        if att_type in {"audio", "voice"} and not mime:
-            mime = "audio/ogg"
-        kind = _map_bot_kind(att_type, mime, str(file_name))
+        if att_type == "sticker":
+            file_name = (
+                payload.get("file_name")
+                or payload.get("filename")
+                or f"sticker_{(payload.get('code') or payload.get('smileId') or 'max')}.png"
+            )
+            mime = payload.get("mime_type") or payload.get("content_type") or "image/png"
+            kind = AttachmentKind.IMAGE
+        else:
+            file_name = (
+                payload.get("file_name")
+                or payload.get("filename")
+                or payload.get("name")
+                or item.get("filename")
+                or ("voice.ogg" if att_type in {"audio", "voice"} else f"{att_type or 'file'}")
+            )
+            mime = payload.get("mime_type") or payload.get("content_type")
+            if att_type in {"audio", "voice"} and not mime:
+                mime = "audio/ogg"
+            kind = _map_bot_kind(att_type, mime, str(file_name))
         relative = None
         size = payload.get("size")
         remote_url = str(url) if url else None
@@ -354,6 +380,10 @@ async def _persist_bot_attachments(
             except Exception:
                 logger.exception("Failed to download maxbot attachment url=%s", remote_url)
 
+        # Stickers without a downloaded file still get a stub so UI is not empty «[медиа]».
+        if att_type == "sticker" and not relative and not remote_url:
+            continue
+
         att = MessageAttachment(
             message_id=msg.id,
             kind=kind.value,
@@ -362,12 +392,75 @@ async def _persist_bot_attachments(
             size_bytes=int(size) if isinstance(size, int) else None,
             storage_path=relative,
             remote_url=remote_url,
-            provider_file_id=str(payload.get("token") or payload.get("fileId") or "") or None,
+            provider_file_id=str(payload.get("token") or payload.get("fileId") or payload.get("code") or "")
+            or None,
         )
         session.add(att)
         stored.append(att)
     await session.flush()
     return stored
+
+
+def _attachment_fallback_label(raw_attachments: list[Any]) -> str | None:
+    types: list[str] = []
+    for item in raw_attachments:
+        if isinstance(item, dict):
+            t = str(item.get("type") or "").lower()
+            if t:
+                types.append(t)
+    if "sticker" in types:
+        return "[стикер]"
+    if "contact" in types:
+        return "[контакт]"
+    if "location" in types:
+        return "[геолокация]"
+    if "share" in types:
+        return "[ссылка]"
+    return None
+
+
+def _apply_contact_attachment_to_dialog(dialog: Dialog, raw_attachments: list[Any]) -> bool:
+    """Best-effort: fill dialog phone/name from a shared contact attachment."""
+    changed = False
+    for item in raw_attachments:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").lower() != "contact":
+            continue
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        info = payload.get("max_info") if isinstance(payload.get("max_info"), dict) else {}
+        phone = (
+            payload.get("phone")
+            or payload.get("phone_number")
+            or info.get("phone")
+            or info.get("phone_number")
+        )
+        name = (
+            payload.get("name")
+            or payload.get("full_name")
+            or info.get("name")
+            or " ".join(
+                str(x)
+                for x in (
+                    info.get("first_name") or payload.get("first_name"),
+                    info.get("last_name") or payload.get("last_name"),
+                )
+                if x
+            ).strip()
+        )
+        if phone and not dialog.contact_phone:
+            digits = "".join(ch for ch in str(phone) if ch.isdigit())
+            if len(digits) >= 5:
+                dialog.contact_phone = str(phone).strip() if str(phone).startswith("+") else f"+{digits}"
+                changed = True
+        if name and (
+            not dialog.contact_name
+            or dialog.contact_name.startswith("User ")
+            or dialog.contact_name.startswith("Chat ")
+        ):
+            dialog.contact_name = str(name).strip()[:255]
+            changed = True
+    return changed
 
 
 def _map_bot_kind(att_type: str, mime: str | None, filename: str) -> AttachmentKind:
