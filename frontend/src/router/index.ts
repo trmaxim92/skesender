@@ -126,6 +126,12 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
+          path: 'settings/dispatcher',
+          name: 'settings-dispatcher',
+          component: () => import('@/views/settings/DispatcherView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'settings/presence-statuses',
           name: 'presence-statuses',
           component: () => import('@/views/settings/PresenceStatusesView.vue'),

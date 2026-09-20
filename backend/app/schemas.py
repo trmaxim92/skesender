@@ -1,5 +1,5 @@
 ﻿from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -1001,3 +1001,59 @@ class SystemNewsOut(BaseModel):
     created_by_id: int | None = None
     created_by_name: str | None = None
     read_count: int = 0
+
+
+# --- Dispatcher ---
+
+
+class DispatcherConditionIn(BaseModel):
+    field: Literal["channel_id", "department_id", "transport"]
+    op: Literal["eq", "in", "neq"] = "eq"
+    value: Any
+
+
+class DispatcherActionIn(BaseModel):
+    type: Literal["send_reply"]
+    text: str = Field(default="", max_length=8000)
+
+
+class DispatcherRuleGroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    active: bool = True
+    sort_order: int = 0
+
+
+class DispatcherRuleGroupOut(BaseModel):
+    id: int
+    name: str
+    active: bool
+    sort_order: int
+    rules_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class DispatcherRuleIn(BaseModel):
+    group_id: int
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=2000)
+    active: bool = True
+    sort_order: int = 0
+    trigger: Literal["appeal.opened"] = "appeal.opened"
+    conditions: list[DispatcherConditionIn] = Field(default_factory=list)
+    actions: list[DispatcherActionIn] = Field(default_factory=list)
+
+
+class DispatcherRuleOut(BaseModel):
+    id: int
+    group_id: int
+    name: str
+    description: str
+    active: bool
+    sort_order: int
+    trigger: str
+    conditions: list[DispatcherConditionIn]
+    actions: list[DispatcherActionIn]
+    last_applied_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime

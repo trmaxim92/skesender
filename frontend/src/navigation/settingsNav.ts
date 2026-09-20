@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import {
   FileText,
   FormInput,
+  GitBranch,
   IdCard,
   Radio,
   CircleDot,
@@ -80,6 +81,20 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         label: 'Закрытие обращения',
         description: 'Системный шаблон при закрытии',
         icon: FileText,
+        permission: 'section.settings',
+      },
+    ],
+  },
+  {
+    id: 'automation',
+    title: 'Автоматизация',
+    description: 'Правила диспетчера и сценарии',
+    items: [
+      {
+        to: '/settings/dispatcher',
+        label: 'Диспетчер',
+        description: 'Гибкие правила: событие → условия → действия',
+        icon: GitBranch,
         permission: 'section.settings',
       },
     ],

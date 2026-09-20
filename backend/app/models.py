@@ -950,3 +950,74 @@ class FleetSyncState(Base):
     last_purged: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DispatcherRuleGroup(Base):
+    """Folder for dispatcher automation rules (HelpdeskEddy-style)."""
+
+    __tablename__ = "dispatcher_rule_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    rules: Mapped[list["DispatcherRule"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        order_by="DispatcherRule.sort_order",
+    )
+
+
+class DispatcherRule(Base):
+    """Event → conditions → actions automation rule."""
+
+    __tablename__ = "dispatcher_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("dispatcher_rule_groups.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # e.g. "appeal.opened"
+    trigger: Mapped[str] = mapped_column(String(64), index=True)
+    # JSON list of {field, op, value}
+    conditions_json: Mapped[str] = mapped_column(Text, default="[]")
+    # JSON list of {type, ...} e.g. {type: send_reply, text: "..."}
+    actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    last_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    group: Mapped[DispatcherRuleGroup] = relationship(back_populates="rules")
+    runs: Mapped[list["DispatcherRuleRun"]] = relationship(
+        back_populates="rule", cascade="all, delete-orphan"
+    )
+
+
+class DispatcherRuleRun(Base):
+    """Idempotency: one successful application of a rule per appeal (or dialog)."""
+
+    __tablename__ = "dispatcher_rule_runs"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "appeal_id", name="uq_dispatcher_rule_appeal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("dispatcher_rules.id", ondelete="CASCADE"), index=True
+    )
+    appeal_id: Mapped[int] = mapped_column(
+        ForeignKey("appeals.id", ondelete="CASCADE"), index=True
+    )
+    dialog_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dialogs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    rule: Mapped[DispatcherRule] = relationship(back_populates="runs")

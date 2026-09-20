@@ -20,6 +20,7 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
 
     Opening a new appeal clears dialog assignee so the first manager who replies
     becomes responsible (chat goes to «Новые»).
+    Schedules dispatcher trigger ``appeal.opened`` when a new appeal row is created.
     """
     # C11: serialize open-appeal creation per dialog (Postgres advisory xact lock).
     if dialog.id is not None:
@@ -55,6 +56,7 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
         status_id=open_status.id,
         opened_at=utcnow(),
     )
+    created_new = False
     try:
         async with session.begin_nested():
             session.add(appeal)
@@ -63,6 +65,7 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
             # Новое обращение — снова без ответственного, пока кто-то не ответит первым.
             dialog.assignee_id = None
             await session.flush()
+            created_new = True
     except IntegrityError:
         # Concurrent open of the same next number — reuse whatever is open now.
         if dialog.current_appeal_id is not None:
@@ -83,6 +86,15 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
             raise
         dialog.current_appeal_id = existing.id
         return existing
+
+    if created_new and dialog.id is not None and appeal.id is not None:
+        try:
+            from app.dispatcher import schedule_appeal_opened
+
+            schedule_appeal_opened(dialog_id=dialog.id, appeal_id=appeal.id)
+        except Exception:
+            # Never break inbound path on dispatcher scheduling errors.
+            pass
     return appeal
 
 

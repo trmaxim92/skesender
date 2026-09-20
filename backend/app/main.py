@@ -744,6 +744,78 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
+                """
+                CREATE TABLE IF NOT EXISTS dispatcher_rule_groups (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dispatcher_rules (
+                    id SERIAL PRIMARY KEY,
+                    group_id INTEGER NOT NULL REFERENCES dispatcher_rule_groups(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    trigger VARCHAR(64) NOT NULL,
+                    conditions_json TEXT NOT NULL DEFAULT '[]',
+                    actions_json TEXT NOT NULL DEFAULT '[]',
+                    last_applied_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dispatcher_rules_group_id "
+                "ON dispatcher_rules (group_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dispatcher_rules_trigger "
+                "ON dispatcher_rules (trigger)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dispatcher_rule_runs (
+                    id SERIAL PRIMARY KEY,
+                    rule_id INTEGER NOT NULL REFERENCES dispatcher_rules(id) ON DELETE CASCADE,
+                    appeal_id INTEGER NOT NULL REFERENCES appeals(id) ON DELETE CASCADE,
+                    dialog_id INTEGER REFERENCES dialogs(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_dispatcher_rule_appeal UNIQUE (rule_id, appeal_id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dispatcher_rule_runs_rule_id "
+                "ON dispatcher_rule_runs (rule_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_dispatcher_rule_runs_appeal_id "
+                "ON dispatcher_rule_runs (appeal_id)"
+            )
+        )
+        await conn.execute(
+            text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS send_mode "
                 "VARCHAR(16) NOT NULL DEFAULT 'ctrl_enter'"
             )
