@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pymax import QrAuthFlow, WebClient
+from pymax import ExtraConfig, QrAuthFlow, WebClient
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +31,11 @@ _DISCONNECT_TIMEOUT_SEC = 8.0
 # Brief wait on outbound so a soft reconnect can finish (receive may still work).
 _ENSURE_WAIT_SEC = 8.0
 _ENSURE_POLL_SEC = 0.2
+# Soft-reconnect backoff (seconds). Owned by us — pymax reconnect must stay off.
+_RECONNECT_DELAYS_SEC = (1, 2, 5, 10, 20, 40)
+# How long to wait for get_client() after kicking a restore.
+_RECONNECT_READY_POLLS = 40
+_RECONNECT_READY_POLL_SEC = 0.25
 
 
 @dataclass
@@ -117,11 +122,23 @@ class MaxPersonalRuntime:
         await state.password_bridge.submit(password)
 
     async def restore_online_channels(self) -> None:
+        """Restore personal MAX sessions after process start.
+
+        Includes ERROR (and CONNECTING) when a session file is saved — otherwise a
+        false gave_up before restart leaves the channel dead until manual reconnect.
+        QR_PENDING / OFFLINE without credentials stay untouched.
+        """
         async with SessionLocal() as session:
             result = await session.execute(
                 select(Channel).where(
                     Channel.transport == ChannelTransport.MAX.value,
-                    Channel.status == ChannelStatus.ONLINE.value,
+                    Channel.status.in_(
+                        (
+                            ChannelStatus.ONLINE.value,
+                            ChannelStatus.ERROR.value,
+                            ChannelStatus.CONNECTING.value,
+                        )
+                    ),
                     Channel.credentials_enc.is_not(None),
                 )
             )
@@ -297,11 +314,59 @@ class MaxPersonalRuntime:
                 name=f"max-personal-restore-{channel_id}",
             )
 
+    async def _force_restore_channel(self, channel_id: int) -> None:
+        """Cancel a zombie task (alive but client unbound) and start a clean restore."""
+        async with self._lock:
+            existing = self._states.get(channel_id)
+            if existing is None:
+                return
+            client = existing.client
+            task = existing.task
+            existing.client = None
+            if task is not None and not task.done():
+                task.cancel()
+        if client is not None:
+            await self._close_client(client)
+        if task is not None and not task.done():
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        async with self._lock:
+            existing = self._states.get(channel_id)
+            if existing is None:
+                return
+            # Another restore may have won while we cancelled.
+            if existing.task is not None and not existing.task.done():
+                return
+            meta = await self._load_session_meta(channel_id)
+            if not meta:
+                return
+            work_dir = Path(meta["work_dir"])
+            state = RuntimeState(
+                channel_id=channel_id,
+                status="connecting",
+                reconnect_generation=existing.reconnect_generation,
+            )
+            self._states[channel_id] = state
+            state.task = asyncio.create_task(
+                self._run_client(
+                    channel_id,
+                    work_dir,
+                    fresh=False,
+                    session_name=meta.get("session_name", "web.db"),
+                ),
+                name=f"max-personal-force-restore-{channel_id}",
+            )
+
     async def _mark_disconnected(self, channel_id: int, reason: str) -> None:
         state = self._states.get(channel_id)
         if state is None:
             return
         if state.status in {"qr_pending", "need_2fa"}:
+            return
+        # Already soft-reconnecting (e.g. on_disconnect + start() except both fire).
+        if state.status == "reconnecting":
             return
         # During initial QR connect (connecting + no prior online) skip soft restore.
         if state.status == "connecting" and state.reconnect_generation == 0:
@@ -335,47 +400,106 @@ class MaxPersonalRuntime:
             name=f"max-personal-reconnect-{channel_id}",
         )
 
+    async def _wait_until_ready(self, channel_id: int) -> bool:
+        for _ in range(_RECONNECT_READY_POLLS):
+            if self.get_client(channel_id):
+                return True
+            await asyncio.sleep(_RECONNECT_READY_POLL_SEC)
+        return self.get_client(channel_id) is not None
+
     async def _reconnect_later(self, channel_id: int, generation: int) -> None:
-        for delay in (1, 2, 5, 10, 20, 40):
+        for attempt, delay in enumerate(_RECONNECT_DELAYS_SEC, start=1):
             await asyncio.sleep(delay)
             state = self._states.get(channel_id)
             if state is None or state.reconnect_generation != generation:
                 return
             if self.get_client(channel_id):
-                return
-            try:
-                await self._restore_channel(channel_id)
-                for _ in range(40):
-                    if self.get_client(channel_id):
-                        await self._update_channel(channel_id, last_error=None)
-                        try:
-                            from app.channel_events import record_channel_event
-
-                            await record_channel_event(
-                                channel_id,
-                                kind="reconnect",
-                                message=f"Автопереподключение успешно (попытка после {delay}с)",
-                                level="info",
-                            )
-                        except Exception:
-                            pass
-                        return
-                    await asyncio.sleep(0.25)
-            except Exception:
-                logger.exception("MAX personal reconnect failed channel=%s", channel_id)
+                await self._update_channel(channel_id, last_error=None)
                 try:
                     from app.channel_events import record_channel_event
 
                     await record_channel_event(
                         channel_id,
-                        kind="reconnect_attempt",
-                        message=f"Автопереподключение не удалось (ожидание {delay}с)",
-                        level="warn",
+                        kind="reconnect",
+                        message=f"Автопереподключение успешно (попытка {attempt}/{len(_RECONNECT_DELAYS_SEC)}, после {delay}с)",
+                        level="info",
                     )
                 except Exception:
                     pass
+                return
+
+            try:
+                from app.channel_events import record_channel_event
+
+                await record_channel_event(
+                    channel_id,
+                    kind="reconnect_attempt",
+                    message=f"Автопереподключение: попытка {attempt}/{len(_RECONNECT_DELAYS_SEC)} (ожидание {delay}с)",
+                    level="warn",
+                )
+            except Exception:
+                pass
+
+            try:
+                state = self._states.get(channel_id)
+                zombie = (
+                    state is not None
+                    and state.task is not None
+                    and not state.task.done()
+                    and state.client is None
+                )
+                if zombie:
+                    logger.warning(
+                        "MAX personal channel %s zombie task without client — force restore",
+                        channel_id,
+                    )
+                    await self._force_restore_channel(channel_id)
+                else:
+                    await self._restore_channel(channel_id)
+                if await self._wait_until_ready(channel_id):
+                    await self._update_channel(channel_id, last_error=None)
+                    try:
+                        from app.channel_events import record_channel_event
+
+                        await record_channel_event(
+                            channel_id,
+                            kind="reconnect",
+                            message=f"Автопереподключение успешно (попытка {attempt}/{len(_RECONNECT_DELAYS_SEC)}, после {delay}с)",
+                            level="info",
+                        )
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                logger.exception("MAX personal reconnect failed channel=%s", channel_id)
 
         # Exhausted backoff — only then mark ERROR (user may need QR).
+        state = self._states.get(channel_id)
+        if state is None or state.reconnect_generation != generation:
+            return
+        if self.get_client(channel_id):
+            await self._update_channel(channel_id, last_error=None)
+            return
+        # Last chance: force-kill zombie and one clean restore before giving up.
+        try:
+            await self._force_restore_channel(channel_id)
+            if await self._wait_until_ready(channel_id):
+                await self._update_channel(channel_id, last_error=None)
+                try:
+                    from app.channel_events import record_channel_event
+
+                    await record_channel_event(
+                        channel_id,
+                        kind="reconnect",
+                        message="Автопереподключение успешно (финальный force-restore)",
+                        level="info",
+                    )
+                except Exception:
+                    pass
+                return
+        except Exception:
+            logger.exception("MAX personal final force-restore failed channel=%s", channel_id)
+
         state = self._states.get(channel_id)
         if state is None or state.reconnect_generation != generation:
             return
@@ -418,11 +542,14 @@ class MaxPersonalRuntime:
             qr_provider=state.qr_bridge,
             password_provider=state.password_bridge,
         )
+        # Own reconnect in this runtime — pymax reconnect=True races with our
+        # soft-restore and clears state.client while the socket is already back.
         client = WebClient(
             work_dir=str(work_dir),
             session_name=session_name,
             auth_flow=auth_flow,
             qr_provider=state.qr_bridge,
+            extra_config=ExtraConfig(reconnect=False),
         )
         state.client = client
 
@@ -447,6 +574,8 @@ class MaxPersonalRuntime:
                     or (str(name) if name else None)
                     or f"id:{external_id}"
                 )
+            # Re-bind even if soft-disconnect cleared the ref while start was in flight.
+            state.client = c
             state.status = "online"
             state.identity = identity
             state.error = None
