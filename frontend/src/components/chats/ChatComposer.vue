@@ -10,9 +10,13 @@ import {
   NotebookPen,
   Paperclip,
   SendHorizontal,
+  Smile,
   TextQuote,
   X,
 } from 'lucide-vue-next'
+import EmojiPickerPanel, {
+  type EmojiSelectPayload,
+} from '@/components/chats/EmojiPickerPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Template, TemplateGroup } from '@/types'
@@ -48,9 +52,12 @@ const emit = defineEmits<{
 
 const attachOpen = ref(false)
 const templatesOpen = ref(false)
+const emojiOpen = ref(false)
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
+/** Caret to restore after emoji insert (survives focus moves). */
+const savedSelection = ref<{ start: number; end: number } | null>(null)
 const accept = ref('image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')
 const dragDepth = ref(0)
 const collapsedCategories = ref<Record<string, boolean>>({})
@@ -115,8 +122,53 @@ function toggleCategory(group: TemplateGroup) {
 }
 
 watch(templatesOpen, (open) => {
-  if (open) collapsedCategories.value = {}
+  if (open) {
+    collapsedCategories.value = {}
+    emojiOpen.value = false
+  }
 })
+
+watch(attachOpen, (open) => {
+  if (open) emojiOpen.value = false
+})
+
+function rememberSelection() {
+  const el = textareaEl.value
+  if (!el) return
+  savedSelection.value = {
+    start: el.selectionStart ?? props.modelValue.length,
+    end: el.selectionEnd ?? el.selectionStart ?? props.modelValue.length,
+  }
+}
+
+function toggleEmojiPicker() {
+  if (!emojiOpen.value) rememberSelection()
+  emojiOpen.value = !emojiOpen.value
+}
+
+function insertEmoji(emoji: EmojiSelectPayload) {
+  const native = emoji.native
+  if (!native) return
+
+  const el = textareaEl.value
+  const fallback = props.modelValue.length
+  const sel = savedSelection.value
+  const start = sel?.start ?? el?.selectionStart ?? fallback
+  const end = sel?.end ?? el?.selectionEnd ?? start
+  const next = props.modelValue.slice(0, start) + native + props.modelValue.slice(end)
+  const caret = start + native.length
+
+  emit('update:modelValue', next)
+  savedSelection.value = { start: caret, end: caret }
+
+  void nextTick(() => {
+    const ta = textareaEl.value
+    if (!ta) return
+    ta.focus()
+    ta.setSelectionRange(caret, caret)
+    resizeTextarea()
+  })
+}
 
 const attachTypes = [
   {
@@ -152,6 +204,7 @@ const attachTypes = [
 function openPicker(typeAccept: string) {
   accept.value = typeAccept
   attachOpen.value = false
+  emojiOpen.value = false
   requestAnimationFrame(() => fileInput.value?.click())
 }
 
@@ -237,6 +290,12 @@ function onPaste(event: ClipboardEvent) {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && emojiOpen.value) {
+    event.preventDefault()
+    emojiOpen.value = false
+    return
+  }
+
   if (event.key !== 'Enter') return
   if (event.isComposing) return
 
@@ -287,7 +346,15 @@ function resizeTextarea() {
 function onInput(event: Event) {
   const el = event.target as HTMLTextAreaElement
   emit('update:modelValue', el.value)
+  savedSelection.value = {
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.selectionStart ?? el.value.length,
+  }
   resizeTextarea()
+}
+
+function onTextareaSelect() {
+  rememberSelection()
 }
 
 watch(
@@ -398,9 +465,15 @@ onMounted(() => {
     </div>
 
     <form
-      class="rounded-2xl border border-line bg-panel p-2.5 shadow-sm md:p-3"
+      class="relative rounded-2xl border border-line bg-panel p-2.5 shadow-sm md:p-3"
       @submit.prevent="emit('send')"
     >
+      <EmojiPickerPanel
+        :open="emojiOpen"
+        @select="insertEmoji"
+        @close="emojiOpen = false"
+      />
+
       <input
         ref="fileInput"
         type="file"
@@ -411,64 +484,82 @@ onMounted(() => {
       />
 
       <div class="flex items-end gap-2">
-        <div v-if="!notesOnly" class="flex shrink-0 items-center gap-0.5 pb-0.5">
+        <div class="flex shrink-0 items-center gap-0.5 pb-0.5">
+          <template v-if="!notesOnly">
+            <button
+              type="button"
+              class="flex size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40"
+              title="Прикрепить"
+              :disabled="noteMode"
+              @click="attachOpen = true"
+            >
+              <Paperclip class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+              title="Фото"
+              :disabled="noteMode"
+              @click="openPicker('image/*')"
+            >
+              <ImageIcon class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+              title="Документ"
+              :disabled="noteMode"
+              @click="openPicker('.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')"
+            >
+              <FileText class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+              title="Аудио"
+              :disabled="noteMode"
+              @click="openPicker('audio/*')"
+            >
+              <Mic class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="hidden size-9 items-center justify-center rounded-xl transition sm:flex"
+              :class="
+                noteMode
+                  ? 'bg-bubble-note text-bubble-note-ink'
+                  : 'text-muted hover:bg-surface hover:text-ink'
+              "
+              :title="noteMode ? 'Режим заметки' : 'Внутренняя заметка'"
+              @click="emit('update:noteMode', !noteMode)"
+            >
+              <NotebookPen class="size-4" />
+            </button>
+            <button
+              type="button"
+              class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
+              title="Шаблон"
+              :disabled="noteMode"
+              @click="templatesOpen = true"
+            >
+              <TextQuote class="size-4" />
+            </button>
+          </template>
           <button
             type="button"
-            class="flex size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40"
-            title="Прикрепить"
-            :disabled="noteMode"
-            @click="attachOpen = true"
-          >
-            <Paperclip class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
-            title="Фото"
-            :disabled="noteMode"
-            @click="openPicker('image/*')"
-          >
-            <ImageIcon class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
-            title="Документ"
-            :disabled="noteMode"
-            @click="openPicker('.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')"
-          >
-            <FileText class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
-            title="Аудио"
-            :disabled="noteMode"
-            @click="openPicker('audio/*')"
-          >
-            <Mic class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="hidden size-9 items-center justify-center rounded-xl transition sm:flex"
+            class="flex size-9 items-center justify-center rounded-xl transition"
             :class="
-              noteMode
-                ? 'bg-bubble-note text-bubble-note-ink'
+              emojiOpen
+                ? 'bg-brand-soft text-brand'
                 : 'text-muted hover:bg-surface hover:text-ink'
             "
-            :title="noteMode ? 'Режим заметки' : 'Внутренняя заметка'"
-            @click="emit('update:noteMode', !noteMode)"
+            title="Эмодзи"
+            aria-label="Эмодзи"
+            :aria-expanded="emojiOpen"
+            @mousedown.prevent="rememberSelection"
+            @click="toggleEmojiPicker"
           >
-            <NotebookPen class="size-4" />
-          </button>
-          <button
-            type="button"
-            class="hidden size-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface hover:text-ink disabled:opacity-40 sm:flex"
-            title="Шаблон"
-            :disabled="noteMode"
-            @click="templatesOpen = true"
-          >
-            <TextQuote class="size-4" />
+            <Smile class="size-4" />
           </button>
         </div>
 
@@ -486,6 +577,9 @@ onMounted(() => {
             @input="onInput"
             @paste="onPaste"
             @keydown="onKeydown"
+            @select="onTextareaSelect"
+            @click="onTextareaSelect"
+            @keyup="onTextareaSelect"
           />
         </div>
 
@@ -519,6 +613,15 @@ onMounted(() => {
             @click="templatesOpen = true"
           >
             Шаблон
+          </button>
+          <button
+            type="button"
+            class="text-[11px] font-semibold"
+            :class="emojiOpen ? 'text-brand' : 'text-muted'"
+            @mousedown.prevent="rememberSelection"
+            @click="toggleEmojiPicker"
+          >
+            Эмодзи
           </button>
         </div>
       </div>
