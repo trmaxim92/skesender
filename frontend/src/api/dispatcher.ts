@@ -102,7 +102,7 @@ export async function createDispatcherGroupRequest(body: {
 }) {
   return api<ApiGroup>('/api/dispatcher/groups', {
     method: 'POST',
-    body: JSON.stringify(body),
+    json: body,
   })
 }
 
@@ -112,7 +112,7 @@ export async function updateDispatcherGroupRequest(
 ) {
   return api<ApiGroup>(`/api/dispatcher/groups/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(body),
+    json: body,
   })
 }
 
@@ -137,7 +137,7 @@ export async function createDispatcherRuleRequest(body: {
 }) {
   return api<ApiRule>('/api/dispatcher/rules', {
     method: 'POST',
-    body: JSON.stringify(body),
+    json: body,
   })
 }
 
@@ -156,7 +156,7 @@ export async function updateDispatcherRuleRequest(
 ) {
   return api<ApiRule>(`/api/dispatcher/rules/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(body),
+    json: body,
   })
 }
 
