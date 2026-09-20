@@ -73,6 +73,47 @@ class MaxPersonalRuntime:
             return None
         return state.client
 
+    async def readiness_snapshot(self) -> dict[str, Any]:
+        """Channels that should be live after boot (session saved) vs ready to send."""
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(Channel).where(
+                    Channel.transport == ChannelTransport.MAX.value,
+                    Channel.credentials_enc.is_not(None),
+                    Channel.status.in_(
+                        (
+                            ChannelStatus.ONLINE.value,
+                            ChannelStatus.ERROR.value,
+                            ChannelStatus.CONNECTING.value,
+                        )
+                    ),
+                )
+            )
+            channels = list(result.scalars().all())
+
+        pending: list[dict[str, Any]] = []
+        ready = 0
+        for ch in channels:
+            live = self.get_client(ch.id) is not None
+            if live:
+                ready += 1
+                continue
+            state = self.get_state(ch.id)
+            pending.append(
+                {
+                    "id": ch.id,
+                    "name": ch.name,
+                    "db_status": ch.status,
+                    "runtime": state.status if state else None,
+                }
+            )
+        return {
+            "expected": len(channels),
+            "ready": ready,
+            "ok": ready == len(channels),
+            "pending": pending,
+        }
+
     async def start_qr_connect(self, channel_id: int) -> RuntimeState:
         async with self._lock:
             existing = self._states.get(channel_id)

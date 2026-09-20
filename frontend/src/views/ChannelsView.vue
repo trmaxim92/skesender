@@ -57,8 +57,8 @@ const kindLabel: Record<string, string> = {
   qr: 'QR',
   error: 'Ошибка',
   disconnect: 'Обрыв',
-  reconnect: 'Переподключение',
-  reconnect_attempt: 'Попытка',
+  reconnect: 'Восстановлен',
+  reconnect_attempt: 'Авто-попытка',
   gave_up: 'Сбой',
   manual_reconnect: 'Вручную',
   connect: 'Подключение',
@@ -68,6 +68,25 @@ const kindLabel: Record<string, string> = {
   poll_error: 'Poll ошибка',
   note: 'Заметка',
   status: 'Статус',
+}
+
+function kindBadgeClass(kind: string, level: string) {
+  if (kind === 'reconnect' || kind === 'online') {
+    return 'bg-ok/15 text-ok'
+  }
+  if (kind === 'reconnect_attempt' || kind === 'manual_reconnect') {
+    return 'bg-amber-500/15 text-amber-800'
+  }
+  if (kind === 'disconnect' || kind === 'note') {
+    return 'bg-amber-500/15 text-amber-800'
+  }
+  if (level === 'error' || kind === 'gave_up' || kind === 'error') {
+    return 'bg-danger/15 text-danger'
+  }
+  if (level === 'warn') {
+    return 'bg-amber-500/15 text-amber-800'
+  }
+  return 'bg-surface text-muted'
 }
 
 async function loadDiagnostics() {
@@ -416,7 +435,7 @@ watch(
         v-else-if="!diagEvents.length"
         class="rounded-2xl border border-dashed border-line bg-panel p-8 text-center text-sm text-muted"
       >
-        Пока нет событий. Они появятся при обрыве связи, переподключении или ошибке канала.
+        Пока нет событий. Они появятся при обрыве, авто-попытках, успешном восстановлении или ошибке канала.
       </p>
       <ul v-else class="space-y-2">
         <li
@@ -427,13 +446,7 @@ watch(
           <div class="flex flex-wrap items-center gap-2 text-[11px]">
             <span
               class="rounded-md px-1.5 py-0.5 font-bold uppercase tracking-wide"
-              :class="
-                ev.level === 'error'
-                  ? 'bg-danger/15 text-danger'
-                  : ev.level === 'warn'
-                    ? 'bg-amber-500/15 text-amber-800'
-                    : 'bg-surface text-muted'
-              "
+              :class="kindBadgeClass(ev.kind, ev.level)"
             >
               {{ kindLabel[ev.kind] || ev.kind }}
             </span>

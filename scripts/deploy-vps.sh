@@ -155,6 +155,7 @@ systemctl reload nginx
 sleep 2
 curl -sf http://127.0.0.1/health || curl -sf http://127.0.0.1:8000/health
 echo
+bash "$APP_DIR/scripts/wait-max-personal.sh"
 systemctl --no-pager --full status order-elite | head -20
 echo "DEPLOY_OK http://${HOST}/"
 echo "Admin: admin@order-elite.local / ChangeMeNow1!"

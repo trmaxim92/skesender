@@ -960,6 +960,19 @@ def create_app() -> FastAPI:
         if leader is not None:
             payload["bg_leader"] = bool(leader.is_leader)
 
+        try:
+            from app.integrations.max_personal.runtime import runtime as max_runtime
+
+            payload["max_personal"] = await max_runtime.readiness_snapshot()
+        except Exception as exc:
+            logger.exception("Health check max_personal failed")
+            payload["max_personal"] = {
+                "expected": 0,
+                "ready": 0,
+                "ok": False,
+                "error": str(exc)[:200],
+            }
+
         status_code = 200 if payload["status"] == "ok" else 503
         return JSONResponse(payload, status_code=status_code)
 

@@ -19,7 +19,8 @@ _MAX_ROWS = 3000
 def _infer_level(*, kind: str, status: str | None = None, last_error: str | None = None) -> str:
     if kind in {"error", "reconnect_failed", "gave_up"} or (status == "error"):
         return "error"
-    if kind in {"disconnect", "reconnect", "reconnect_attempt"} or last_error:
+    # Successful soft-reconnect is informational; attempts/disconnects stay warn.
+    if kind in {"disconnect", "reconnect_attempt"} or last_error:
         return "warn"
     return "info"
 

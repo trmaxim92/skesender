@@ -81,6 +81,7 @@ systemctl reload nginx
 sleep 3
 curl -sf http://127.0.0.1/health
 echo
+bash "$APP_DIR/scripts/wait-max-personal.sh"
 curl -sf -o /dev/null -w "UI:%{http_code}\n" http://127.0.0.1/
 systemctl --no-pager --full status order-elite | sed -n "1,18p"
 echo "DEPLOY_OK http://${HOST}/"
