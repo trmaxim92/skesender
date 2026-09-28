@@ -21,6 +21,7 @@ from app.integrations.max_personal.inbox import (
     backfill_max_personal_attachments,
     ingest_pymax_message,
 )
+from app.integrations.max_personal.upload_patch import apply_photo_upload_patch
 from app.integrations.media_jobs import schedule_media_job
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
 from app.realtime.publish import (
@@ -175,6 +176,7 @@ class MaxPersonalRuntime:
         false gave_up before restart leaves the channel dead until manual reconnect.
         QR_PENDING / OFFLINE without credentials stay untouched.
         """
+        apply_photo_upload_patch()
         async with SessionLocal() as session:
             result = await session.execute(
                 select(Channel).where(
