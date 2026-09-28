@@ -382,15 +382,13 @@ async def delete_message(token: str, *, message_id: str) -> dict[str, Any]:
 
 
 async def download_url(url: str) -> bytes:
+    from app.integrations.media_fetch import fetch_url_bytes
+
     settings = get_settings()
     try:
-        async with httpx.AsyncClient(timeout=20.0, verify=settings.max_api_verify_ssl, follow_redirects=True) as client:
-            response = await client.get(url)
-    except httpx.HTTPError as exc:
+        return await fetch_url_bytes(url, timeout=120.0, verify=settings.max_api_verify_ssl)
+    except Exception as exc:
         raise MaxApiError(f"Download failed: {exc}") from exc
-    if response.status_code >= 400:
-        raise MaxApiError(f"Download failed: {response.status_code}")
-    return response.content
 
 
 def _safe_json(response: httpx.Response) -> Any:

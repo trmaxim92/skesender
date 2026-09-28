@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,11 +22,13 @@ from app.models import (
     MessageStatus,
     utcnow,
 )
+from app.integrations.media_fetch import fetch_url_bytes
 from app.serializers import message_preview_text
 from app.storage.attachments import save_bytes
 
 try:
     from pymax.types.domain.attachments.audio import AudioAttachment
+    from pymax.types.domain.attachments.contact import ContactAttachment
     from pymax.types.domain.attachments.file import FileAttachment
     from pymax.types.domain.attachments.photo import PhotoAttachment
     from pymax.types.domain.attachments.share import ShareAttachment
@@ -35,6 +36,7 @@ try:
     from pymax.types.domain.attachments.video import VideoAttachment
 except Exception:  # pragma: no cover
     AudioAttachment = ()  # type: ignore[misc, assignment]
+    ContactAttachment = ()  # type: ignore[misc, assignment]
     FileAttachment = ()  # type: ignore[misc, assignment]
     PhotoAttachment = ()  # type: ignore[misc, assignment]
     ShareAttachment = ()  # type: ignore[misc, assignment]
@@ -441,6 +443,7 @@ async def ingest_pymax_message(
     attaches: list[Any] | None = None,
     client: Any | None = None,
     reply_to_external_id: str | None = None,
+    link: Any | None = None,
 ) -> ChatMessage | None:
     is_out = my_user_id is not None and sender_id is not None and int(sender_id) == int(my_user_id)
     direction = MessageDirection.OUT.value if is_out else MessageDirection.IN.value
@@ -510,6 +513,27 @@ async def ingest_pymax_message(
 
     appeal = await ensure_open_appeal(session, dialog)
 
+    attaches_list = list(attaches or [])
+    resolved_text = (text or "").strip()
+    link_meta: dict[str, Any] | None = None
+    # Forwards often arrive as link.type=FORWARD with empty attaches/text.
+    if link is not None and (not attaches_list or not resolved_text):
+        link_meta = _link_as_dict(link)
+        link_text, link_attaches = await _expand_message_link(
+            client, link, fallback_chat_id=chat_id
+        )
+        if link_attaches and not attaches_list:
+            attaches_list = link_attaches
+            logger.info(
+                "Expanded FORWARD/link attaches=%s chat=%s id=%s",
+                len(link_attaches),
+                chat_id,
+                message_id,
+            )
+        if link_text and not resolved_text:
+            resolved_text = link_text.strip()
+            text = resolved_text
+
     created_at = _ts_to_dt(timestamp)
     reply_to_id = await _resolve_reply_to_id(session, channel.id, reply_to_external_id)
     msg = ChatMessage(
@@ -518,7 +542,7 @@ async def ingest_pymax_message(
         appeal_id=appeal.id,
         external_id=str(message_id) if message_id is not None else None,
         direction=direction,
-        text=(text or "").strip(),
+        text=resolved_text,
         status=MessageStatus.DELIVERED.value,
         reply_to_message_id=reply_to_id,
         raw_json=json.dumps(
@@ -529,17 +553,18 @@ async def ingest_pymax_message(
                 "text": text,
                 "reply_to": reply_to_external_id,
                 "attach_types": [
-                    _attach_type_name(a) or type(a).__name__ for a in (attaches or [])
+                    _attach_type_name(a) or type(a).__name__ for a in attaches_list
                 ],
+                "link": link_meta,
             },
             ensure_ascii=False,
+            default=str,
         ),
         created_at=created_at,
     )
     if await try_insert_message(session, msg) is None:
         return None
 
-    attaches_list = list(attaches or [])
     stored = await _persist_pymax_attachments(
         session,
         msg,
@@ -551,13 +576,23 @@ async def ingest_pymax_message(
     # Live events sometimes arrive without resolved media payload — refetch once.
     if (
         not stored
-        and not (text or "").strip()
+        and not (msg.text or "").strip()
         and client is not None
         and message_id is not None
     ):
         try:
             full = await client.get_message(int(chat_id), int(message_id))
             refetch = list(getattr(full, "attaches", None) or []) if full else []
+            # Also expand link from the full message if present.
+            if not refetch and full is not None:
+                full_link = getattr(full, "link", None)
+                if full_link is not None:
+                    link_text, link_attaches = await _expand_message_link(
+                        client, full_link, fallback_chat_id=chat_id
+                    )
+                    refetch = link_attaches
+                    if link_text and not (msg.text or "").strip():
+                        msg.text = link_text.strip()
             if refetch:
                 logger.info(
                     "Refetched %s attaches for max message chat=%s id=%s",
@@ -579,6 +614,12 @@ async def ingest_pymax_message(
                 chat_id,
                 message_id,
             )
+
+    contact_labels = _contact_labels(attaches_list)
+    if contact_labels:
+        extra = "\n".join(contact_labels)
+        msg.text = f"{msg.text}\n{extra}".strip() if msg.text else extra
+
     if not msg.text:
         msg.text = message_preview_text("", stored) or "[медиа]"
 
@@ -695,6 +736,115 @@ def _clean_url(value: Any) -> str | None:
     return text
 
 
+def _link_as_dict(link: Any) -> dict[str, Any] | None:
+    if link is None:
+        return None
+    if isinstance(link, dict):
+        return dict(link)
+    data: dict[str, Any] = {}
+    if hasattr(link, "model_dump"):
+        try:
+            dumped = link.model_dump(by_alias=True, mode="python")
+            if isinstance(dumped, dict):
+                data.update(dumped)
+        except Exception:
+            pass
+    extra = getattr(link, "__pydantic_extra__", None)
+    if isinstance(extra, dict):
+        data.update(extra)
+    for key in ("type", "message_id", "messageId", "chat_id", "chatId", "message"):
+        if hasattr(link, key):
+            value = getattr(link, key)
+            if value is not None and key not in data:
+                data[key] = value
+    return data or None
+
+
+def _message_payload_parts(msg: Any) -> tuple[str | None, list[Any]]:
+    if msg is None:
+        return None, []
+    if isinstance(msg, dict):
+        return (msg.get("text") or None), list(msg.get("attaches") or [])
+    text = getattr(msg, "text", None)
+    attaches = list(getattr(msg, "attaches", None) or [])
+    return (text if text else None), attaches
+
+
+async def _expand_message_link(
+    client: Any | None,
+    link: Any,
+    *,
+    fallback_chat_id: int,
+) -> tuple[str | None, list[Any]]:
+    """Resolve FORWARD/REPLY link into text + attaches when the wrapper is empty."""
+    data = _link_as_dict(link)
+    if not data:
+        return None, []
+
+    nested = data.get("message")
+    if nested is not None:
+        text, attaches = _message_payload_parts(nested)
+        if attaches or (text and str(text).strip()):
+            return text, attaches
+
+    link_type = str(data.get("type") or data.get("_type") or "").upper()
+    if link_type and link_type not in {"FORWARD", "REPLY"}:
+        return None, []
+
+    msg_id = data.get("message_id") if data.get("message_id") is not None else data.get("messageId")
+    chat_raw = data.get("chat_id") if data.get("chat_id") is not None else data.get("chatId")
+    chat_id = int(chat_raw) if chat_raw is not None else int(fallback_chat_id)
+    if client is None or msg_id is None:
+        return None, []
+    try:
+        full = await client.get_message(chat_id, int(msg_id))
+    except Exception:
+        logger.exception(
+            "Failed to resolve message link type=%s chat=%s id=%s",
+            link_type or "?",
+            chat_id,
+            msg_id,
+        )
+        return None, []
+    return _message_payload_parts(full)
+
+
+def _contact_labels(attaches: list[Any]) -> list[str]:
+    labels: list[str] = []
+    for attach in attaches:
+        if not (isinstance(attach, ContactAttachment) or _attach_type_name(attach) == "CONTACT"):
+            continue
+        if isinstance(attach, dict):
+            name = (
+                attach.get("name")
+                or " ".join(
+                    p
+                    for p in (attach.get("first_name"), attach.get("last_name"))
+                    if p
+                ).strip()
+                or f"id {attach.get('contact_id') or attach.get('contactId') or '?'}"
+            )
+        else:
+            name = (
+                getattr(attach, "name", None)
+                or " ".join(
+                    p
+                    for p in (
+                        getattr(attach, "first_name", None),
+                        getattr(attach, "last_name", None),
+                    )
+                    if p
+                ).strip()
+                or f"id {getattr(attach, 'contact_id', '?')}"
+            )
+        labels.append(f"📇 {name}")
+    return labels
+
+
+def _sanitize_contact_name(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (name or "contact"))[:40]
+
+
 async def _resolve_pymax_attach(
     attach: Any,
     *,
@@ -791,6 +941,19 @@ async def _resolve_pymax_attach(
             None,
             "text/uri-list",
         )
+    if isinstance(attach, ContactAttachment) or type_name == "CONTACT":
+        contact_id = getattr(attach, "contact_id", None)
+        photo = getattr(attach, "photo_url", None)
+        name = getattr(attach, "name", None) or "contact"
+        if photo:
+            return (
+                AttachmentKind.IMAGE,
+                f"contact_{contact_id or _sanitize_contact_name(str(name))}.jpg",
+                _clean_url(photo),
+                contact_id,
+                "image/jpeg",
+            )
+        return None, "file", None, None, None
     return None, "file", None, None, None
 
 
@@ -803,18 +966,62 @@ async def repair_message_media(
 ) -> list[MessageAttachment]:
     """Fetch full MAX message and persist missing attachments."""
     if not msg.external_id:
-        return []
+        return list(msg.attachments or [])
     existing = list(msg.attachments or [])
+    settings = get_settings()
     if existing:
-        return existing
+        changed = False
+        for att in existing:
+            if att.storage_path or not att.remote_url:
+                continue
+            try:
+                data = await fetch_url_bytes(
+                    att.remote_url,
+                    verify=settings.max_api_verify_ssl,
+                )
+                relative, safe_name, resolved_mime, size = save_bytes(
+                    data=data,
+                    file_name=att.file_name or "file",
+                    message_id=msg.id,
+                    mime_type=att.mime_type,
+                )
+                att.storage_path = relative
+                att.file_name = safe_name
+                att.mime_type = resolved_mime
+                att.size_bytes = size
+                changed = True
+            except Exception:
+                logger.exception(
+                    "Repair download failed message=%s att=%s", msg.id, att.id
+                )
+        if changed:
+            await session.flush()
+        if any(att.storage_path for att in existing):
+            return existing
+
     dialog = await session.get(Dialog, msg.dialog_id)
     if dialog is None or not dialog.external_chat_id:
-        return []
+        return existing
     chat_id = int(dialog.external_chat_id)
     message_id = int(msg.external_id)
     attaches = await _fetch_message_attaches(client, chat_id, message_id)
     if not attaches:
-        return []
+        try:
+            full = await client.get_message(chat_id, message_id)
+            link = getattr(full, "link", None) if full else None
+            if link is not None:
+                link_text, link_attaches = await _expand_message_link(
+                    client, link, fallback_chat_id=chat_id
+                )
+                attaches = link_attaches
+                if link_text and (not msg.text or msg.text in {"[медиа]", "[media]"}):
+                    msg.text = link_text.strip() or msg.text
+        except Exception:
+            logger.exception("repair link expand failed message=%s", msg.id)
+    if not attaches:
+        return existing
+    if existing:
+        return existing
     stored = await _persist_pymax_attachments(
         session,
         msg,
@@ -827,6 +1034,50 @@ async def repair_message_media(
         msg.text = message_preview_text("", stored) or msg.text or "[медиа]"
     await session.refresh(msg, attribute_names=["attachments"])
     return stored
+
+
+async def backfill_max_personal_attachments(message_id: int) -> None:
+    """Download stub attachments after ingest when CDN fetch failed."""
+    from app.db import SessionLocal
+
+    settings = get_settings()
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChatMessage)
+            .options(selectinload(ChatMessage.attachments))
+            .where(ChatMessage.id == message_id)
+        )
+        msg = result.scalar_one_or_none()
+        if msg is None:
+            return
+        changed = False
+        for att in list(msg.attachments or []):
+            if att.storage_path or not att.remote_url:
+                continue
+            try:
+                data = await fetch_url_bytes(
+                    att.remote_url,
+                    verify=settings.max_api_verify_ssl,
+                )
+                relative, safe_name, resolved_mime, size = save_bytes(
+                    data=data,
+                    file_name=att.file_name or "file",
+                    message_id=msg.id,
+                    mime_type=att.mime_type,
+                )
+                att.storage_path = relative
+                att.file_name = safe_name
+                att.mime_type = resolved_mime
+                att.size_bytes = size
+                changed = True
+            except Exception:
+                logger.exception(
+                    "Backfill max personal attachment failed message=%s url=%s",
+                    message_id,
+                    att.remote_url,
+                )
+        if changed:
+            await session.commit()
 
 
 async def _fetch_message_attaches(client: Any, chat_id: int, message_id: int) -> list[Any]:
@@ -872,11 +1123,7 @@ async def _fetch_message_attaches(client: Any, chat_id: int, message_id: int) ->
 
 async def _download(url: str) -> bytes:
     settings = get_settings()
-    async with httpx.AsyncClient(timeout=20.0, verify=settings.max_api_verify_ssl, follow_redirects=True) as client:
-        response = await client.get(url)
-    if response.status_code >= 400:
-        raise RuntimeError(f"download failed: {response.status_code}")
-    return response.content
+    return await fetch_url_bytes(url, timeout=120.0, verify=settings.max_api_verify_ssl)
 
 
 async def load_message_with_attachments(session: AsyncSession, message_id: int) -> ChatMessage | None:

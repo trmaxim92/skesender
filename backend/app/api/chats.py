@@ -13,7 +13,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import String, and_, cast, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +33,7 @@ from app.fields import (
     upsert_field_value,
 )
 from app.integrations.base import ChannelNotReadyError, IntegrationError
+from app.integrations.media_fetch import fetch_url_bytes
 from app.integrations.registry import get_adapter
 from app.models import (
     Appeal,
@@ -1907,7 +1908,7 @@ async def download_attachment(
     token: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
-) -> FileResponse | RedirectResponse:
+) -> FileResponse:
     access = None
     if creds and creds.credentials:
         access = creds.credentials
@@ -1936,17 +1937,48 @@ async def download_attachment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     await _require_dialog_access(user, dialog, db)
 
-    if not att.storage_path:
-        if att.remote_url:
-            return RedirectResponse(att.remote_url)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    try:
-        path = absolute_path(att.storage_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not path.exists():
-        if att.remote_url:
-            return RedirectResponse(att.remote_url)
+    path = None
+    if att.storage_path:
+        try:
+            candidate = absolute_path(att.storage_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if candidate.exists():
+            path = candidate
+
+    # MAX okcdn URLs are IP-bound to the server — never redirect the browser.
+    # Materialize missing files from remote_url with a browser User-Agent.
+    if path is None and att.remote_url:
+        try:
+            settings = get_settings()
+            data = await fetch_url_bytes(
+                att.remote_url,
+                verify=settings.max_api_verify_ssl,
+            )
+            relative, safe_name, resolved_mime, size = save_bytes(
+                data=data,
+                file_name=att.file_name or "file",
+                message_id=msg.id,
+                mime_type=att.mime_type,
+            )
+            att.storage_path = relative
+            att.file_name = safe_name
+            att.mime_type = resolved_mime or att.mime_type
+            att.size_bytes = size
+            await db.commit()
+            path = absolute_path(relative)
+        except Exception as exc:
+            logger.exception(
+                "Attachment proxy download failed id=%s url=%s",
+                attachment_id,
+                att.remote_url,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File missing on disk",
+            ) from exc
+
+    if path is None or not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
     return FileResponse(
         path,

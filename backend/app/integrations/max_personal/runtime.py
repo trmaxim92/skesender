@@ -15,7 +15,13 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.integrations.base import ChannelNotReadyError, IntegrationError
 from app.integrations.max_personal.auth_qr import BridgePasswordProvider, BridgeQrHandler
-from app.integrations.max_personal.inbox import apply_read_mark, backfill_dialog_names, ingest_pymax_message
+from app.integrations.max_personal.inbox import (
+    apply_read_mark,
+    backfill_dialog_names,
+    backfill_max_personal_attachments,
+    ingest_pymax_message,
+)
+from app.integrations.media_jobs import schedule_media_job
 from app.models import Channel, ChannelStatus, ChannelTransport, Dialog, utcnow
 from app.realtime.publish import (
     dialog_updated_event,
@@ -681,6 +687,7 @@ class MaxPersonalRuntime:
                     client=c,
                     # prev_message_id is chronological previous message, NOT a reply quote.
                     reply_to_external_id=None,
+                    link=getattr(message, "link", None),
                 )
                 event = None
                 if created is not None:
@@ -693,6 +700,15 @@ class MaxPersonalRuntime:
                     await session.refresh(created, attribute_names=["attachments"])
                     if dialog is not None:
                         event = message_created_event(dialog, created, channel.transport)
+                    # Retry CDN downloads that failed without browser UA / transient errors.
+                    if any(
+                        (not att.storage_path and att.remote_url)
+                        for att in (created.attachments or [])
+                    ):
+                        schedule_media_job(
+                            backfill_max_personal_attachments(created.id),
+                            name=f"max-personal-media-{created.id}",
+                        )
                 await session.commit()
                 if event is not None:
                     await emit_event(event)
