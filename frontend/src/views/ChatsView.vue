@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ArrowLeft, ArrowRightLeft, EllipsisVertical, Hand, NotebookPen, PanelRight, Pencil, Plus, Reply, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, EllipsisVertical, Hand, ListChecks, NotebookPen, PanelRight, Pencil, Plus, Reply, RotateCcw, Search, Trash2, X } from 'lucide-vue-next'
 import AppealHistoryBar from '@/components/chats/AppealHistoryBar.vue'
 import AuthMedia from '@/components/chats/AuthMedia.vue'
 import ChatComposer from '@/components/chats/ChatComposer.vue'
@@ -64,6 +64,7 @@ const transferNotice = ref('')
 const closeOpen = ref(false)
 const stickToBottom = ref(true)
 const pendingBelow = ref(0)
+const selectMode = ref(false)
 const selectedNew = ref<Set<string>>(new Set())
 const bulkCloseBusy = ref(false)
 const bulkCloseMsg = ref('')
@@ -72,6 +73,7 @@ let noticeTimer: number | undefined
 let syncingUrl = false
 
 const canBulkCloseNew = computed(() => canWrite.value && chats.filter === 'new')
+const showBulkUi = computed(() => canBulkCloseNew.value && selectMode.value)
 const selectedNewCount = computed(() => selectedNew.value.size)
 const allNewSelected = computed(() => {
   const list = chats.filteredDialogs
@@ -84,8 +86,22 @@ function clearNewSelection() {
   bulkCloseMsg.value = ''
 }
 
-function toggleNewSelect(id: string) {
+function exitSelectMode() {
+  selectMode.value = false
+  clearNewSelection()
+}
+
+function toggleSelectMode() {
   if (!canBulkCloseNew.value) return
+  if (selectMode.value) {
+    exitSelectMode()
+    return
+  }
+  selectMode.value = true
+}
+
+function toggleNewSelect(id: string) {
+  if (!showBulkUi.value) return
   const next = new Set(selectedNew.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
@@ -93,7 +109,7 @@ function toggleNewSelect(id: string) {
 }
 
 function toggleSelectAllNew() {
-  if (!canBulkCloseNew.value) return
+  if (!showBulkUi.value) return
   if (allNewSelected.value) {
     clearNewSelection()
     return
@@ -102,7 +118,7 @@ function toggleSelectAllNew() {
 }
 
 async function onBulkCloseNew() {
-  if (!canBulkCloseNew.value || bulkCloseBusy.value || !selectedNewCount.value) return
+  if (!showBulkUi.value || bulkCloseBusy.value || !selectedNewCount.value) return
   const ids = [...selectedNew.value]
   const ok = window.confirm(
     `Закрыть ${ids.length} обращений из «Новые»?\nКлиентам шаблон закрытия отправляться не будет.`,
@@ -470,9 +486,13 @@ watch(
 watch(
   () => chats.filter,
   () => {
-    clearNewSelection()
+    exitSelectMode()
   },
 )
+
+watch(canBulkCloseNew, (ok) => {
+  if (!ok) exitSelectMode()
+})
 
 onMounted(async () => {
   mdMq = window.matchMedia('(min-width: 768px)')
@@ -583,6 +603,21 @@ onUnmounted(() => {
           </span>
         </button>
         <button
+          v-if="canBulkCloseNew"
+          type="button"
+          class="mb-2 flex size-9 shrink-0 items-center justify-center rounded-lg transition"
+          :class="
+            selectMode
+              ? 'bg-brand-soft text-brand'
+              : 'text-muted hover:bg-surface hover:text-brand'
+          "
+          :title="selectMode ? 'Выйти из режима выделения' : 'Выделить чаты'"
+          :aria-pressed="selectMode"
+          @click="toggleSelectMode"
+        >
+          <ListChecks class="size-5" />
+        </button>
+        <button
           v-if="canCreateOutbound"
           type="button"
           class="mb-2 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-brand"
@@ -593,7 +628,7 @@ onUnmounted(() => {
         </button>
       </div>
       <div
-        v-if="canBulkCloseNew && chats.filteredDialogs.length"
+        v-if="showBulkUi && chats.filteredDialogs.length"
         class="flex items-center justify-between gap-2 border-b border-line bg-surface/60 px-3 py-2"
       >
         <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
@@ -605,14 +640,24 @@ onUnmounted(() => {
           />
           Выбрать все
         </label>
-        <button
-          type="button"
-          class="rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
-          :disabled="!selectedNewCount || bulkCloseBusy"
-          @click="onBulkCloseNew"
-        >
-          {{ bulkCloseBusy ? '…' : `Закрыть (${selectedNewCount})` }}
-        </button>
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            class="rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
+            :disabled="!selectedNewCount || bulkCloseBusy"
+            @click="onBulkCloseNew"
+          >
+            {{ bulkCloseBusy ? '…' : `Закрыть (${selectedNewCount})` }}
+          </button>
+          <button
+            type="button"
+            class="flex size-7 items-center justify-center rounded-lg text-muted transition hover:bg-panel hover:text-ink"
+            title="Снять выделение"
+            @click="exitSelectMode"
+          >
+            <X class="size-3.5" />
+          </button>
+        </div>
       </div>
       <p v-if="bulkCloseMsg" class="border-b border-line px-3 py-1.5 text-[11px] text-ok">
         {{ bulkCloseMsg }}
@@ -667,7 +712,7 @@ onUnmounted(() => {
           @click="selectDialog(d.id)"
         >
           <div
-            v-if="canBulkCloseNew"
+            v-if="showBulkUi"
             class="flex shrink-0 items-start pt-2"
             @click.stop
           >

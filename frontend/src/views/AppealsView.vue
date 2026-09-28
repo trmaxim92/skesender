@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ListChecks,
   MoreVertical,
   Plus,
   Search,
@@ -43,6 +44,7 @@ const bulkBusy = ref(false)
 const bulkMsg = ref('')
 const selected = ref<Set<number>>(new Set())
 const filtersOpen = ref(false)
+const selectMode = ref(false)
 
 const filtersActiveCount = computed(() => {
   let n = 0
@@ -57,6 +59,7 @@ const canCreate = computed(() => auth.can('section.chats') && auth.can('action.w
 const canWrite = computed(() => auth.can('section.appeals') && auth.can('action.write'))
 const canDelete = computed(() => auth.can('action.delete_appeals'))
 const canBulk = computed(() => canWrite.value || canDelete.value)
+const showBulkUi = computed(() => canBulk.value && selectMode.value)
 
 const selectedCount = computed(() => selected.value.size)
 const selectedOpenCount = computed(
@@ -156,8 +159,22 @@ function clearSelection() {
   selected.value = new Set()
 }
 
-function toggleSelect(id: number) {
+function exitSelectMode() {
+  selectMode.value = false
+  clearSelection()
+}
+
+function toggleSelectMode() {
   if (!canBulk.value) return
+  if (selectMode.value) {
+    exitSelectMode()
+    return
+  }
+  selectMode.value = true
+}
+
+function toggleSelect(id: number) {
+  if (!showBulkUi.value) return
   const next = new Set(selected.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
@@ -165,7 +182,7 @@ function toggleSelect(id: number) {
 }
 
 function toggleSelectAll() {
-  if (!canBulk.value) return
+  if (!showBulkUi.value) return
   if (allPageSelected.value) {
     clearSelection()
     return
@@ -243,18 +260,39 @@ async function onBulkDelete() {
         <div class="min-w-0">
           <h1 class="text-xl font-bold tracking-tight text-ink md:text-2xl">Обращения</h1>
           <p class="mt-0.5 text-sm text-muted">
-            Отметьте нужные и закройте или удалите пачкой
+            {{
+              selectMode
+                ? 'Отметьте нужные и закройте или удалите пачкой'
+                : 'Поиск и работа с обращениями'
+            }}
           </p>
         </div>
-        <button
-          v-if="canCreate"
-          type="button"
-          class="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand text-white shadow-sm transition hover:brightness-110"
-          title="Создать обращение"
-          @click="openCreate"
-        >
-          <Plus class="size-5" />
-        </button>
+        <div class="flex shrink-0 items-center gap-2">
+          <button
+            v-if="canBulk"
+            type="button"
+            class="inline-flex size-10 items-center justify-center rounded-lg transition"
+            :class="
+              selectMode
+                ? 'bg-brand-soft text-brand'
+                : 'border border-line bg-panel text-muted hover:text-brand'
+            "
+            :title="selectMode ? 'Выйти из режима выделения' : 'Выделить обращения'"
+            :aria-pressed="selectMode"
+            @click="toggleSelectMode"
+          >
+            <ListChecks class="size-5" />
+          </button>
+          <button
+            v-if="canCreate"
+            type="button"
+            class="inline-flex size-10 items-center justify-center rounded-lg bg-brand text-white shadow-sm transition hover:brightness-110"
+            title="Создать обращение"
+            @click="openCreate"
+          >
+            <Plus class="size-5" />
+          </button>
+        </div>
       </div>
 
       <form
@@ -337,11 +375,33 @@ async function onBulkDelete() {
         </div>
       </form>
       <p v-if="bulkMsg" class="mt-2 text-xs text-ok">{{ bulkMsg }}</p>
+      <div
+        v-if="showBulkUi && appeals.items.length"
+        class="mt-3 flex items-center justify-between gap-2 rounded-xl border border-line bg-panel px-3 py-2"
+      >
+        <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-muted">
+          <input
+            type="checkbox"
+            class="size-4 rounded border-line accent-brand"
+            :checked="allPageSelected"
+            @change="toggleSelectAll"
+          />
+          Выбрать все на странице
+        </label>
+        <button
+          type="button"
+          class="flex size-7 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-ink"
+          title="Выйти из режима выделения"
+          @click="exitSelectMode"
+        >
+          <X class="size-3.5" />
+        </button>
+      </div>
     </div>
 
     <div
       class="min-h-0 flex-1 overflow-auto px-3 pb-4 md:px-6"
-      :class="selectedCount ? 'pb-28 md:pb-24' : ''"
+      :class="showBulkUi && selectedCount ? 'pb-28 md:pb-24' : ''"
     >
       <p v-if="appeals.error" class="mb-3 text-sm text-danger">{{ appeals.error }}</p>
       <p v-if="appeals.loading && !appeals.items.length" class="text-sm text-muted">Загрузка…</p>
@@ -359,7 +419,7 @@ async function onBulkDelete() {
           :class="selected.has(a.id) ? 'bg-brand-soft/40' : ''"
           @click="openAppeal(a.id)"
         >
-          <div v-if="canBulk" class="shrink-0" @click.stop>
+          <div v-if="showBulkUi" class="shrink-0" @click.stop>
             <input
               type="checkbox"
               class="size-4 rounded border-line accent-brand"
@@ -409,7 +469,7 @@ async function onBulkDelete() {
           <table class="w-full min-w-[920px] text-left text-sm">
             <thead class="border-b border-line bg-surface/80 text-[11px] font-semibold uppercase tracking-wide text-muted">
               <tr>
-                <th v-if="canBulk" class="w-12 px-4 py-3.5">
+                <th v-if="showBulkUi" class="w-12 px-4 py-3.5">
                   <input
                     type="checkbox"
                     class="size-4 rounded border-line accent-brand"
@@ -439,7 +499,7 @@ async function onBulkDelete() {
                 :class="selected.has(a.id) ? 'bg-brand-soft/40' : 'hover:bg-surface/80'"
                 @click="openAppeal(a.id)"
               >
-                <td v-if="canBulk" class="px-4 py-3.5" @click.stop>
+                <td v-if="showBulkUi" class="px-4 py-3.5" @click.stop>
                   <input
                     type="checkbox"
                     class="size-4 rounded border-line accent-brand"
@@ -604,7 +664,7 @@ async function onBulkDelete() {
     </div>
 
     <div
-      v-if="canBulk && selectedCount"
+      v-if="showBulkUi && selectedCount"
       class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-6"
     >
       <div
@@ -637,7 +697,7 @@ async function onBulkDelete() {
           type="button"
           class="inline-flex items-center gap-1 rounded-xl px-2 py-2 text-sm text-muted hover:text-ink"
           title="Снять выделение"
-          @click="clearSelection"
+          @click="exitSelectMode"
         >
           <X class="size-4" />
         </button>
