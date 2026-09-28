@@ -1869,7 +1869,11 @@ async def repair_message_media_endpoint(
     channel = await db.get(Channel, msg.channel_id)
     if channel is None or channel.transport != ChannelTransport.MAX.value:
         raise HTTPException(status_code=400, detail="Repair supported only for MAX personal")
-    if msg.attachments:
+
+    needs_repair = (not msg.attachments) or any(
+        (not att.storage_path) for att in (msg.attachments or [])
+    )
+    if not needs_repair:
         return message_to_out(msg)
 
     from app.integrations.max_personal.inbox import repair_message_media
@@ -1886,7 +1890,7 @@ async def repair_message_media_endpoint(
         logger.exception("repair-media failed message=%s", message_id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    if not stored:
+    if not stored and not any(att.storage_path for att in (msg.attachments or [])):
         raise HTTPException(status_code=404, detail="MAX did not return attachments for this message")
 
     result = await db.execute(
@@ -1948,35 +1952,65 @@ async def download_attachment(
 
     # MAX okcdn URLs are IP-bound to the server — never redirect the browser.
     # Materialize missing files from remote_url with a browser User-Agent.
-    if path is None and att.remote_url:
-        try:
-            settings = get_settings()
-            data = await fetch_url_bytes(
-                att.remote_url,
-                verify=settings.max_api_verify_ssl,
-            )
-            relative, safe_name, resolved_mime, size = save_bytes(
-                data=data,
-                file_name=att.file_name or "file",
-                message_id=msg.id,
-                mime_type=att.mime_type,
-            )
-            att.storage_path = relative
-            att.file_name = safe_name
-            att.mime_type = resolved_mime or att.mime_type
-            att.size_bytes = size
-            await db.commit()
-            path = absolute_path(relative)
-        except Exception as exc:
-            logger.exception(
-                "Attachment proxy download failed id=%s url=%s",
-                attachment_id,
-                att.remote_url,
-            )
+    if path is None and (att.remote_url or att.provider_file_id):
+        settings = get_settings()
+        url = att.remote_url
+        data = None
+        if url:
+            try:
+                data = await fetch_url_bytes(url, verify=settings.max_api_verify_ssl)
+            except Exception:
+                logger.warning(
+                    "Attachment remote download failed id=%s, will try refresh",
+                    attachment_id,
+                )
+                data = None
+        if data is None and att.provider_file_id:
+            try:
+                from app.integrations.max_personal.inbox import _refresh_attachment_remote_url
+                from app.integrations.max_personal.runtime import runtime as max_runtime
+
+                channel = await db.get(Channel, msg.channel_id)
+                dialog_chat = dialog.external_chat_id
+                if (
+                    channel is not None
+                    and channel.transport == ChannelTransport.MAX.value
+                    and dialog_chat
+                    and msg.external_id
+                ):
+                    client = await max_runtime.ensure_client(channel.id)
+                    url = await _refresh_attachment_remote_url(
+                        att,
+                        client=client,
+                        chat_id=int(dialog_chat),
+                        message_id=int(msg.external_id),
+                    )
+                    if url:
+                        data = await fetch_url_bytes(
+                            url, verify=settings.max_api_verify_ssl
+                        )
+            except Exception:
+                logger.exception(
+                    "Attachment refresh download failed id=%s", attachment_id
+                )
+                data = None
+        if data is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File missing on disk",
-            ) from exc
+            )
+        relative, safe_name, resolved_mime, size = save_bytes(
+            data=data,
+            file_name=att.file_name or "file",
+            message_id=msg.id,
+            mime_type=att.mime_type,
+        )
+        att.storage_path = relative
+        att.file_name = safe_name
+        att.mime_type = resolved_mime or att.mime_type
+        att.size_bytes = size
+        await db.commit()
+        path = absolute_path(relative)
 
     if path is None or not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")

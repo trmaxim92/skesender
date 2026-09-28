@@ -957,6 +957,41 @@ async def _resolve_pymax_attach(
     return None, "file", None, None, None
 
 
+async def _refresh_attachment_remote_url(
+    att: MessageAttachment,
+    *,
+    client: Any,
+    chat_id: int,
+    message_id: int,
+) -> str | None:
+    """Ask MAX for a fresh CDN URL when the stored one expired / is single-use."""
+    if not att.provider_file_id:
+        return None
+    try:
+        file_id = int(att.provider_file_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        if att.kind == AttachmentKind.VIDEO.value:
+            req = await client.get_video_by_id(chat_id, message_id, file_id)
+        elif att.kind == AttachmentKind.FILE.value:
+            req = await client.get_file_by_id(chat_id, message_id, file_id)
+        else:
+            return None
+        url = _clean_url(getattr(req, "url", None) if req else None)
+        if url:
+            att.remote_url = url
+        return url
+    except Exception:
+        logger.exception(
+            "refresh remote url failed kind=%s provider=%s msg=%s",
+            att.kind,
+            att.provider_file_id,
+            message_id,
+        )
+        return None
+
+
 async def repair_message_media(
     session: AsyncSession,
     *,
@@ -969,16 +1004,30 @@ async def repair_message_media(
         return list(msg.attachments or [])
     existing = list(msg.attachments or [])
     settings = get_settings()
-    if existing:
+    dialog = await session.get(Dialog, msg.dialog_id)
+    chat_id = int(dialog.external_chat_id) if dialog and dialog.external_chat_id else None
+    message_id = int(msg.external_id)
+
+    if existing and chat_id is not None:
         changed = False
         for att in existing:
-            if att.storage_path or not att.remote_url:
+            if att.storage_path:
+                continue
+            url = att.remote_url
+            if not url or att.kind in {
+                AttachmentKind.VIDEO.value,
+                AttachmentKind.FILE.value,
+            }:
+                # Prefer a fresh signed URL — okcdn links can go stale quickly.
+                refreshed = await _refresh_attachment_remote_url(
+                    att, client=client, chat_id=chat_id, message_id=message_id
+                )
+                if refreshed:
+                    url = refreshed
+            if not url:
                 continue
             try:
-                data = await fetch_url_bytes(
-                    att.remote_url,
-                    verify=settings.max_api_verify_ssl,
-                )
+                data = await fetch_url_bytes(url, verify=settings.max_api_verify_ssl)
                 relative, safe_name, resolved_mime, size = save_bytes(
                     data=data,
                     file_name=att.file_name or "file",
@@ -999,11 +1048,8 @@ async def repair_message_media(
         if any(att.storage_path for att in existing):
             return existing
 
-    dialog = await session.get(Dialog, msg.dialog_id)
     if dialog is None or not dialog.external_chat_id:
         return existing
-    chat_id = int(dialog.external_chat_id)
-    message_id = int(msg.external_id)
     attaches = await _fetch_message_attaches(client, chat_id, message_id)
     if not attaches:
         try:
