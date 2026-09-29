@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.appeals import ensure_open_appeal
 from app.config import get_settings
 from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
+from app.dialogs import ensure_dialog_crm_contact, format_contact_phone
 from app.models import (
     AttachmentKind,
     Channel,
@@ -405,9 +406,13 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             dialog.contact_avatar_url = avatar
             dialog.contact_external_id = contact_ext
             if phone:
-                dialog.contact_phone = phone
+                dialog.contact_phone = format_contact_phone(phone) or phone
             elif has_self_phone:
                 dialog.contact_phone = None
+            try:
+                await ensure_dialog_crm_contact(session, dialog)
+            except Exception:
+                logger.exception("CRM contact link failed during backfill dialog=%s", dialog.id)
             updated += 1
     if updated:
         await session.flush()
@@ -562,6 +567,7 @@ async def ingest_pymax_message(
 
     my_phone = _my_phone(client)
     contact_phone = _peer_phone(contact_phone, my_phone=my_phone)
+    contact_phone = format_contact_phone(contact_phone)
 
     dialog = await get_or_create_dialog(
         session,
@@ -589,8 +595,23 @@ async def ingest_pymax_message(
             dialog.contact_name = contact_name
     if dialog.contact_phone and _peer_phone(dialog.contact_phone, my_phone=my_phone) is None:
         dialog.contact_phone = None
-    if contact_phone and not dialog.contact_phone:
+    if contact_phone and (
+        not dialog.contact_phone
+        or dialog.contact_phone != contact_phone
+    ):
         dialog.contact_phone = contact_phone
+    if contact_id and (
+        not dialog.contact_external_id
+        or dialog.contact_external_id == str(chat_id)
+        or (
+            my_user_id is not None and dialog.contact_external_id == str(my_user_id)
+        )
+    ):
+        dialog.contact_external_id = contact_id
+    try:
+        await ensure_dialog_crm_contact(session, dialog)
+    except Exception:
+        logger.exception("CRM contact link failed dialog=%s", dialog.id)
 
     if message_id is not None:
         exists = await session.execute(
@@ -735,17 +756,46 @@ async def ingest_pymax_message(
             dialog.contact_username = contact_username
             if contact_avatar_url:
                 dialog.contact_avatar_url = contact_avatar_url
-            if sender_id is not None:
-                dialog.contact_external_id = str(sender_id)
-            if contact_phone and not dialog.contact_phone:
+            peer_ext = _lookup_user_id(
+                chat_id=int(chat_id),
+                my_id=int(my_user_id) if my_user_id is not None else None,
+                sender_id=int(sender_id) if sender_id is not None else None,
+            )
+            if peer_ext is not None:
+                dialog.contact_external_id = str(peer_ext)
+            if contact_phone and (
+                not dialog.contact_phone
+                or _peer_phone(dialog.contact_phone, my_phone=my_phone) is None
+            ):
                 dialog.contact_phone = contact_phone
             elif dialog.contact_phone and _peer_phone(
                 dialog.contact_phone, my_phone=my_phone
             ) is None:
                 dialog.contact_phone = contact_phone
+            try:
+                await ensure_dialog_crm_contact(session, dialog)
+            except Exception:
+                logger.exception("CRM contact link failed dialog=%s", dialog.id)
     else:
         # Native outbound (phone/desktop) — operator already handled the thread.
         await clear_unread(session, dialog)
+        if not _is_group_chat(chat_id):
+            peer_ext = _lookup_user_id(
+                chat_id=int(chat_id),
+                my_id=int(my_user_id) if my_user_id is not None else None,
+                sender_id=None,
+            )
+            if peer_ext is not None and (
+                not dialog.contact_external_id
+                or dialog.contact_external_id == str(chat_id)
+            ):
+                dialog.contact_external_id = str(peer_ext)
+            if contact_phone and not dialog.contact_phone:
+                dialog.contact_phone = contact_phone
+            try:
+                await ensure_dialog_crm_contact(session, dialog)
+            except Exception:
+                logger.exception("CRM contact link failed dialog=%s", dialog.id)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from sqlalchemy import select, update
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Channel,
+    ChannelTransport,
     ChatMessage,
     Contact,
     ContactStatus,
@@ -17,6 +19,10 @@ from app.models import (
     MessageDirection,
     utcnow,
 )
+
+logger = logging.getLogger(__name__)
+
+_MAX_FAMILY = (ChannelTransport.MAX.value, ChannelTransport.MAXBOT.value)
 
 
 def _normalize_phone(raw: str | None) -> str:
@@ -26,47 +32,164 @@ def _normalize_phone(raw: str | None) -> str:
     return digits
 
 
-async def ensure_dialog_crm_contact(session: AsyncSession, dialog: Dialog) -> Contact | None:
-    """Link dialog to a CRM Contact by phone (create if missing)."""
-    if dialog.contact_id is not None:
-        return await session.get(Contact, dialog.contact_id)
+def format_contact_phone(raw: str | None) -> str | None:
+    """Canonical +7… display form, or None if not a real phone."""
+    if not raw or is_messenger_phone_key(raw):
+        return None
+    digits = _normalize_phone(raw)
+    if len(digits) < 10:
+        return None
+    return f"+{digits}"
 
-    phone = _normalize_phone(dialog.contact_phone)
-    if len(phone) < 5:
+
+def messenger_family(transport: str | None) -> str | None:
+    t = (transport or "").lower()
+    if t in _MAX_FAMILY:
+        return "max"
+    if t in {ChannelTransport.TELEGRAM.value, ChannelTransport.TGAPI.value}:
+        return "telegram"
+    return None
+
+
+def messenger_phone_key(family: str, external_user_id: str) -> str:
+    """Synthetic Contact.phone when MAX/Telegram hide the real number."""
+    return f"{family}:{external_user_id}"
+
+
+def is_messenger_phone_key(phone: str | None) -> bool:
+    raw = (phone or "").strip()
+    if not raw or ":" not in raw:
+        return False
+    family, _, rest = raw.partition(":")
+    return family in {"max", "telegram"} and bool(rest.strip())
+
+
+def _family_transports(family: str) -> tuple[str, ...]:
+    if family == "max":
+        return _MAX_FAMILY
+    if family == "telegram":
+        return (ChannelTransport.TELEGRAM.value, ChannelTransport.TGAPI.value)
+    return ()
+
+
+async def _find_contact_by_messenger_id(
+    session: AsyncSession,
+    *,
+    family: str,
+    external_user_id: str,
+) -> Contact | None:
+    key = messenger_phone_key(family, external_user_id)
+    by_key = (
+        await session.execute(select(Contact).where(Contact.phone == key).limit(1))
+    ).scalar_one_or_none()
+    if by_key is not None:
+        return by_key
+
+    transports = _family_transports(family)
+    if not transports:
+        return None
+    row = (
+        await session.execute(
+            select(Dialog.contact_id)
+            .join(Channel, Channel.id == Dialog.channel_id)
+            .where(
+                Dialog.contact_external_id == external_user_id,
+                Dialog.contact_id.is_not(None),
+                Channel.transport.in_(transports),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return await session.get(Contact, int(row))
+
+
+def _apply_contact_name(contact: Contact, dialog: Dialog) -> None:
+    if dialog.contact_name and (
+        not contact.name
+        or contact.name == contact.phone
+        or is_messenger_phone_key(contact.name)
+        or contact.name.startswith("User ")
+        or contact.name.startswith("Chat ")
+    ):
+        contact.name = dialog.contact_name
+
+
+async def ensure_dialog_crm_contact(session: AsyncSession, dialog: Dialog) -> Contact | None:
+    """Link dialog to a CRM Contact by phone and/or messenger user id.
+
+    MAX often hides the phone. We still create/link a contact via
+    ``max:{user_id}`` so personal-channel and bot threads stay one card.
+    """
+    channel = await session.get(Channel, dialog.channel_id)
+    family = messenger_family(channel.transport if channel else None)
+    external_id = (dialog.contact_external_id or "").strip()
+    if external_id and external_id == (dialog.external_chat_id or "").strip():
+        # Legacy personal MAX rows stored dialog chat id here — not a user id.
+        if family == "max" and not external_id.startswith("-"):
+            external_id = ""
+
+    real_phone = format_contact_phone(dialog.contact_phone)
+    if real_phone:
+        dialog.contact_phone = real_phone
+    elif dialog.contact_phone and not is_messenger_phone_key(dialog.contact_phone):
+        # Garbage / too short — clear so the client card stays empty.
+        dialog.contact_phone = None
+
+    if real_phone and channel is not None:
+        channel_phone = _normalize_phone(channel.identity)
+        if len(channel_phone) >= 5 and channel_phone == _normalize_phone(real_phone):
+            dialog.contact_phone = None
+            real_phone = None
+
+    contact: Contact | None = None
+    if dialog.contact_id is not None:
+        contact = await session.get(Contact, dialog.contact_id)
+
+    if contact is None and real_phone:
+        contact = (
+            await session.execute(select(Contact).where(Contact.phone == real_phone).limit(1))
+        ).scalar_one_or_none()
+
+    if contact is None and family and external_id:
+        contact = await _find_contact_by_messenger_id(
+            session, family=family, external_user_id=external_id
+        )
+
+    if contact is None and not real_phone and not (family and external_id):
         return None
 
-    # Never treat the channel's own number as the client's phone.
-    channel = await session.get(Channel, dialog.channel_id)
-    if channel is not None:
-        channel_phone = _normalize_phone(channel.identity)
-        if len(channel_phone) >= 5 and channel_phone == phone:
-            dialog.contact_phone = None
-            return None
-
-    existing = (
-        await session.execute(select(Contact).where(Contact.phone == phone).limit(1))
-    ).scalar_one_or_none()
-    if existing is not None:
-        dialog.contact_id = existing.id
-        if dialog.department_id and existing.department_id is None:
-            existing.department_id = dialog.department_id
-        if dialog.contact_name and (
-            not existing.name
-            or existing.name == existing.phone
-            or existing.name.startswith("User ")
+    if contact is None:
+        phone_value = real_phone or messenger_phone_key(family or "max", external_id)
+        contact = Contact(
+            name=(dialog.contact_name or "").strip() or phone_value,
+            phone=phone_value,
+            status=ContactStatus.NEW.value,
+            department_id=dialog.department_id,
+        )
+        session.add(contact)
+        await session.flush()
+    else:
+        if real_phone and (
+            is_messenger_phone_key(contact.phone) or not contact.phone
         ):
-            existing.name = dialog.contact_name
-        return existing
+            # Upgrade synthetic key → real phone when MAX finally exposes it.
+            taken = (
+                await session.execute(
+                    select(Contact.id).where(
+                        Contact.phone == real_phone, Contact.id != contact.id
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if taken is None:
+                contact.phone = real_phone
+        if dialog.department_id and contact.department_id is None:
+            contact.department_id = dialog.department_id
+        _apply_contact_name(contact, dialog)
 
-    contact = Contact(
-        name=(dialog.contact_name or "").strip() or phone,
-        phone=phone,
-        status=ContactStatus.NEW.value,
-        department_id=dialog.department_id,
-    )
-    session.add(contact)
-    await session.flush()
     dialog.contact_id = contact.id
+    _apply_contact_name(contact, dialog)
     return contact
 
 
@@ -88,6 +211,7 @@ async def get_or_create_dialog(
         )
     )
     dialog = result.scalar_one_or_none()
+    phone = format_contact_phone(contact_phone)
     if dialog:
         if dialog.department_id is None and channel.department_id is not None:
             dialog.department_id = channel.department_id
@@ -101,12 +225,19 @@ async def get_or_create_dialog(
             dialog.contact_name = contact_name
         if contact_avatar_url and not dialog.contact_avatar_url:
             dialog.contact_avatar_url = contact_avatar_url
-        if contact_phone and not dialog.contact_phone:
-            dialog.contact_phone = contact_phone
+        if contact_external_id and (
+            not dialog.contact_external_id
+            or dialog.contact_external_id == dialog.external_chat_id
+        ):
+            dialog.contact_external_id = contact_external_id
+        if phone and (
+            not dialog.contact_phone or is_messenger_phone_key(dialog.contact_phone)
+        ):
+            dialog.contact_phone = phone
         try:
             await ensure_dialog_crm_contact(session, dialog)
         except Exception:
-            pass
+            logger.exception("ensure_dialog_crm_contact failed dialog=%s", dialog.id)
         return dialog
 
     dialog = Dialog(
@@ -116,7 +247,7 @@ async def get_or_create_dialog(
         contact_name=contact_name or "Клиент",
         contact_username=contact_username,
         contact_avatar_url=contact_avatar_url,
-        contact_phone=contact_phone,
+        contact_phone=phone,
         department_id=channel.department_id,
         last_message="",
         last_at=utcnow(),
@@ -129,7 +260,11 @@ async def get_or_create_dialog(
             try:
                 await ensure_dialog_crm_contact(session, dialog)
             except Exception:
-                pass
+                logger.exception(
+                    "ensure_dialog_crm_contact failed new dialog channel=%s chat=%s",
+                    channel.id,
+                    external_chat_id,
+                )
     except IntegrityError:
         result = await session.execute(
             select(Dialog).where(

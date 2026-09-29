@@ -1507,6 +1507,13 @@ async def update_client_fields(
     if body.external_id is not None:
         dialog.contact_external_id = body.external_id.strip() or None
 
+    from app.dialogs import ensure_dialog_crm_contact
+
+    try:
+        await ensure_dialog_crm_contact(db, dialog)
+    except Exception:
+        pass
+
     defs = await list_field_definitions(
         db,
         scope=FieldScope.CLIENT.value,

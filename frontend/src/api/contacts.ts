@@ -329,8 +329,26 @@ export async function sendContactMessageRequest(
   })
 }
 
+/** Synthetic CRM phone when messenger hides the real number (`max:123`). */
+export function isMessengerPhoneKey(phone: string | null | undefined): boolean {
+  const raw = (phone || '').trim()
+  if (!raw.includes(':')) return false
+  const family = raw.slice(0, raw.indexOf(':'))
+  return family === 'max' || family === 'telegram'
+}
+
+export function displayPhone(phone: string | null | undefined): string {
+  if (!phone) return '—'
+  if (!isMessengerPhoneKey(phone)) return phone
+  const [family, id] = phone.split(':')
+  if (family === 'max') return `MAX · ${id || '—'}`
+  if (family === 'telegram') return `Telegram · ${id || '—'}`
+  return phone
+}
+
 /** Opens the OS/SIP dialer via tel: (softphones usually intercept this). */
 export function telHref(phone: string): string {
+  if (isMessengerPhoneKey(phone)) return '#'
   const digits = phone.replace(/[^\d+]/g, '')
   return `tel:${digits}`
 }

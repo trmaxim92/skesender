@@ -243,8 +243,18 @@ async def _handle_message_created(
                 dialog.contact_avatar_url = avatar
             if user_id is not None:
                 dialog.contact_external_id = str(user_id)
+        try:
+            await ensure_dialog_crm_contact(session, dialog)
+        except Exception:
+            logger.exception("CRM contact link failed maxbot dialog=%s", dialog.id)
     else:
         await clear_unread(session, dialog)
+        if user_id is not None and not dialog.contact_external_id:
+            dialog.contact_external_id = str(user_id)
+        try:
+            await ensure_dialog_crm_contact(session, dialog)
+        except Exception:
+            logger.exception("CRM contact link failed maxbot dialog=%s", dialog.id)
 
     await session.refresh(msg, attribute_names=["attachments", "reply_to"])
     return msg

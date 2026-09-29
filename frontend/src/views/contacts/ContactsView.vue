@@ -10,6 +10,8 @@ import {
   importContactsRequest,
   listContactsRequest,
   syncContactsFromFleetRequest,
+  displayPhone,
+  isMessengerPhoneKey,
   telHref,
   type Contact,
   type ContactFilter,
@@ -464,7 +466,7 @@ const subtitle = computed(() => {
                 {{ c.name || 'Без имени' }}
               </div>
               <div class="mt-0.5 truncate text-xs text-muted">
-                {{ c.phone }}{{ companyOf(c) ? ` · ${companyOf(c)}` : '' }}
+                {{ displayPhone(c.phone) }}{{ companyOf(c) ? ` · ${companyOf(c)}` : '' }}
               </div>
               <div class="mt-1 flex items-center gap-1.5">
                 <span
@@ -483,7 +485,7 @@ const subtitle = computed(() => {
               </div>
             </div>
             <a
-              v-if="c.phone"
+              v-if="c.phone && !isMessengerPhoneKey(c.phone)"
               :href="telHref(c.phone)"
               class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand"
               title="Позвонить"
@@ -558,13 +560,15 @@ const subtitle = computed(() => {
                 <td class="px-4 py-3 text-muted">{{ companyOf(c) || '—' }}</td>
                 <td class="px-4 py-3" @click.stop>
                   <a
+                    v-if="c.phone && !isMessengerPhoneKey(c.phone)"
                     :href="telHref(c.phone)"
                     class="inline-flex items-center gap-1.5 font-medium text-brand hover:underline"
                     title="Позвонить"
                   >
                     <Phone class="size-3.5 opacity-70" />
-                    {{ c.phone }}
+                    {{ displayPhone(c.phone) }}
                   </a>
+                  <span v-else class="text-muted">{{ displayPhone(c.phone) }}</span>
                 </td>
                 <td class="px-4 py-3 text-xs">
                   <span

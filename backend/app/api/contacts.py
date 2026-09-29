@@ -1051,6 +1051,14 @@ async def send_contact_message(
     user = await load_user_rbac(db, user)
     contact = await _get_contact(db, contact_id)
 
+    from app.dialogs import is_messenger_phone_key
+
+    if is_messenger_phone_key(contact.phone) or len(_normalize_phone(contact.phone)) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У контакта нет реального номера — отправка по телефону недоступна",
+        )
+
     if contact.assignee_id is None:
         await db.execute(
             update(Contact)

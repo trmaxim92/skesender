@@ -8,6 +8,8 @@ import {
   claimNextContactRequest,
   getContactRequest,
   setContactAppealStatusRequest,
+  displayPhone,
+  isMessengerPhoneKey,
   telHref,
   updateContactFieldsRequest,
   type Contact,
@@ -456,7 +458,7 @@ function onSent(dialogId: number) {
         <div class="text-sm font-semibold text-ink">История</div>
         <div class="flex flex-wrap gap-2">
           <a
-            v-if="detail"
+            v-if="detail && detail.phone && !isMessengerPhoneKey(detail.phone)"
             :href="telHref(detail.phone)"
             class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:opacity-90"
             title="Откроет SIP / телефонное приложение"
@@ -533,9 +535,14 @@ function onSent(dialogId: number) {
               />
               {{ detail.currentAppeal.statusDef.name }}
             </span>
-            <a :href="telHref(detail.phone)" class="ml-auto font-medium text-brand hover:underline">
-              {{ detail.phone }}
+            <a
+              v-if="detail.phone && !isMessengerPhoneKey(detail.phone)"
+              :href="telHref(detail.phone)"
+              class="ml-auto font-medium text-brand hover:underline"
+            >
+              {{ displayPhone(detail.phone) }}
             </a>
+            <span v-else class="ml-auto text-muted">{{ displayPhone(detail.phone) }}</span>
           </div>
           <p class="mb-2 text-xs text-muted">Этап обзвона</p>
           <div class="flex flex-wrap gap-2">
