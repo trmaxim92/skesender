@@ -373,7 +373,7 @@ input[type='checkbox']:indeterminate {
   min-width: 17.5rem;
 }
 
-/* ——— Knowledge base (document editor) ——— */
+/* --- Knowledge base (document editor) --- */
 .kb-doc {
   display: flex;
   flex-direction: column;
