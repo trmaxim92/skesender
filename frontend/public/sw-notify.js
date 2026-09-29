@@ -83,21 +83,32 @@ self.addEventListener('push', (event) => {
   const dialogId = data.dialogId != null ? String(data.dialogId) : null
   const newsId = data.newsId != null ? String(data.newsId) : null
   const kind = data.kind || 'message'
+  const isNews = kind === 'news'
+  const icon = typeof data.icon === 'string' && data.icon ? data.icon : ICON
+  const badge = typeof data.badge === 'string' && data.badge ? data.badge : BADGE
+  const actions = Array.isArray(data.actions) && data.actions.length
+    ? data.actions
+    : isNews
+      ? [
+          { action: 'open', title: 'Читать' },
+          { action: 'dismiss', title: 'Позже' },
+        ]
+      : [
+          { action: 'open', title: 'Открыть' },
+          { action: 'dismiss', title: 'Скрыть' },
+        ]
   const options = {
-    body: data.body || 'Новое сообщение',
-    icon: ICON,
-    badge: BADGE,
+    body: data.body || (isNews ? 'Новое объявление в кабинете' : 'Новое сообщение'),
+    icon,
+    badge,
     tag: data.tag || (dialogId ? `oe-chat-${dialogId}` : newsId ? `oe-news-${newsId}` : 'oe-chat'),
     renotify: true,
-    requireInteraction: data.requireInteraction !== false,
+    requireInteraction: data.requireInteraction === true,
     silent: false,
-    vibrate: [160, 80, 160],
+    vibrate: isNews ? [120, 60, 120] : [160, 80, 160],
     lang: 'ru',
     data: { dialogId, newsId, kind },
-    actions: [
-      { action: 'open', title: 'Открыть' },
-      { action: 'dismiss', title: 'Скрыть' },
-    ],
+    actions,
   }
 
   event.waitUntil(

@@ -16,6 +16,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useMyTemplatesStore } from '@/stores/myTemplates'
 import { fetchMyTemplateMediaBlob } from '@/api/cabinet'
+import SoftSelect from '@/components/ui/SoftSelect.vue'
 import type { ChannelTransport, Template, TemplateKind } from '@/types'
 import { transportLabel } from '@/types'
 import {
@@ -103,6 +104,21 @@ const grouped = computed(() => {
   }
   return groups
 })
+
+const categoryOptions = computed(() => [
+  { value: '', label: 'Выберите категорию' },
+  ...templates.categories.map((c) => ({ value: c.id, label: c.name })),
+])
+
+const transportOptions = computed(() => [
+  { value: 'all', label: 'Все каналы' },
+  ...Object.entries(transportLabel).map(([value, label]) => ({ value, label })),
+])
+
+const kindOptions = [
+  { value: 'general', label: 'Обычный ответ' },
+  { value: 'appeal_closed', label: 'При закрытии обращения' },
+]
 
 onMounted(async () => {
   await templates.fetchAll()
@@ -526,24 +542,17 @@ async function removeTemplate(id: string) {
             <h2 class="text-base font-bold text-ink">Категории и каналы</h2>
             <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="block">
+                <div class="block">
                   <span class="mb-1.5 block text-sm font-medium text-ink">
                     Категория <span class="text-brand">*</span>
                   </span>
-                  <select
+                  <SoftSelect
                     v-model="categoryId"
-                    class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm outline-none ring-brand/20 focus:ring-2"
-                  >
-                    <option value="">Выберите категорию</option>
-                    <option
-                      v-for="cat in templates.categories"
-                      :key="cat.id"
-                      :value="cat.id"
-                    >
-                      {{ cat.name }}
-                    </option>
-                  </select>
-                </label>
+                    :options="categoryOptions"
+                    placeholder="Выберите категорию"
+                    aria-label="Категория"
+                  />
+                </div>
                 <button
                   v-if="canWrite"
                   type="button"
@@ -591,35 +600,25 @@ async function removeTemplate(id: string) {
                 </div>
               </div>
 
-              <label class="block">
+              <div class="block">
                 <span class="mb-1.5 block text-sm font-medium text-ink">
                   Канал <span class="text-brand">*</span>
                 </span>
-                <select
+                <SoftSelect
                   v-model="transport"
-                  class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm outline-none ring-brand/20 focus:ring-2"
-                >
-                  <option value="all">Все каналы</option>
-                  <option
-                    v-for="(label, key) in transportLabel"
-                    :key="key"
-                    :value="key"
-                  >
-                    {{ label }}
-                  </option>
-                </select>
-              </label>
+                  :options="transportOptions"
+                  aria-label="Канал"
+                />
+              </div>
 
-              <label class="block sm:col-span-2">
+              <div class="block sm:col-span-2 sm:max-w-xs">
                 <span class="mb-1.5 block text-sm font-medium text-ink">Тип</span>
-                <select
+                <SoftSelect
                   v-model="kind"
-                  class="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm outline-none ring-brand/20 focus:ring-2 sm:max-w-xs"
-                >
-                  <option value="general">Обычный ответ</option>
-                  <option value="appeal_closed">При закрытии обращения</option>
-                </select>
-              </label>
+                  :options="kindOptions"
+                  aria-label="Тип шаблона"
+                />
+              </div>
             </div>
           </section>
 

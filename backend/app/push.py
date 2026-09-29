@@ -257,6 +257,39 @@ async def send_push_to_users(
     return await _deliver_rows(session, rows, payload)
 
 
+def _news_push_copy(*, title: str, body: str) -> tuple[str, str]:
+    """Compact, readable OS notification text for system news."""
+    clean_title = (title or "").strip() or "Обновления кабинета"
+    push_title = f"SkySender · {clean_title}" if not clean_title.lower().startswith("skysender") else clean_title
+
+    bullets: list[str] = []
+    for raw in (body or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(("•", "-", "–", "*")):
+            line = line.lstrip("•-*– ").strip()
+        if line.lower().startswith("что нового"):
+            continue
+        if line.lower().startswith("если что"):
+            continue
+        if line:
+            bullets.append(line)
+
+    if bullets:
+        head = bullets[:2]
+        more = len(bullets) - len(head)
+        preview = " · ".join(h[:70] for h in head)
+        if more > 0:
+            preview = f"{preview} · и ещё {more}"
+    else:
+        preview = (body or "").strip() or "Открыто новое объявление"
+
+    if len(preview) > 160:
+        preview = preview[:159] + "…"
+    return push_title, preview
+
+
 async def notify_system_news(*, news_id: int, title: str, body: str) -> None:
     """Fan-out Web Push for a published system news item (all subscribed devices)."""
     try:
@@ -265,16 +298,20 @@ async def notify_system_news(*, news_id: int, title: str, body: str) -> None:
             user_ids = list(result.scalars().all())
             if not user_ids:
                 return
-            preview = (body or "").strip()
-            if len(preview) > 140:
-                preview = preview[:139] + "…"
+            push_title, preview = _news_push_copy(title=title, body=body)
             payload = {
-                "title": (title or "Новости системы").strip() or "Новости системы",
-                "body": preview or "Открыто новое объявление в SkySender",
+                "title": push_title,
+                "body": preview,
                 "tag": f"oe-news-{news_id}",
                 "kind": "news",
                 "newsId": str(news_id),
                 "requireInteraction": False,
+                "icon": "/oe-notify-icon.png",
+                "badge": "/oe-badge.png",
+                "actions": [
+                    {"action": "open", "title": "Читать"},
+                    {"action": "dismiss", "title": "Позже"},
+                ],
             }
             n = await send_push_to_users(session, user_ids, payload)
             await session.commit()
