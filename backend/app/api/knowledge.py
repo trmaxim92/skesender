@@ -5,15 +5,17 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import datetime, timezone
+from html import unescape
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import KnowledgeArticle, KnowledgeFolder, User
+from app.models import AttachmentKind, KnowledgeArticle, KnowledgeFolder, User
 from app.rbac import ACTION_WRITE, SECTION_KNOWLEDGE, user_can
 from app.schemas import (
     KbArticleCreateRequest,
@@ -24,10 +26,43 @@ from app.schemas import (
     KbFolderNodeOut,
     KbFolderReorderRequest,
     KbFolderUpdateRequest,
+    KbImageOut,
+    KbSearchHitOut,
+    KbSearchOut,
     KbTreeOut,
 )
+from app.storage.attachments import absolute_path, guess_kind, save_bytes
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _strip_html(html: str) -> str:
+    text = _TAG_RE.sub(" ", html or "")
+    text = unescape(text)
+    return _WS_RE.sub(" ", text).strip()
+
+
+def _snippet(html: str, query: str, *, radius: int = 70) -> str:
+    plain = _strip_html(html)
+    if not plain:
+        return ""
+    q = (query or "").strip().lower()
+    low = plain.lower()
+    idx = low.find(q) if q else -1
+    if idx < 0:
+        return plain[: radius * 2] + ("…" if len(plain) > radius * 2 else "")
+    start = max(0, idx - radius)
+    end = min(len(plain), idx + len(q) + radius)
+    chunk = plain[start:end]
+    if start > 0:
+        chunk = "…" + chunk
+    if end < len(plain):
+        chunk = chunk + "…"
+    return chunk
 
 
 def _require_knowledge(user: User) -> None:
@@ -167,6 +202,90 @@ async def knowledge_tree(
     )
     folders = list(result.scalars().unique().all())
     return KbTreeOut(folders=_build_tree(folders, include_unpublished=can_write))
+
+
+@router.get("/search", response_model=KbSearchOut)
+async def search_articles(
+    q: str = "",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> KbSearchOut:
+    _require_knowledge(user)
+    query = (q or "").strip()
+    if len(query) < 2:
+        return KbSearchOut(items=[])
+    pattern = f"%{query}%"
+    stmt = (
+        select(KnowledgeArticle)
+        .where(
+            or_(
+                KnowledgeArticle.title.ilike(pattern),
+                KnowledgeArticle.body_html.ilike(pattern),
+            )
+        )
+        .order_by(KnowledgeArticle.updated_at.desc())
+        .limit(40)
+    )
+    if not user_can(user, ACTION_WRITE):
+        stmt = stmt.where(KnowledgeArticle.is_published.is_(True))
+    rows = list((await db.execute(stmt)).scalars().all())
+    return KbSearchOut(
+        items=[
+            KbSearchHitOut(
+                id=a.id,
+                folder_id=a.folder_id,
+                title=a.title,
+                snippet=_snippet(a.body_html or "", query),
+                is_published=bool(a.is_published),
+                updated_at=a.updated_at,
+            )
+            for a in rows
+        ]
+    )
+
+
+@router.post("/images", response_model=KbImageOut, status_code=status.HTTP_201_CREATED)
+async def upload_knowledge_image(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+) -> KbImageOut:
+    _require_write(user)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Файл не выбран")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Изображение больше 8 МБ")
+    kind = guess_kind(file.content_type, file.filename)
+    if kind != AttachmentKind.IMAGE:
+        raise HTTPException(status_code=400, detail="Можно загрузить только изображение")
+    relative, safe_name, _mime, _size = save_bytes(
+        data=data,
+        file_name=file.filename,
+        mime_type=file.content_type,
+        subdir="kb",
+    )
+    return KbImageOut(url=f"/api/knowledge/media/{relative}", file_name=safe_name)
+
+
+@router.get("/media/{file_path:path}")
+async def knowledge_media(
+    file_path: str,
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    _require_knowledge(user)
+    # Only allow files under the kb/ upload prefix.
+    normalized = (file_path or "").replace("\\", "/").lstrip("/")
+    if not normalized.startswith("kb/") or ".." in normalized.split("/"):
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    try:
+        path = absolute_path(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Файл не найден") from exc
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return FileResponse(path, filename=path.name)
 
 
 @router.get("/articles/{article_id}", response_model=KbArticleOut)

@@ -172,3 +172,76 @@ export async function updateKnowledgeArticle(
 export async function deleteKnowledgeArticle(id: number): Promise<void> {
   await api(`/api/knowledge/articles/${id}`, { method: 'DELETE' })
 }
+
+export async function reorderKnowledgeFolders(
+  items: { id: number; parentId: number | null; sortOrder: number }[],
+): Promise<KbFolderNode[]> {
+  const data = await api<ApiTree>('/api/knowledge/folders/reorder', {
+    method: 'POST',
+    json: {
+      items: items.map((i) => ({
+        id: i.id,
+        parent_id: i.parentId,
+        sort_order: i.sortOrder,
+      })),
+    },
+  })
+  return (data.folders ?? []).map(mapFolder)
+}
+
+export type KbSearchHit = {
+  id: number
+  folderId: number
+  title: string
+  snippet: string
+  isPublished: boolean
+  updatedAt: string
+}
+
+export async function searchKnowledgeArticles(q: string): Promise<KbSearchHit[]> {
+  const data = await api<{
+    items: {
+      id: number
+      folder_id: number
+      title: string
+      snippet: string
+      is_published: boolean
+      updated_at: string
+    }[]
+  }>(`/api/knowledge/search?q=${encodeURIComponent(q)}`)
+  return (data.items ?? []).map((i) => ({
+    id: i.id,
+    folderId: i.folder_id,
+    title: i.title,
+    snippet: i.snippet ?? '',
+    isPublished: i.is_published,
+    updatedAt: i.updated_at,
+  }))
+}
+
+export async function uploadKnowledgeImage(file: File): Promise<{ url: string; fileName: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  const token = localStorage.getItem('oe_access_token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch('/api/knowledge/images', { method: 'POST', headers, body: form })
+  const raw = await response.text()
+  let data: unknown = null
+  if (raw) {
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      data = raw
+    }
+  }
+  if (!response.ok) {
+    const detail =
+      typeof data === 'object' && data && 'detail' in data
+        ? String((data as { detail: unknown }).detail)
+        : `HTTP ${response.status}`
+    throw new Error(detail)
+  }
+  const parsed = data as { url: string; file_name: string }
+  return { url: parsed.url, fileName: parsed.file_name }
+}

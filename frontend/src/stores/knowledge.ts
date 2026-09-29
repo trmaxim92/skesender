@@ -7,6 +7,7 @@ import {
   deleteKnowledgeFolder,
   fetchKnowledgeArticle,
   fetchKnowledgeTree,
+  reorderKnowledgeFolders,
   updateKnowledgeArticle,
   updateKnowledgeFolder,
 } from '@/api/knowledge'
@@ -22,6 +23,36 @@ function countArticles(nodes: KbFolderNode[]): number {
   return n
 }
 
+function findFolder(nodes: KbFolderNode[], id: number): KbFolderNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    const nested = findFolder(n.children, id)
+    if (nested) return nested
+  }
+  return null
+}
+
+function siblingsOf(nodes: KbFolderNode[], folderId: number): KbFolderNode[] | null {
+  for (const n of nodes) {
+    if (n.id === folderId) return nodes
+    const nested = siblingsOf(n.children, folderId)
+    if (nested) return nested
+  }
+  return null
+}
+
+function flattenFolders(
+  nodes: KbFolderNode[],
+  depth = 0,
+): { id: number; title: string; depth: number }[] {
+  const out: { id: number; title: string; depth: number }[] = []
+  for (const n of nodes) {
+    out.push({ id: n.id, title: n.title, depth })
+    out.push(...flattenFolders(n.children, depth + 1))
+  }
+  return out
+}
+
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const folders = ref<KbFolderNode[]>([])
   const current = ref<KbArticle | null>(null)
@@ -32,6 +63,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   const isEmpty = computed(() => folders.value.length === 0)
   const articleCount = computed(() => countArticles(folders.value))
+  const flatFolderOptions = computed(() => flattenFolders(folders.value))
 
   async function fetchTree() {
     loading.value = true
@@ -68,7 +100,14 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     saving.value = true
     error.value = ''
     try {
-      await createKnowledgeFolder({ title, parentId })
+      const siblings =
+        parentId == null
+          ? folders.value
+          : (findFolder(folders.value, parentId)?.children ?? [])
+      const sortOrder = siblings.length
+        ? Math.max(...siblings.map((s) => s.sortOrder)) + 1
+        : 0
+      await createKnowledgeFolder({ title, parentId, sortOrder })
       await fetchTree()
       return true
     } catch (e) {
@@ -109,11 +148,58 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
   }
 
-  async function createArticle(folderId: number, title: string, bodyHtml = '') {
+  async function moveFolder(id: number, direction: 'up' | 'down') {
+    const siblings = siblingsOf(folders.value, id)
+    if (!siblings || siblings.length < 2) return false
+    const idx = siblings.findIndex((s) => s.id === id)
+    if (idx < 0) return false
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1
+    if (swapWith < 0 || swapWith >= siblings.length) return false
+
     saving.value = true
     error.value = ''
     try {
-      const article = await createKnowledgeArticle({ folderId, title, bodyHtml })
+      const reindexed = [...siblings]
+      ;[reindexed[idx], reindexed[swapWith]] = [reindexed[swapWith], reindexed[idx]]
+      folders.value = await reorderKnowledgeFolders(
+        reindexed.map((s, i) => ({
+          id: s.id,
+          parentId: s.parentId,
+          sortOrder: i,
+        })),
+      )
+      return true
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.detail : 'Не удалось изменить порядок'
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
+  function canMoveFolder(id: number, direction: 'up' | 'down') {
+    const siblings = siblingsOf(folders.value, id)
+    if (!siblings) return false
+    const idx = siblings.findIndex((s) => s.id === id)
+    if (idx < 0) return false
+    return direction === 'up' ? idx > 0 : idx < siblings.length - 1
+  }
+
+  async function createArticle(
+    folderId: number,
+    title: string,
+    bodyHtml = '',
+    isPublished = true,
+  ) {
+    saving.value = true
+    error.value = ''
+    try {
+      const article = await createKnowledgeArticle({
+        folderId,
+        title,
+        bodyHtml,
+        isPublished,
+      })
       await fetchTree()
       current.value = article
       return article
@@ -169,12 +255,15 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     error,
     isEmpty,
     articleCount,
+    flatFolderOptions,
     fetchTree,
     loadArticle,
     clearArticle,
     createFolder,
     renameFolder,
     removeFolder,
+    moveFolder,
+    canMoveFolder,
     createArticle,
     saveArticle,
     removeArticle,

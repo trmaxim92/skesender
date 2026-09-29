@@ -1139,3 +1139,21 @@ class KbArticleUpdateRequest(BaseModel):
     body_html: str | None = None
     is_published: bool | None = None
 
+
+class KbSearchHitOut(BaseModel):
+    id: int
+    folder_id: int
+    title: str
+    snippet: str = ""
+    is_published: bool = True
+    updated_at: datetime
+
+
+class KbSearchOut(BaseModel):
+    items: list[KbSearchHitOut] = []
+
+
+class KbImageOut(BaseModel):
+    url: str
+    file_name: str
+

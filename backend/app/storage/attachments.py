@@ -51,13 +51,20 @@ def save_bytes(
     file_name: str,
     message_id: int | None = None,
     mime_type: str | None = None,
+    subdir: str | None = None,
 ) -> tuple[str, str, str | None, int]:
     """Save bytes under attachments dir. Returns (relative_path, safe_name, mime, size)."""
     safe = sanitize_filename(file_name)
     mime = mime_type or mimetypes.guess_type(safe)[0]
-    folder = attachments_root() / (str(message_id) if message_id else "tmp")
+    if subdir:
+        folder_name = sanitize_filename(subdir).strip("._-") or "tmp"
+    elif message_id is not None:
+        folder_name = str(message_id)
+    else:
+        folder_name = "tmp"
+    folder = attachments_root() / folder_name
     folder.mkdir(parents=True, exist_ok=True)
-    relative = f"{folder.name}/{uuid.uuid4().hex}_{safe}"
+    relative = f"{folder_name}/{uuid.uuid4().hex}_{safe}"
     absolute = attachments_root() / relative
     absolute.write_bytes(data)
     return relative, safe, mime, len(data)
