@@ -643,7 +643,10 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
-        <header class="shrink-0 border-b border-line bg-panel px-3 py-3 sm:px-6">
+        <header
+          class="shrink-0 border-b border-line px-3 py-3 sm:px-6"
+          :class="editing ? 'bg-brand-soft/35' : 'bg-panel'"
+        >
           <div class="mb-2 flex items-center gap-2">
             <button
               type="button"
@@ -667,6 +670,12 @@ onUnmounted(() => {
                 <span v-else class="truncate font-medium text-ink">{{ c.title }}</span>
               </template>
             </nav>
+            <span
+              v-if="editing"
+              class="ml-auto hidden rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white sm:inline"
+            >
+              Редактирование
+            </span>
           </div>
 
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -674,9 +683,10 @@ onUnmounted(() => {
               <input
                 v-if="editing"
                 v-model="draftTitle"
-                class="w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-xl font-semibold outline-none focus:border-brand"
+                class="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-xl font-semibold tracking-tight text-ink shadow-sm outline-none focus:border-brand sm:text-2xl"
+                placeholder="Название статьи"
               />
-              <h1 v-else class="truncate text-xl font-semibold text-ink sm:text-2xl">
+              <h1 v-else class="truncate text-xl font-semibold tracking-tight text-ink sm:text-2xl">
                 {{ store.current?.title ?? '…' }}
               </h1>
               <p v-if="store.current && !editing" class="mt-1 text-xs text-muted">
@@ -688,21 +698,38 @@ onUnmounted(() => {
                   >черновик</span
                 >
               </p>
-              <label
-                v-if="editing"
-                class="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs text-ink"
-              >
-                <input v-model="draftPublished" type="checkbox" class="rounded border-line" />
-                Опубликовано
-                <span class="text-muted">(снято = черновик, видят только с правом записи)</span>
-              </label>
+              <div v-if="editing" class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+                  :class="
+                    draftPublished
+                      ? 'border-ok/30 bg-ok/10 text-ok'
+                      : 'border-warn/30 bg-warn/10 text-warn'
+                  "
+                  @click="draftPublished = !draftPublished"
+                >
+                  <span
+                    class="size-2 rounded-full"
+                    :class="draftPublished ? 'bg-ok' : 'bg-warn'"
+                  />
+                  {{ draftPublished ? 'Опубликовано' : 'Черновик' }}
+                </button>
+                <span class="text-[11px] text-muted">
+                  {{
+                    draftPublished
+                      ? 'Видят все с доступом к базе знаний'
+                      : 'Видят только сотрудники с правом записи'
+                  }}
+                </span>
+              </div>
             </div>
 
             <div v-if="canWrite" class="flex shrink-0 flex-wrap gap-2">
               <template v-if="editing">
                 <button
                   type="button"
-                  class="rounded-xl border border-line px-3 py-1.5 text-sm"
+                  class="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm font-medium"
                   :disabled="store.saving"
                   @click="cancelEdit"
                 >
@@ -710,7 +737,7 @@ onUnmounted(() => {
                 </button>
                 <button
                   type="button"
-                  class="rounded-xl bg-brand px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                  class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
                   :disabled="store.saving || !draftTitle.trim()"
                   @click="saveEdit"
                 >
@@ -720,7 +747,7 @@ onUnmounted(() => {
               <template v-else>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm"
+                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm font-medium"
                   @click="startEdit"
                 >
                   <Pencil class="size-3.5" />
@@ -728,7 +755,7 @@ onUnmounted(() => {
                 </button>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm"
+                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm"
                   @click="openMoveArticle"
                 >
                   <FolderInput class="size-3.5" />
@@ -736,7 +763,7 @@ onUnmounted(() => {
                 </button>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 text-sm text-danger"
+                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm text-danger"
                   @click="openDeleteArticle"
                 >
                   <Trash2 class="size-3.5" />
@@ -749,10 +776,15 @@ onUnmounted(() => {
         </header>
 
         <div class="flex min-h-0 flex-1 overflow-hidden">
-          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6">
+          <div
+            class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-5"
+            :class="editing ? 'bg-surface' : ''"
+          >
             <p v-if="store.loadingArticle" class="text-sm text-muted">Загрузка статьи…</p>
             <template v-else-if="store.current">
-              <KbRichEditor v-if="editing" v-model="draftHtml" />
+              <div v-if="editing" class="mx-auto max-w-4xl">
+                <KbRichEditor v-model="draftHtml" />
+              </div>
               <KbArticleBody
                 v-else
                 ref="articleBodyRef"
