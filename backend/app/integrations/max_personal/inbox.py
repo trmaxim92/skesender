@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -48,6 +48,42 @@ logger = logging.getLogger(__name__)
 
 def _is_group_chat(chat_id: int) -> bool:
     return int(chat_id) < 0
+
+
+def _dm_peer_id(chat_id: int, my_id: int | None) -> int | None:
+    """Personal MAX 1:1 chat ids are ``my_id XOR peer_id`` (pymax ``get_chat_id``).
+
+    Treating the dialog chat id as a user id yields empty profiles and
+    placeholder names like ``User 213470097``.
+    """
+    cid = int(chat_id)
+    if cid <= 0:
+        return None
+    if my_id is None:
+        return cid
+    peer = cid ^ int(my_id)
+    if peer == 0 or peer == int(my_id):
+        return cid
+    return peer
+
+
+def _lookup_user_id(
+    *,
+    chat_id: int,
+    my_id: int | None,
+    sender_id: int | None,
+) -> int | None:
+    """Pick the peer user id to fetch a profile for."""
+    if _is_group_chat(chat_id):
+        return sender_id if sender_id is not None and (my_id is None or int(sender_id) != int(my_id)) else None
+    xor_peer = _dm_peer_id(chat_id, my_id)
+    if sender_id is not None and (my_id is None or int(sender_id) != int(my_id)):
+        # Inbound sender is usually the real peer; ignore when it equals the chat id
+        # (legacy outbound path stored dialog id as contact).
+        if xor_peer is not None and int(sender_id) == int(chat_id):
+            return xor_peer
+        return int(sender_id)
+    return xor_peer
 
 
 def _name_from_pymax_user(user: Any) -> tuple[str | None, str | None]:
@@ -157,31 +193,69 @@ async def _resolve_contact_profile(
                 return f"Chat {chat_id}", None, avatar, None
         except Exception:
             logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
+    lookup_id = _lookup_user_id(chat_id=chat_id, my_id=my_id, sender_id=sender_id)
     if (
         client is not None
-        and sender_id is not None
-        and not (my_id is not None and int(sender_id) == int(my_id))
+        and lookup_id is not None
+        and not (my_id is not None and int(lookup_id) == int(my_id))
     ):
         try:
-            user = client.get_cached_user(int(sender_id))
+            user = client.get_cached_user(int(lookup_id))
             if user is None:
-                user = await client.get_user(int(sender_id))
+                user = await client.get_user(int(lookup_id))
             resolved_name, resolved_username = _name_from_pymax_user(user)
             avatar = _avatar_from_obj(user)
             phone = _peer_phone(_phone_from_pymax_user(user), my_phone=my_phone)
             # If API fell back to our phone as the display name, drop it.
             if resolved_name and my_phone:
                 if _normalize_phone_digits(resolved_name) == _normalize_phone_digits(my_phone):
-                    resolved_name = f"User {sender_id}"
+                    resolved_name = f"User {lookup_id}"
             if resolved_name:
                 return resolved_name, resolved_username, avatar, phone
         except Exception:
             logger.debug(
-                "Failed to resolve pymax user profile sender_id=%s",
+                "Failed to resolve pymax user profile sender_id=%s lookup_id=%s",
                 sender_id,
+                lookup_id,
                 exc_info=True,
             )
-    if client is not None and sender_id is None:
+    if client is not None and not _is_group_chat(chat_id):
+        try:
+            chat = await client.get_chat(int(chat_id))
+            title = (getattr(chat, "title", None) or "").strip()
+            avatar = _avatar_from_obj(chat)
+            if title:
+                return title, None, avatar, None
+            participants = getattr(chat, "participants", None) or {}
+            if isinstance(participants, dict) and my_id is not None:
+                for pid in participants:
+                    try:
+                        pid_i = int(pid)
+                    except (TypeError, ValueError):
+                        continue
+                    if pid_i == int(my_id):
+                        continue
+                    if lookup_id is not None and pid_i == int(lookup_id):
+                        continue
+                    try:
+                        user = client.get_cached_user(pid_i) or await client.get_user(pid_i)
+                        resolved_name, resolved_username = _name_from_pymax_user(user)
+                        peer_avatar = _avatar_from_obj(user) or avatar
+                        phone = _peer_phone(_phone_from_pymax_user(user), my_phone=my_phone)
+                        if resolved_name and not (
+                            resolved_name.startswith("User ") or resolved_name.startswith("Chat ")
+                        ):
+                            return resolved_name, resolved_username, peer_avatar, phone
+                    except Exception:
+                        logger.debug(
+                            "Failed to resolve participant profile chat_id=%s pid=%s",
+                            chat_id,
+                            pid_i,
+                            exc_info=True,
+                        )
+        except Exception:
+            logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
+    elif client is not None and lookup_id is None:
         try:
             chat = await client.get_chat(int(chat_id))
             title = (getattr(chat, "title", None) or "").strip()
@@ -190,6 +264,8 @@ async def _resolve_contact_profile(
                 return title, None, avatar, None
         except Exception:
             logger.debug("Failed to resolve pymax chat title chat_id=%s", chat_id, exc_info=True)
+    if lookup_id is not None:
+        return f"User {lookup_id}", None, None, None
     if sender_id is not None:
         return f"User {sender_id}", None, None, None
     return f"Chat {chat_id}", None, None, None
@@ -214,6 +290,11 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
         has_self_contact_id = bool(
             my_id is not None and dialog.contact_external_id and dialog.contact_external_id == str(my_id)
         )
+        contact_ext_is_chat = bool(
+            not _is_group_chat(chat_id)
+            and dialog.contact_external_id
+            and dialog.contact_external_id == str(chat_id)
+        )
         has_self_phone = bool(
             my_phone_digits
             and _normalize_phone_digits(dialog.contact_phone) == my_phone_digits
@@ -227,22 +308,27 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
             or name.startswith("Chat ")
             or not dialog.contact_avatar_url
             or has_self_contact_id
+            or contact_ext_is_chat
             or has_self_phone
             or name_is_self_phone
         ):
             continue
 
         candidates: list[int | None] = []
+        xor_peer = None if _is_group_chat(chat_id) else _dm_peer_id(chat_id, my_id)
         if _is_group_chat(chat_id):
             candidates.append(None)
+        stored_ext = dialog.contact_external_id
+        stored_ext_is_chat = contact_ext_is_chat
         if (
-            dialog.contact_external_id
-            and dialog.contact_external_id.lstrip("-").isdigit()
-            and not (my_id is not None and dialog.contact_external_id == str(my_id))
+            stored_ext
+            and stored_ext.lstrip("-").isdigit()
+            and not (my_id is not None and stored_ext == str(my_id))
+            and not stored_ext_is_chat
         ):
-            candidates.append(int(dialog.contact_external_id))
-        if chat_id > 0 and not (my_id is not None and chat_id == my_id):
-            candidates.append(chat_id)
+            candidates.append(int(stored_ext))
+        if xor_peer is not None:
+            candidates.append(xor_peer)
         if _is_group_chat(chat_id):
             candidates.append(None)
 
@@ -262,15 +348,15 @@ async def backfill_dialog_names(session: AsyncSession, *, channel: Channel, clie
         # Own channel phone must never stay on the client card.
         phone = None if has_self_phone else dialog.contact_phone
         contact_ext = dialog.contact_external_id
-        if has_self_contact_id and chat_id:
-            contact_ext = str(chat_id)
-        changed = has_self_contact_id or has_self_phone or name_is_self_phone
+        changed = has_self_contact_id or has_self_phone or name_is_self_phone or stored_ext_is_chat
+        if has_self_contact_id or stored_ext_is_chat:
+            contact_ext = str(xor_peer) if xor_peer is not None else (str(chat_id) if chat_id else contact_ext)
         if has_self_phone and dialog.contact_phone:
             dialog.contact_phone = None
             phone = None
             changed = True
         if name_is_self_phone:
-            resolved = f"User {chat_id or contact_ext or '?'}"
+            resolved = f"User {xor_peer or contact_ext or chat_id or '?'}"
             changed = True
 
         for sender_id in ordered:
@@ -456,7 +542,7 @@ async def ingest_pymax_message(
             )
             contact_id = str(chat_id)
         else:
-            peer_id = int(chat_id) if chat_id > 0 else None
+            peer_id = _dm_peer_id(int(chat_id), int(my_user_id) if my_user_id is not None else None)
             if my_user_id is not None and peer_id is not None and peer_id == int(my_user_id):
                 peer_id = None
             contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
@@ -464,9 +550,14 @@ async def ingest_pymax_message(
             )
             contact_id = str(peer_id if peer_id is not None else chat_id)
     else:
-        contact_id = str(sender_id) if sender_id is not None else str(chat_id)
+        peer_id = _lookup_user_id(
+            chat_id=int(chat_id),
+            my_id=int(my_user_id) if my_user_id is not None else None,
+            sender_id=int(sender_id) if sender_id is not None else None,
+        )
+        contact_id = str(peer_id if peer_id is not None else (sender_id if sender_id is not None else chat_id))
         contact_name, contact_username, contact_avatar_url, contact_phone = await _resolve_contact_profile(
-            client, sender_id, chat_id
+            client, peer_id if peer_id is not None else sender_id, chat_id
         )
 
     my_phone = _my_phone(client)
