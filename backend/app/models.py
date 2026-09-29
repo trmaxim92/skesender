@@ -1023,3 +1023,64 @@ class DispatcherRuleRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     rule: Mapped[DispatcherRule] = relationship(back_populates="runs")
+
+
+class KnowledgeFolder(Base):
+    """Nested folder node for the operator knowledge base."""
+
+    __tablename__ = "kb_folders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("kb_folders.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), default="")
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    parent: Mapped["KnowledgeFolder | None"] = relationship(
+        remote_side="KnowledgeFolder.id",
+        back_populates="children",
+    )
+    children: Mapped[list["KnowledgeFolder"]] = relationship(
+        back_populates="parent",
+        cascade="all, delete-orphan",
+    )
+    articles: Mapped[list["KnowledgeArticle"]] = relationship(
+        back_populates="folder",
+        cascade="all, delete-orphan",
+    )
+
+
+class KnowledgeArticle(Base):
+    """Article leaf inside a knowledge folder."""
+
+    __tablename__ = "kb_articles"
+    __table_args__ = (UniqueConstraint("slug", name="uq_kb_articles_slug"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    folder_id: Mapped[int] = mapped_column(
+        ForeignKey("kb_folders.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), default="")
+    slug: Mapped[str] = mapped_column(String(255), index=True)
+    body_html: Mapped[str] = mapped_column(Text, default="")
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    folder: Mapped[KnowledgeFolder] = relationship(back_populates="articles")
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+    updated_by: Mapped[User | None] = relationship(foreign_keys=[updated_by_id])

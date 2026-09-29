@@ -18,6 +18,7 @@ SECTION_EMPLOYEES = "section.employees"
 SECTION_TEMPLATES = "section.templates"
 SECTION_WEBHOOKS = "section.webhooks"
 SECTION_SETTINGS = "section.settings"
+SECTION_KNOWLEDGE = "section.knowledge"
 ACTION_WRITE = "action.write"
 ACTION_MANAGE_CHANNELS = "action.manage_channels"
 ACTION_MANAGE_USERS = "action.manage_users"
@@ -32,6 +33,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     SECTION_EMPLOYEES,
     SECTION_WEBHOOKS,
     SECTION_SETTINGS,
+    SECTION_KNOWLEDGE,
     ACTION_WRITE,
     ACTION_MANAGE_CHANNELS,
     ACTION_MANAGE_USERS,
@@ -48,6 +50,7 @@ SECTION_LABELS: dict[str, str] = {
     SECTION_TEMPLATES: "Шаблоны (устарело)",
     SECTION_WEBHOOKS: "Webhooks",
     SECTION_SETTINGS: "Настройки",
+    SECTION_KNOWLEDGE: "База знаний",
     ACTION_WRITE: "Запись (ответы, рассылки)",
     ACTION_MANAGE_CHANNELS: "Управление каналами",
     ACTION_MANAGE_USERS: "Управление сотрудниками и ролями",
@@ -61,12 +64,14 @@ LEGACY_PERMISSIONS: dict[str, set[str]] = {
         SECTION_APPEALS,
         SECTION_CONTACTS,
         SECTION_MAILING,
+        SECTION_KNOWLEDGE,
         ACTION_WRITE,
     },
     Role.VIEWER.value: {
         SECTION_CHATS,
         SECTION_APPEALS,
         SECTION_CONTACTS,
+        SECTION_KNOWLEDGE,
     },
 }
 
@@ -87,6 +92,7 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
             SECTION_APPEALS,
             SECTION_CONTACTS,
             SECTION_MAILING,
+            SECTION_KNOWLEDGE,
             ACTION_WRITE,
         ],
     },
@@ -94,7 +100,7 @@ SYSTEM_ROLE_DEFS: tuple[dict, ...] = (
         "slug": "viewer",
         "name": "Наблюдатель",
         "all_channels": False,
-        "permissions": [SECTION_CHATS, SECTION_APPEALS, SECTION_CONTACTS],
+        "permissions": [SECTION_CHATS, SECTION_APPEALS, SECTION_CONTACTS, SECTION_KNOWLEDGE],
     },
 )
 
@@ -223,6 +229,28 @@ async def seed_access_roles(session: AsyncSession) -> dict[str, AccessRole]:
                     )
         by_slug[spec["slug"]] = role
     await session.flush()
+
+    # Grant knowledge base to any custom role that already has chats.
+    chats_role_ids = (
+        await session.execute(
+            select(RolePermission.role_id).where(RolePermission.code == SECTION_CHATS)
+        )
+    ).scalars().all()
+    if chats_role_ids:
+        have_kb = set(
+            (
+                await session.execute(
+                    select(RolePermission.role_id).where(
+                        RolePermission.code == SECTION_KNOWLEDGE
+                    )
+                )
+            ).scalars().all()
+        )
+        for rid in set(chats_role_ids):
+            if rid not in have_kb:
+                session.add(RolePermission(role_id=rid, code=SECTION_KNOWLEDGE))
+        await session.flush()
+
     return by_slug
 
 

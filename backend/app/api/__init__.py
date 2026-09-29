@@ -10,6 +10,7 @@ from app.api import (
     departments,
     dispatcher,
     fleet,
+    knowledge,
     mailing,
     me_templates,
     notifications,
@@ -41,6 +42,7 @@ api_router.include_router(departments.router)
 api_router.include_router(settings_fields.router)
 api_router.include_router(templates.router)
 api_router.include_router(dispatcher.router)
+api_router.include_router(knowledge.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(push.router)
 api_router.include_router(notifications.router)

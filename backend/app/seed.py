@@ -16,6 +16,8 @@ from app.appeal_statuses import get_default_closed_status, get_default_open_stat
 from app.models import (
     Appeal,
     AppealStatus,
+    KnowledgeArticle,
+    KnowledgeFolder,
     MessageTemplate,
     Role,
     RoleChannel,
@@ -42,6 +44,101 @@ async def _ensure_role_channel(session: AsyncSession, role_id: int, channel_id: 
     ).scalar_one_or_none()
     if exists is None:
         session.add(RoleChannel(role_id=role_id, channel_id=channel_id))
+
+
+async def _seed_knowledge_demo(session: AsyncSession, *, admin_id: int) -> None:
+    """Demo tree for the knowledge base — only when empty."""
+    existing = await session.scalar(select(func.count()).select_from(KnowledgeFolder))
+    if existing:
+        return
+
+    welcome = KnowledgeFolder(title="Старт для оператора", icon="book", sort_order=0)
+    scripts = KnowledgeFolder(title="Скрипты ответов", icon="message", sort_order=1)
+    session.add_all([welcome, scripts])
+    await session.flush()
+
+    faq = KnowledgeFolder(title="Частые вопросы", parent_id=scripts.id, icon=None, sort_order=0)
+    session.add(faq)
+    await session.flush()
+
+    articles = [
+        KnowledgeArticle(
+            folder_id=welcome.id,
+            title="Как пользоваться базой знаний",
+            slug="kak-polzovatsya-bazoy-znaniy",
+            body_html=(
+                "<h2>Зачем этот раздел</h2>"
+                "<p>Здесь хранятся инструкции и готовые формулировки для операторов. "
+                "Слева — дерево разделов, справа — текст статьи.</p>"
+                "<h3>Кто может править</h3>"
+                "<ul><li>Читать может любой с правом «База знаний».</li>"
+                "<li>Создавать и менять статьи — только с правом записи.</li></ul>"
+                "<blockquote>Подсказка: начните с разделов и вложенных папок, "
+                "потом добавляйте статьи внутрь.</blockquote>"
+            ),
+            created_by_id=admin_id,
+            updated_by_id=admin_id,
+        ),
+        KnowledgeArticle(
+            folder_id=welcome.id,
+            title="Первый день на смене",
+            slug="pervyy-den-na-smene",
+            body_html=(
+                "<h2>Чек-лист</h2>"
+                "<ol><li>Проверьте статус «На смене».</li>"
+                "<li>Откройте каналы и новые чаты.</li>"
+                "<li>Посмотрите свежие новости в колокольчике.</li>"
+                "<li>При необходимости — шаблоны в профиле.</li></ol>"
+                "<p>Если канал офлайн — сообщите старшему или переподключите QR.</p>"
+            ),
+            created_by_id=admin_id,
+            updated_by_id=admin_id,
+        ),
+        KnowledgeArticle(
+            folder_id=scripts.id,
+            title="Приветствие клиента",
+            slug="privetstvie-klienta",
+            body_html=(
+                "<h2>Базовая фраза</h2>"
+                "<p>Здравствуйте! Меня зовут {{name}}, я помогу с вашим вопросом.</p>"
+                "<h3>Если клиент уже писал</h3>"
+                "<p>Здравствуйте ещё раз! Продолжаем по вашему обращению.</p>"
+            ),
+            created_by_id=admin_id,
+            updated_by_id=admin_id,
+        ),
+        KnowledgeArticle(
+            folder_id=faq.id,
+            title="Клиент просит перезвонить",
+            slug="klient-prosit-perezvonit",
+            body_html=(
+                "<h2>Что ответить</h2>"
+                "<p>Конечно, передадим запрос. Уточните, пожалуйста, удобное время "
+                "и номер телефона.</p>"
+                "<h3>После ответа</h3>"
+                "<ul><li>Зафиксируйте телефон в карточке клиента.</li>"
+                "<li>Поставьте этап обзвона / статус обращения.</li></ul>"
+            ),
+            created_by_id=admin_id,
+            updated_by_id=admin_id,
+        ),
+        KnowledgeArticle(
+            folder_id=faq.id,
+            title="Нет ответа от клиента",
+            slug="net-otveta-ot-klienta",
+            body_html=(
+                "<h2>Повторное сообщение</h2>"
+                "<p>Добрый день! Напоминаем про ваше обращение — мы на связи, "
+                "если вопрос ещё актуален.</p>"
+                "<blockquote>Не закрывайте обращение сразу: подождите разумный срок "
+                "по регламенту смены.</blockquote>"
+            ),
+            created_by_id=admin_id,
+            updated_by_id=admin_id,
+        ),
+    ]
+    session.add_all(articles)
+    logger.info("Seeded demo knowledge base (%s folders, %s articles)", 3, len(articles))
 
 
 async def migrate_user_channels_to_roles(session: AsyncSession) -> None:
@@ -206,6 +303,8 @@ async def seed_database(session: AsyncSession) -> None:
             )
         )
         logger.info("Seeded initial system news")
+
+    await _seed_knowledge_demo(session, admin_id=admin.id)
 
     token = settings.seed_max_bot_token.strip()
     if not token:

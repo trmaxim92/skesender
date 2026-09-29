@@ -150,6 +150,18 @@ const router = createRouter({
           meta: { permission: 'section.webhooks' },
         },
         {
+          path: 'knowledge',
+          name: 'knowledge',
+          component: () => import('@/views/knowledge/KnowledgeView.vue'),
+          meta: { permission: 'section.knowledge' },
+        },
+        {
+          path: 'knowledge/:articleId',
+          name: 'knowledge-article',
+          component: () => import('@/views/knowledge/KnowledgeView.vue'),
+          meta: { permission: 'section.knowledge' },
+        },
+        {
           path: 'settings/yandex-fleet',
           name: 'settings-yandex-fleet',
           component: () => import('@/views/settings/YandexFleetView.vue'),

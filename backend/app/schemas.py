@@ -1060,3 +1060,82 @@ class DispatcherRuleOut(BaseModel):
     last_applied_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+# --- Knowledge base ---
+
+
+class KbArticleSummaryOut(BaseModel):
+    id: int
+    folder_id: int
+    title: str
+    slug: str
+    is_published: bool = True
+    updated_at: datetime
+
+
+class KbFolderNodeOut(BaseModel):
+    id: int
+    parent_id: int | None = None
+    title: str
+    icon: str | None = None
+    sort_order: int = 0
+    articles: list[KbArticleSummaryOut] = []
+    children: list["KbFolderNodeOut"] = []
+
+
+class KbTreeOut(BaseModel):
+    folders: list[KbFolderNodeOut]
+
+
+class KbArticleOut(BaseModel):
+    id: int
+    folder_id: int
+    title: str
+    slug: str
+    body_html: str
+    is_published: bool = True
+    created_by_id: int | None = None
+    created_by_name: str | None = None
+    updated_by_id: int | None = None
+    updated_by_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class KbFolderCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    parent_id: int | None = None
+    icon: str | None = Field(default=None, max_length=64)
+    sort_order: int = 0
+
+
+class KbFolderUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    parent_id: int | None = None
+    icon: str | None = Field(default=None, max_length=64)
+    sort_order: int | None = None
+
+
+class KbFolderReorderItem(BaseModel):
+    id: int
+    parent_id: int | None = None
+    sort_order: int = 0
+
+
+class KbFolderReorderRequest(BaseModel):
+    items: list[KbFolderReorderItem] = Field(min_length=1)
+
+
+class KbArticleCreateRequest(BaseModel):
+    folder_id: int
+    title: str = Field(min_length=1, max_length=255)
+    body_html: str = ""
+    is_published: bool = True
+
+
+class KbArticleUpdateRequest(BaseModel):
+    folder_id: int | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    body_html: str | None = None
+    is_published: bool | None = None
+

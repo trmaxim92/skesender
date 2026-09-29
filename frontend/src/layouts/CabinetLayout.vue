@@ -23,6 +23,7 @@ import {
   Bell,
   Tags,
   List,
+  BookOpen,
 } from 'lucide-vue-next'
 import { AUTH_EXPIRED_EVENT, ApiError } from '@/api/client'
 import { listPresenceStatusesRequest, mapPresenceStatus } from '@/api/presence'
@@ -66,6 +67,7 @@ type NavLeaf = { to: string; label: string; icon: typeof MessageSquare }
 const navWorkStart: NavLeaf[] = [
   { to: '/chats', label: 'Чаты', icon: MessageSquare },
   { to: '/appeals', label: 'Обращения', icon: Inbox },
+  { to: '/knowledge', label: 'База знаний', icon: BookOpen },
 ]
 
 const navWorkEnd: NavLeaf[] = [
@@ -223,6 +225,7 @@ function isMobileTabActive(tab: MobileTab) {
     return (
       route.path.startsWith('/employees') ||
       route.path.startsWith('/mailing') ||
+      route.path.startsWith('/knowledge') ||
       route.path.startsWith('/users') ||
       route.path.startsWith('/roles') ||
       route.path.startsWith('/departments') ||
@@ -264,6 +267,7 @@ const title = computed(() => {
   if (route.path.startsWith('/profile/templates')) return 'Мои шаблоны'
   if (route.name === 'appeal-detail') return 'Обращение'
   if (route.path.startsWith('/employees')) return 'На смене'
+  if (route.path.startsWith('/knowledge')) return 'База знаний'
   if (route.path.startsWith('/news')) return 'Новости'
   if (route.path.startsWith('/users')) return 'Пользователи'
   if (route.path.startsWith('/roles')) return 'Роли'

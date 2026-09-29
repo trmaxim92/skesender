@@ -10,10 +10,45 @@ export type PermissionCode =
   | 'section.templates'
   | 'section.webhooks'
   | 'section.settings'
+  | 'section.knowledge'
   | 'action.write'
   | 'action.manage_channels'
   | 'action.manage_users'
   | 'action.delete_appeals'
+
+export interface KbArticleSummary {
+  id: number
+  folderId: number
+  title: string
+  slug: string
+  isPublished: boolean
+  updatedAt: string
+}
+
+export interface KbFolderNode {
+  id: number
+  parentId: number | null
+  title: string
+  icon: string | null
+  sortOrder: number
+  articles: KbArticleSummary[]
+  children: KbFolderNode[]
+}
+
+export interface KbArticle {
+  id: number
+  folderId: number
+  title: string
+  slug: string
+  bodyHtml: string
+  isPublished: boolean
+  createdById: number | null
+  createdByName: string | null
+  updatedById: number | null
+  updatedByName: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 export type ContactStatus = 'new' | 'in_work' | 'done'
 
@@ -332,6 +367,7 @@ export const SECTION_BY_PATH: Record<string, PermissionCode> = {
   '/departments': 'section.employees',
   '/employees': 'section.chats',
   '/webhooks': 'section.webhooks',
+  '/knowledge': 'section.knowledge',
   '/settings': 'section.settings',
   '/settings/yandex-fleet': 'section.settings',
   '/settings/appeal-fields': 'section.settings',
@@ -347,6 +383,7 @@ export const FIRST_SECTION_PATHS = [
   '/appeals',
   '/contacts',
   '/mailing',
+  '/knowledge',
   '/channels',
   '/users',
   '/departments',

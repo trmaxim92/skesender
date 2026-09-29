@@ -822,6 +822,49 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
+                """
+                CREATE TABLE IF NOT EXISTS kb_folders (
+                    id SERIAL PRIMARY KEY,
+                    parent_id INTEGER REFERENCES kb_folders(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL DEFAULT '',
+                    icon VARCHAR(64),
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_kb_folders_parent_id ON kb_folders (parent_id)")
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kb_articles (
+                    id SERIAL PRIMARY KEY,
+                    folder_id INTEGER NOT NULL REFERENCES kb_folders(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL DEFAULT '',
+                    slug VARCHAR(255) NOT NULL,
+                    body_html TEXT NOT NULL DEFAULT '',
+                    is_published BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    updated_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_kb_articles_slug UNIQUE (slug)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_kb_articles_folder_id ON kb_articles (folder_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_kb_articles_slug ON kb_articles (slug)")
+        )
+        await conn.execute(
+            text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS send_mode "
                 "VARCHAR(16) NOT NULL DEFAULT 'ctrl_enter'"
             )

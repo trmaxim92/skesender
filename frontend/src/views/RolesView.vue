@@ -28,7 +28,7 @@ watch(roleAllChannels, (all) => {
 function openCreateRole() {
   editingRoleId.value = null
   roleName.value = ''
-  rolePerms.value = ['section.chats', 'section.appeals', 'action.write']
+  rolePerms.value = ['section.chats', 'section.appeals', 'section.knowledge', 'action.write']
   roleAllChannels.value = true
   roleChannelIds.value = []
   roleEditorOpen.value = true
