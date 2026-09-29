@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
-  ChevronDown,
-  ChevronRight,
   FileText,
   Film,
   Image as ImageIcon,
@@ -18,6 +16,7 @@ import EmojiPickerPanel, {
   type EmojiSelectPayload,
 } from '@/components/chats/EmojiPickerPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
+import TemplatePickerModal from '@/components/chats/TemplatePickerModal.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Template, TemplateGroup } from '@/types'
 import { normalizeSendMode, type SendMode } from '@/utils/composerPrefs'
@@ -60,7 +59,6 @@ const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const savedSelection = ref<{ start: number; end: number } | null>(null)
 const accept = ref('image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip')
 const dragDepth = ref(0)
-const collapsedCategories = ref<Record<string, boolean>>({})
 const sendMode = computed<SendMode>(() => normalizeSendMode(auth.user?.sendMode))
 
 const canSend = computed(
@@ -95,37 +93,8 @@ const groupedTemplates = computed(() => {
   ]
 })
 
-const hasTemplates = computed(() =>
-  groupedTemplates.value.some((g) => g.templates.length > 0),
-)
-
-function categoryKey(group: TemplateGroup) {
-  return group.categoryId ?? 'none'
-}
-
-function isCategoryOpen(group: TemplateGroup) {
-  const key = categoryKey(group)
-  // Default: first category expanded, others collapsed when many groups.
-  if (!(key in collapsedCategories.value)) {
-    return groupedTemplates.value.length <= 1 || groupedTemplates.value[0] === group
-  }
-  return !collapsedCategories.value[key]
-}
-
-function toggleCategory(group: TemplateGroup) {
-  const key = categoryKey(group)
-  const currentlyOpen = isCategoryOpen(group)
-  collapsedCategories.value = {
-    ...collapsedCategories.value,
-    [key]: currentlyOpen,
-  }
-}
-
 watch(templatesOpen, (open) => {
-  if (open) {
-    collapsedCategories.value = {}
-    emojiOpen.value = false
-  }
+  if (open) emojiOpen.value = false
 })
 
 watch(attachOpen, (open) => {
@@ -627,51 +596,12 @@ onMounted(() => {
       </div>
     </form>
 
-    <Modal v-if="templatesOpen" title="Шаблоны" @close="templatesOpen = false">
-      <p v-if="!hasTemplates" class="text-sm text-muted">
-        Нет шаблонов для этого канала. Создайте в разделе «Шаблоны».
-      </p>
-      <div v-else class="max-h-[60vh] space-y-2 overflow-y-auto">
-        <section
-          v-for="group in groupedTemplates"
-          :key="group.categoryId ?? 'none'"
-          class="overflow-hidden rounded-xl border border-line"
-        >
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 bg-surface px-3 py-2.5 text-left transition hover:bg-brand-soft/40"
-            @click="toggleCategory(group)"
-          >
-            <ChevronDown v-if="isCategoryOpen(group)" class="size-4 shrink-0 text-muted" />
-            <ChevronRight v-else class="size-4 shrink-0 text-muted" />
-            <span class="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted">
-              {{ group.categoryName }}
-            </span>
-            <span class="shrink-0 text-[11px] text-muted">{{ group.templates.length }}</span>
-          </button>
-          <div v-if="isCategoryOpen(group)" class="space-y-2 border-t border-line p-2">
-            <button
-              v-for="t in group.templates"
-              :key="t.id"
-              type="button"
-              class="w-full rounded-xl border border-line bg-panel px-3.5 py-3 text-left transition hover:border-brand/40 hover:bg-brand-soft/50"
-              @click="
-                emit('applyTemplate', t);
-                templatesOpen = false
-              "
-            >
-              <div class="text-sm font-semibold">
-                {{ t.name }}
-                <span v-if="t.mediaCount" class="ml-1 text-[10px] font-medium text-muted">
-                  · {{ t.mediaCount }} фото
-                </span>
-              </div>
-              <div class="mt-1 line-clamp-2 text-xs text-muted">{{ t.body || 'Изображение' }}</div>
-            </button>
-          </div>
-        </section>
-      </div>
-    </Modal>
+    <TemplatePickerModal
+      v-if="templatesOpen"
+      :groups="groupedTemplates"
+      @close="templatesOpen = false"
+      @select="emit('applyTemplate', $event)"
+    />
 
     <Modal v-if="attachOpen" title="Прикрепить файл" @close="attachOpen = false">
       <p class="mb-4 text-sm text-muted">Выберите тип вложения — откроется выбор файлов.</p>

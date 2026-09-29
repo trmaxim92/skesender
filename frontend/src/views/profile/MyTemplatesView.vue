@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { FolderPlus, ImagePlus, Pencil, Trash2, X } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMyTemplatesStore } from '@/stores/myTemplates'
@@ -20,6 +21,8 @@ type DraftItem = {
 
 const auth = useAuthStore()
 const templates = useMyTemplatesStore()
+const route = useRoute()
+const router = useRouter()
 const canWrite = computed(() => auth.can('action.write'))
 
 const categoryName = ref('')
@@ -55,9 +58,29 @@ const grouped = computed(() => {
   return groups
 })
 
-onMounted(() => {
-  void templates.fetchAll()
+onMounted(async () => {
+  await templates.fetchAll()
+  openEditFromQuery()
 })
+
+watch(
+  () => route.query.edit,
+  () => {
+    openEditFromQuery()
+  },
+)
+
+function openEditFromQuery() {
+  const raw = route.query.edit
+  const id = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0] : null
+  if (!id || !canWrite.value) return
+  const tpl = templates.templates.find((t) => t.id === id)
+  if (!tpl) return
+  startEdit(tpl)
+  const nextQuery = { ...route.query }
+  delete nextQuery.edit
+  void router.replace({ query: nextQuery })
+}
 
 onUnmounted(() => {
   clearDraft()

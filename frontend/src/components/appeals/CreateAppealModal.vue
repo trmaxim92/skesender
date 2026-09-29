@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, ChevronDown, ChevronRight, Radio, TextQuote } from 'lucide-vue-next'
+import { ArrowLeft, Radio, TextQuote } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
+import TemplatePickerModal from '@/components/chats/TemplatePickerModal.vue'
 import { startChatRequest } from '@/api/chats'
 import { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -38,7 +39,6 @@ const text = ref('')
 const busy = ref(false)
 const error = ref('')
 const templatesOpen = ref(false)
-const collapsedCategories = ref<Record<string, boolean>>({})
 
 const START_TRANSPORTS = new Set(['maxbot', 'max', 'telegram', 'tgapi'])
 
@@ -53,10 +53,6 @@ const selected = computed(() => eligible.value.find((c) => c.id === selectedId.v
 const templateGroups = computed((): TemplateGroup[] => {
   return [...myTemplates.forTransportGrouped(selected.value?.transport)]
 })
-
-const hasTemplates = computed(() =>
-  templateGroups.value.some((g) => g.templates.length > 0),
-)
 
 const recipientHint = computed(() => {
   const t = selected.value?.transport
@@ -90,7 +86,6 @@ watch(
     busy.value = false
     error.value = ''
     templatesOpen.value = false
-    collapsedCategories.value = {}
     void myTemplates.fetchAll()
   },
 )
@@ -106,22 +101,6 @@ function back() {
   error.value = ''
   templatesOpen.value = false
   step.value = 'channel'
-}
-
-function categoryKey(group: TemplateGroup) {
-  return group.categoryId ?? 'none'
-}
-
-function isCategoryOpen(group: TemplateGroup) {
-  return !collapsedCategories.value[categoryKey(group)]
-}
-
-function toggleCategory(group: TemplateGroup) {
-  const key = categoryKey(group)
-  collapsedCategories.value = {
-    ...collapsedCategories.value,
-    [key]: !collapsedCategories.value[key],
-  }
 }
 
 function applyTemplate(template: Template) {
@@ -276,41 +255,10 @@ async function submit() {
     </div>
   </Modal>
 
-  <Modal v-if="open && templatesOpen" title="Шаблоны" @close="templatesOpen = false">
-    <p v-if="!hasTemplates" class="text-sm text-muted">
-      Нет шаблонов для этого канала. Создайте в разделе «Мои шаблоны».
-    </p>
-    <div v-else class="max-h-[60vh] space-y-2 overflow-y-auto">
-      <section
-        v-for="group in templateGroups"
-        :key="group.categoryId ?? 'none'"
-        class="overflow-hidden rounded-xl border border-line"
-      >
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 bg-surface px-3 py-2.5 text-left transition hover:bg-brand-soft/40"
-          @click="toggleCategory(group)"
-        >
-          <ChevronDown v-if="isCategoryOpen(group)" class="size-4 shrink-0 text-muted" />
-          <ChevronRight v-else class="size-4 shrink-0 text-muted" />
-          <span class="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted">
-            {{ group.categoryName }}
-          </span>
-          <span class="shrink-0 text-[11px] text-muted">{{ group.templates.length }}</span>
-        </button>
-        <div v-if="isCategoryOpen(group)" class="space-y-2 border-t border-line p-2">
-          <button
-            v-for="t in group.templates"
-            :key="t.id"
-            type="button"
-            class="w-full rounded-xl border border-line bg-panel px-3.5 py-3 text-left transition hover:border-brand/40 hover:bg-brand-soft/50"
-            @click="applyTemplate(t)"
-          >
-            <div class="text-sm font-semibold">{{ t.name }}</div>
-            <div class="mt-1 line-clamp-2 text-xs text-muted">{{ t.body || 'Без текста' }}</div>
-          </button>
-        </div>
-      </section>
-    </div>
-  </Modal>
+  <TemplatePickerModal
+    v-if="open && templatesOpen"
+    :groups="templateGroups"
+    @close="templatesOpen = false"
+    @select="applyTemplate"
+  />
 </template>
