@@ -39,5 +39,5 @@ defineExpose({ scrollToHeading })
 </script>
 
 <template>
-  <div ref="root" class="kb-prose mx-auto max-w-3xl" />
+  <div ref="root" class="kb-prose" />
 </template>

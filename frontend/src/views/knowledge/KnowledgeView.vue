@@ -490,13 +490,22 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="kb-shell flex h-full min-h-0 overflow-hidden bg-surface">
+  <div class="kb-shell flex h-full min-h-0 overflow-hidden bg-[#eef1f6]">
     <!-- Tree -->
     <aside
-      class="flex w-full shrink-0 flex-col border-r border-line bg-panel md:w-[280px] lg:w-[300px]"
+      class="flex w-full shrink-0 flex-col border-r border-line/80 bg-panel md:w-[300px] lg:w-[320px]"
       :class="articleId ? 'hidden md:flex' : 'flex'"
     >
-      <div class="border-b border-line px-3 py-3">
+      <div class="border-b border-line px-4 py-4">
+        <div class="mb-3 flex items-center gap-2">
+          <div class="flex size-8 items-center justify-center rounded-xl bg-brand text-white">
+            <BookOpen class="size-4" />
+          </div>
+          <div>
+            <div class="text-sm font-bold tracking-tight text-ink">База знаний</div>
+            <div class="text-[11px] text-muted">Инструкции для смены</div>
+          </div>
+        </div>
         <div class="relative">
           <Search
             class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted"
@@ -504,13 +513,13 @@ onUnmounted(() => {
           <input
             v-model="search"
             type="search"
-            placeholder="Поиск по названию и тексту…"
-            class="w-full rounded-xl border border-line bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-brand"
+            placeholder="Найти статью…"
+            class="w-full rounded-xl border border-line bg-surface py-2.5 pl-9 pr-3 text-sm outline-none focus:border-brand"
           />
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2" @click.stop>
+      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3" @click.stop>
         <p v-if="store.loading" class="px-2 py-4 text-sm text-muted">Загрузка…</p>
         <p v-else-if="store.error && store.isEmpty" class="px-2 py-4 text-sm text-danger">
           {{ store.error }}
@@ -522,7 +531,7 @@ onUnmounted(() => {
             <li v-for="hit in searchHits" :key="hit.id">
               <button
                 type="button"
-                class="w-full rounded-xl px-2.5 py-2 text-left transition hover:bg-surface"
+                class="w-full rounded-xl px-2.5 py-2.5 text-left transition hover:bg-surface"
                 :class="articleId === hit.id ? 'bg-brand-soft' : ''"
                 @click="openArticle(hit.id)"
               >
@@ -535,8 +544,10 @@ onUnmounted(() => {
           </ul>
         </template>
         <template v-else>
-          <div v-if="recent.length && !search.trim()" class="mb-3 px-1">
-            <div class="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-bold uppercase tracking-wide text-muted">
+          <div v-if="recent.length && !search.trim()" class="mb-4">
+            <div
+              class="mb-1.5 flex items-center gap-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-muted"
+            >
               <Clock class="size-3" />
               Недавние
             </div>
@@ -544,10 +555,10 @@ onUnmounted(() => {
               v-for="r in recent"
               :key="'r' + r.id"
               type="button"
-              class="mb-0.5 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] text-ink/80 hover:bg-surface"
+              class="mb-0.5 flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] text-ink/85 transition hover:bg-surface"
               @click="openArticle(r.id)"
             >
-              <FileText class="size-3 shrink-0 opacity-50" />
+              <FileText class="size-3.5 shrink-0 text-brand/70" />
               <span class="truncate">{{ r.title }}</span>
             </button>
           </div>
@@ -573,10 +584,10 @@ onUnmounted(() => {
         </template>
       </div>
 
-      <div v-if="canWrite" class="border-t border-line p-2">
+      <div v-if="canWrite" class="border-t border-line p-3">
         <button
           type="button"
-          class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-sm font-medium text-ink transition hover:border-brand hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+          class="flex w-full items-center justify-center gap-2 rounded-xl bg-ink px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:opacity-50"
           :disabled="treeBusy || store.saving"
           @click="openCreateFolder(null)"
         >
@@ -586,7 +597,7 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <!-- Reader -->
+    <!-- Reader / editor -->
     <section
       class="relative flex min-w-0 flex-1 flex-col overflow-hidden"
       :class="!articleId && !store.isEmpty ? 'hidden md:flex' : 'flex'"
@@ -595,224 +606,209 @@ onUnmounted(() => {
         v-if="store.isEmpty && !store.loading"
         class="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center"
       >
-        <div
-          class="mb-5 flex size-14 items-center justify-center rounded-2xl bg-brand text-white"
-        >
-          <BookOpen class="size-7" />
+        <div class="mb-5 flex size-16 items-center justify-center rounded-3xl bg-brand text-white shadow-lg shadow-brand/20">
+          <BookOpen class="size-8" />
         </div>
-        <h1 class="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">База знаний</h1>
-        <p class="mt-2 max-w-sm text-sm text-muted">
-          Инструкции и скрипты для операторов. Создайте первый раздел, затем добавьте статьи.
+        <h1 class="text-3xl font-bold tracking-tight text-ink">База знаний</h1>
+        <p class="mt-2 max-w-md text-sm leading-relaxed text-muted">
+          Живые инструкции для операторов — скрипты, регламенты и ответы на частые вопросы.
         </p>
         <button
           v-if="canWrite"
           type="button"
-          class="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white"
+          class="mt-6 inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white"
           @click="openCreateFolder(null)"
         >
           <Plus class="size-4" />
           Создать первый раздел
         </button>
-        <p v-else class="mt-5 text-sm text-muted">Пока нет опубликованных материалов.</p>
       </div>
 
       <div
         v-else-if="!articleId"
         class="flex flex-1 flex-col items-center justify-center px-6 text-center"
       >
-        <FileText class="mb-3 size-10 text-muted/40" />
-        <p class="text-sm font-medium text-ink">Выберите статью</p>
-        <p class="mt-1 text-xs text-muted">
-          {{ store.articleCount }}
-          {{ store.articleCount === 1 ? 'статья' : store.articleCount < 5 ? 'статьи' : 'статей' }}
-          в дереве слева
+        <div class="mb-4 flex size-14 items-center justify-center rounded-2xl bg-panel text-muted shadow-sm">
+          <FileText class="size-6" />
+        </div>
+        <p class="text-base font-semibold text-ink">Выберите статью слева</p>
+        <p class="mt-1 text-sm text-muted">
+          {{ store.articleCount }} материалов в базе
         </p>
-        <div v-if="recent.length" class="mt-6 w-full max-w-sm text-left">
-          <div class="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted">Недавние</div>
+        <div v-if="recent.length" class="mt-8 w-full max-w-sm text-left">
+          <div class="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted">Продолжить</div>
           <button
             v-for="r in recent"
             :key="'rr' + r.id"
             type="button"
-            class="mb-1 flex w-full items-center gap-2 rounded-xl border border-line bg-panel px-3 py-2 text-left text-sm hover:border-brand/40"
+            class="mb-2 flex w-full items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3 text-left shadow-sm transition hover:border-brand/35"
             @click="openArticle(r.id)"
           >
-            <Clock class="size-3.5 shrink-0 text-muted" />
-            <span class="truncate">{{ r.title }}</span>
+            <Clock class="size-4 shrink-0 text-brand" />
+            <span class="truncate text-sm font-medium">{{ r.title }}</span>
           </button>
         </div>
       </div>
 
       <template v-else>
-        <header
-          class="shrink-0 border-b border-line px-3 py-3 sm:px-6"
-          :class="editing ? 'bg-brand-soft/35' : 'bg-panel'"
-        >
-          <div class="mb-2 flex items-center gap-2">
-            <button
-              type="button"
-              class="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink md:hidden"
-              aria-label="К дереву"
-              @click="backToTree"
-            >
-              <ArrowLeft class="size-4" />
-            </button>
-            <nav class="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-muted">
-              <template v-for="(c, i) in breadcrumb" :key="i">
-                <span v-if="i > 0" class="opacity-40">/</span>
-                <button
-                  v-if="c.kind !== 'article'"
-                  type="button"
-                  class="truncate transition hover:text-brand"
-                  @click="onCrumb(c)"
-                >
-                  {{ c.title }}
-                </button>
-                <span v-else class="truncate font-medium text-ink">{{ c.title }}</span>
-              </template>
-            </nav>
-            <span
-              v-if="editing"
-              class="ml-auto hidden rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white sm:inline"
-            >
-              Редактирование
-            </span>
-          </div>
-
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <input
-                v-if="editing"
-                v-model="draftTitle"
-                class="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-xl font-semibold tracking-tight text-ink shadow-sm outline-none focus:border-brand sm:text-2xl"
-                placeholder="Название статьи"
-              />
-              <h1 v-else class="truncate text-xl font-semibold tracking-tight text-ink sm:text-2xl">
-                {{ store.current?.title ?? '…' }}
-              </h1>
-              <p v-if="store.current && !editing" class="mt-1 text-xs text-muted">
-                <span v-if="store.current.updatedByName">{{ store.current.updatedByName }} · </span>
-                {{ formatDate(store.current.updatedAt) }}
-                <span
-                  v-if="!store.current.isPublished"
-                  class="ml-2 rounded bg-warn/15 px-1.5 py-0.5 text-warn"
-                  >черновик</span
-                >
-              </p>
-              <div v-if="editing" class="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-                  :class="
-                    draftPublished
-                      ? 'border-ok/30 bg-ok/10 text-ok'
-                      : 'border-warn/30 bg-warn/10 text-warn'
-                  "
-                  @click="draftPublished = !draftPublished"
-                >
-                  <span
-                    class="size-2 rounded-full"
-                    :class="draftPublished ? 'bg-ok' : 'bg-warn'"
-                  />
-                  {{ draftPublished ? 'Опубликовано' : 'Черновик' }}
-                </button>
-                <span class="text-[11px] text-muted">
-                  {{
-                    draftPublished
-                      ? 'Видят все с доступом к базе знаний'
-                      : 'Видят только сотрудники с правом записи'
-                  }}
-                </span>
-              </div>
-            </div>
-
-            <div v-if="canWrite" class="flex shrink-0 flex-wrap gap-2">
-              <template v-if="editing">
-                <button
-                  type="button"
-                  class="rounded-xl border border-line bg-panel px-3.5 py-2 text-sm font-medium"
-                  :disabled="store.saving"
-                  @click="cancelEdit"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
-                  :disabled="store.saving || !draftTitle.trim()"
-                  @click="saveEdit"
-                >
-                  {{ store.saving ? 'Сохранение…' : 'Сохранить' }}
-                </button>
-              </template>
-              <template v-else>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm font-medium"
-                  @click="startEdit"
-                >
-                  <Pencil class="size-3.5" />
-                  Изменить
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm"
-                  @click="openMoveArticle"
-                >
-                  <FolderInput class="size-3.5" />
-                  Перенести
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3 py-1.5 text-sm text-danger"
-                  @click="openDeleteArticle"
-                >
-                  <Trash2 class="size-3.5" />
-                  Удалить
-                </button>
-              </template>
-            </div>
-          </div>
-          <p v-if="store.error" class="mt-2 text-xs text-danger">{{ store.error }}</p>
-        </header>
-
-        <div class="flex min-h-0 flex-1 overflow-hidden">
-          <div
-            class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-5"
-            :class="editing ? 'bg-surface' : ''"
-          >
-            <p v-if="store.loadingArticle" class="text-sm text-muted">Загрузка статьи…</p>
-            <template v-else-if="store.current">
-              <div v-if="editing" class="mx-auto max-w-4xl">
-                <KbRichEditor v-model="draftHtml" />
-              </div>
-              <KbArticleBody
-                v-else
-                ref="articleBodyRef"
-                :html="store.current.bodyHtml || '<p>Пустая статья</p>'"
-                @toc="toc = $event"
-              />
-            </template>
-          </div>
-          <aside
-            v-if="!editing && toc.length > 1"
-            class="hidden w-52 shrink-0 overflow-y-auto border-l border-line bg-panel/60 px-3 py-5 xl:block"
-          >
-            <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted">
-              Содержание
-            </div>
-            <nav class="space-y-1">
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div class="mx-auto max-w-3xl px-4 py-5 sm:px-8 sm:py-8">
+            <div class="mb-4 flex items-center gap-2">
               <button
-                v-for="item in toc"
-                :key="item.id"
                 type="button"
-                class="block w-full truncate text-left text-[12px] text-muted transition hover:text-brand"
-                :class="item.level === 3 ? 'pl-3' : 'font-medium text-ink/80'"
-                @click="articleBodyRef?.scrollToHeading(item.id)"
+                class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-panel text-muted shadow-sm md:hidden"
+                aria-label="К дереву"
+                @click="backToTree"
               >
-                {{ item.text }}
+                <ArrowLeft class="size-4" />
               </button>
-            </nav>
-          </aside>
+              <nav class="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-muted">
+                <template v-for="(c, i) in breadcrumb" :key="i">
+                  <span v-if="i > 0" class="opacity-40">/</span>
+                  <button
+                    v-if="c.kind !== 'article'"
+                    type="button"
+                    class="truncate transition hover:text-brand"
+                    @click="onCrumb(c)"
+                  >
+                    {{ c.title }}
+                  </button>
+                  <span v-else class="truncate font-medium text-ink">{{ c.title }}</span>
+                </template>
+              </nav>
+            </div>
+
+            <!-- Document card -->
+            <article class="overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_8px_30px_rgba(21,32,51,0.06)]">
+              <header class="border-b border-line px-5 py-5 sm:px-8 sm:py-6">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <input
+                      v-if="editing"
+                      v-model="draftTitle"
+                      class="w-full border-0 bg-transparent text-2xl font-bold tracking-tight text-ink outline-none placeholder:text-muted/50 sm:text-3xl"
+                      placeholder="Название статьи"
+                    />
+                    <h1 v-else class="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+                      {{ store.current?.title ?? '…' }}
+                    </h1>
+                    <div v-if="!editing && store.current" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+                      <span v-if="store.current.updatedByName">{{ store.current.updatedByName }}</span>
+                      <span v-if="store.current.updatedByName">·</span>
+                      <span>{{ formatDate(store.current.updatedAt) }}</span>
+                      <span
+                        v-if="!store.current.isPublished"
+                        class="rounded-full bg-warn/15 px-2 py-0.5 font-semibold text-warn"
+                        >черновик</span
+                      >
+                    </div>
+                    <div v-else-if="editing" class="mt-4 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold"
+                        :class="
+                          draftPublished
+                            ? 'border-ok/25 bg-ok/10 text-ok'
+                            : 'border-warn/25 bg-warn/10 text-warn'
+                        "
+                        @click="draftPublished = !draftPublished"
+                      >
+                        <span
+                          class="size-2 rounded-full"
+                          :class="draftPublished ? 'bg-ok' : 'bg-warn'"
+                        />
+                        {{ draftPublished ? 'Опубликовано' : 'Черновик' }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-if="canWrite" class="flex shrink-0 flex-wrap gap-2">
+                    <template v-if="editing">
+                      <button
+                        type="button"
+                        class="rounded-xl border border-line px-3.5 py-2 text-sm font-medium"
+                        :disabled="store.saving"
+                        @click="cancelEdit"
+                      >
+                        Отмена
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        :disabled="store.saving || !draftTitle.trim()"
+                        @click="saveEdit"
+                      >
+                        {{ store.saving ? 'Сохранение…' : 'Сохранить' }}
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-ink px-3.5 py-2 text-sm font-semibold text-white"
+                        @click="startEdit"
+                      >
+                        <Pencil class="size-3.5" />
+                        Редактировать
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-sm"
+                        @click="openMoveArticle"
+                      >
+                        <FolderInput class="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-sm text-danger"
+                        @click="openDeleteArticle"
+                      >
+                        <Trash2 class="size-3.5" />
+                      </button>
+                    </template>
+                  </div>
+                </div>
+                <p v-if="store.error" class="mt-2 text-xs text-danger">{{ store.error }}</p>
+              </header>
+
+              <div class="px-0 py-0 sm:px-0">
+                <p v-if="store.loadingArticle" class="px-8 py-10 text-sm text-muted">Загрузка…</p>
+                <template v-else-if="store.current">
+                  <div v-if="editing" class="p-3 sm:p-4">
+                    <KbRichEditor :key="store.current.id" v-model="draftHtml" />
+                  </div>
+                  <div v-else class="px-5 py-6 sm:px-8 sm:py-8">
+                    <div class="flex gap-8">
+                      <KbArticleBody
+                        ref="articleBodyRef"
+                        class="min-w-0 flex-1"
+                        :html="store.current.bodyHtml || '<p>Пустая статья — нажмите «Редактировать».</p>'"
+                        @toc="toc = $event"
+                      />
+                      <aside v-if="toc.length > 1" class="hidden w-44 shrink-0 xl:block">
+                        <div class="sticky top-6">
+                          <div class="mb-2 text-[10px] font-bold uppercase tracking-[0.08em] text-muted">
+                            На этой странице
+                          </div>
+                          <nav class="space-y-1.5 border-l border-line pl-3">
+                            <button
+                              v-for="item in toc"
+                              :key="item.id"
+                              type="button"
+                              class="block w-full truncate text-left text-[12px] text-muted transition hover:text-brand"
+                              :class="item.level === 3 ? 'pl-2' : 'font-semibold text-ink/80'"
+                              @click="articleBodyRef?.scrollToHeading(item.id)"
+                            >
+                              {{ item.text }}
+                            </button>
+                          </nav>
+                        </div>
+                      </aside>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </article>
+          </div>
         </div>
       </template>
     </section>
@@ -950,92 +946,3 @@ onUnmounted(() => {
     </Modal>
   </div>
 </template>
-
-<style>
-.kb-prose {
-  font-size: 0.975rem;
-  line-height: 1.7;
-  color: var(--color-ink);
-}
-.kb-prose h2 {
-  margin: 1.4em 0 0.5em;
-  font-size: 1.35rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-.kb-prose h3 {
-  margin: 1.2em 0 0.4em;
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-.kb-prose p {
-  margin: 0.65em 0;
-}
-.kb-prose ul,
-.kb-prose ol {
-  margin: 0.65em 0;
-  padding-left: 1.35rem;
-}
-.kb-prose ul {
-  list-style: disc;
-}
-.kb-prose ol {
-  list-style: decimal;
-}
-.kb-prose blockquote {
-  margin: 0.9em 0;
-  border-left: 3px solid var(--color-brand);
-  padding-left: 0.9rem;
-  color: var(--color-muted);
-  font-style: italic;
-}
-.kb-prose a,
-.kb-tiptap-body a.kb-link {
-  color: var(--color-brand);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.kb-prose img,
-.kb-tiptap-body img,
-.kb-img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 1rem 0;
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-line);
-}
-.kb-prose h2,
-.kb-prose h3 {
-  scroll-margin-top: 1rem;
-}
-.kb-tiptap-body {
-  font-size: 0.975rem;
-  line-height: 1.7;
-  color: var(--color-ink);
-}
-.kb-tiptap-body h2 {
-  margin: 1.2em 0 0.45em;
-  font-size: 1.3rem;
-  font-weight: 650;
-}
-.kb-tiptap-body h3 {
-  margin: 1em 0 0.35em;
-  font-size: 1.08rem;
-  font-weight: 600;
-}
-.kb-tiptap-body ul {
-  list-style: disc;
-  padding-left: 1.35rem;
-}
-.kb-tiptap-body ol {
-  list-style: decimal;
-  padding-left: 1.35rem;
-}
-.kb-tiptap-body blockquote {
-  border-left: 3px solid var(--color-brand);
-  padding-left: 0.85rem;
-  color: var(--color-muted);
-  font-style: italic;
-}
-</style>

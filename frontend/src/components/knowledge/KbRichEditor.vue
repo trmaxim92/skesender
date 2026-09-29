@@ -21,7 +21,6 @@ import { hydrateKbImages, serializeKbHtml } from '@/utils/knowledgeUi'
 
 const props = defineProps<{
   modelValue: string
-  editable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -29,15 +28,15 @@ const emit = defineEmits<{
 }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const shell = ref<HTMLElement | null>(null)
 const uploading = ref(false)
 const uploadError = ref('')
-const editorRoot = ref<HTMLElement | null>(null)
 const linkOpen = ref(false)
 const linkUrl = ref('')
+const initError = ref('')
 
 const editor = useEditor({
   content: props.modelValue || '<p></p>',
-  editable: props.editable !== false,
   extensions: [
     StarterKit.configure({
       heading: { levels: [2, 3] },
@@ -48,28 +47,32 @@ const editor = useEditor({
     Link.configure({
       openOnClick: false,
       autolink: true,
-      HTMLAttributes: { class: 'kb-link', rel: 'noopener noreferrer', target: '_blank' },
+      HTMLAttributes: {
+        class: 'text-brand underline underline-offset-2',
+        rel: 'noopener noreferrer',
+        target: '_blank',
+      },
     }),
     Image.configure({
       allowBase64: false,
-      HTMLAttributes: { class: 'kb-img' },
+      HTMLAttributes: { class: 'kb-doc-img' },
     }),
     Placeholder.configure({
-      placeholder: 'Начните текст статьи… Можно вставить заголовки, списки и картинки.',
+      placeholder: 'Пишите инструкцию… Выделите текст и оформите панелью сверху.',
     }),
   ],
   editorProps: {
     attributes: {
-      class: 'kb-tiptap-body',
+      class: 'kb-doc-editor outline-none',
       spellcheck: 'true',
     },
   },
   onUpdate: ({ editor: ed }) => {
     emit('update:modelValue', serializeKbHtml(ed.getHTML()))
-    void nextTick(() => hydrateKbImages(editorRoot.value))
+    void nextTick(() => hydrateKbImages(shell.value))
   },
   onCreate: () => {
-    void nextTick(() => hydrateKbImages(editorRoot.value))
+    void nextTick(() => hydrateKbImages(shell.value))
   },
 })
 
@@ -80,58 +83,53 @@ watch(
     const current = serializeKbHtml(editor.value.getHTML())
     if (html !== current) {
       editor.value.commands.setContent(html || '<p></p>', { emitUpdate: false })
-      void nextTick(() => hydrateKbImages(editorRoot.value))
+      void nextTick(() => hydrateKbImages(shell.value))
     }
   },
 )
 
-watch(
-  () => props.editable,
-  (editable) => {
-    editor.value?.setEditable(editable !== false)
-  },
-)
-
 onBeforeUnmount(() => {
-  editor.value?.destroy()
+  try {
+    editor.value?.destroy()
+  } catch {
+    /* ignore */
+  }
 })
 
-const ready = computed(() => Boolean(editor.value))
-const canLink = computed(() => editor.value?.isActive('link') ?? false)
+const active = computed(() => ({
+  h2: editor.value?.isActive('heading', { level: 2 }) ?? false,
+  h3: editor.value?.isActive('heading', { level: 3 }) ?? false,
+  bold: editor.value?.isActive('bold') ?? false,
+  italic: editor.value?.isActive('italic') ?? false,
+  bullet: editor.value?.isActive('bulletList') ?? false,
+  ordered: editor.value?.isActive('orderedList') ?? false,
+  quote: editor.value?.isActive('blockquote') ?? false,
+  link: editor.value?.isActive('link') ?? false,
+}))
 
-function run(cmd: () => void) {
-  if (!editor.value) return
-  cmd()
+function chain() {
+  return editor.value?.chain().focus()
 }
 
-function openLinkPanel() {
+function openLink() {
   if (!editor.value) return
   linkUrl.value = (editor.value.getAttributes('link').href as string) || 'https://'
   linkOpen.value = true
 }
 
 function applyLink() {
-  if (!editor.value) return
-  const trimmed = linkUrl.value.trim()
-  if (!trimmed) {
-    editor.value.chain().focus().extendMarkRange('link').unsetLink().run()
-  } else {
-    editor.value.chain().focus().extendMarkRange('link').setLink({ href: trimmed }).run()
-  }
+  const t = linkUrl.value.trim()
+  if (!t) chain()?.extendMarkRange('link').unsetLink().run()
+  else chain()?.extendMarkRange('link').setLink({ href: t }).run()
   linkOpen.value = false
 }
 
-function removeLink() {
-  editor.value?.chain().focus().extendMarkRange('link').unsetLink().run()
+function clearLink() {
+  chain()?.extendMarkRange('link').unsetLink().run()
   linkOpen.value = false
 }
 
-function pickImage() {
-  uploadError.value = ''
-  fileInput.value?.click()
-}
-
-async function onFileChange(ev: Event) {
+async function onFile(ev: Event) {
   const input = ev.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
@@ -142,18 +140,15 @@ async function onFileChange(ev: Event) {
     const { url } = await uploadKnowledgeImage(file)
     editor.value.chain().focus().setImage({ src: url }).run()
     await nextTick()
-    editorRoot.value
-      ?.querySelectorAll('img')
-      .forEach((img) => {
-        const src = img.getAttribute('src')
-        if (src === url || src?.startsWith('blob:')) {
-          img.setAttribute('data-kb-src', url)
-        }
-      })
-    await hydrateKbImages(editorRoot.value)
+    shell.value?.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src')
+      if (src === url || src?.startsWith('blob:')) img.setAttribute('data-kb-src', url)
+    })
+    await hydrateKbImages(shell.value)
     emit('update:modelValue', serializeKbHtml(editor.value.getHTML()))
   } catch (e) {
-    uploadError.value = e instanceof Error ? e.message : 'Не удалось загрузить'
+    uploadError.value = e instanceof Error ? e.message : 'Ошибка загрузки'
+    initError.value = ''
   } finally {
     uploading.value = false
   }
@@ -161,351 +156,107 @@ async function onFileChange(ev: Event) {
 </script>
 
 <template>
-  <div ref="editorRoot" class="kb-editor">
-    <div v-if="editable !== false" class="kb-toolbar">
-      <div class="kb-toolbar-group">
+  <div ref="shell" class="kb-doc">
+    <!-- Sticky format bar — always outside the writing surface -->
+    <div class="kb-doc-bar">
+      <div class="kb-doc-bar-inner">
         <button
           type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('heading', { level: 2 }) }"
-          @click="run(() => editor!.chain().focus().toggleHeading({ level: 2 }).run())"
+          class="kb-chip"
+          :class="{ on: active.h2 }"
+          @click="chain()?.toggleHeading({ level: 2 }).run()"
         >
-          <Heading2 class="size-4" />
-          <span>Заголовок</span>
+          <Heading2 class="size-3.5" />
+          H2
         </button>
         <button
           type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('heading', { level: 3 }) }"
-          @click="run(() => editor!.chain().focus().toggleHeading({ level: 3 }).run())"
+          class="kb-chip"
+          :class="{ on: active.h3 }"
+          @click="chain()?.toggleHeading({ level: 3 }).run()"
         >
-          <Heading3 class="size-4" />
-          <span>Подзаголовок</span>
+          <Heading3 class="size-3.5" />
+          H3
         </button>
+        <span class="kb-sep" />
+        <button
+          type="button"
+          class="kb-chip"
+          :class="{ on: active.bold }"
+          @click="chain()?.toggleBold().run()"
+        >
+          <Bold class="size-3.5" />
+          Жирный
+        </button>
+        <button
+          type="button"
+          class="kb-chip"
+          :class="{ on: active.italic }"
+          @click="chain()?.toggleItalic().run()"
+        >
+          <Italic class="size-3.5" />
+          Курсив
+        </button>
+        <span class="kb-sep" />
+        <button
+          type="button"
+          class="kb-chip"
+          :class="{ on: active.bullet }"
+          @click="chain()?.toggleBulletList().run()"
+        >
+          <List class="size-3.5" />
+          Список
+        </button>
+        <button
+          type="button"
+          class="kb-chip"
+          :class="{ on: active.ordered }"
+          @click="chain()?.toggleOrderedList().run()"
+        >
+          <ListOrdered class="size-3.5" />
+          1. 2. 3.
+        </button>
+        <button
+          type="button"
+          class="kb-chip"
+          :class="{ on: active.quote }"
+          @click="chain()?.toggleBlockquote().run()"
+        >
+          <Quote class="size-3.5" />
+          Цитата
+        </button>
+        <span class="kb-sep" />
+        <button type="button" class="kb-chip" :class="{ on: active.link || linkOpen }" @click="openLink">
+          <Link2 class="size-3.5" />
+          Ссылка
+        </button>
+        <button type="button" class="kb-chip" :disabled="uploading" @click="fileInput?.click()">
+          <ImagePlus class="size-3.5" />
+          {{ uploading ? '…' : 'Фото' }}
+        </button>
+        <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile" />
       </div>
-      <div class="kb-toolbar-group">
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('bold') }"
-          title="Жирный"
-          @click="run(() => editor!.chain().focus().toggleBold().run())"
-        >
-          <Bold class="size-4" />
-          <span>Жирный</span>
-        </button>
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('italic') }"
-          title="Курсив"
-          @click="run(() => editor!.chain().focus().toggleItalic().run())"
-        >
-          <Italic class="size-4" />
-          <span>Курсив</span>
-        </button>
+
+      <div v-if="linkOpen" class="kb-link-row">
+        <input
+          v-model="linkUrl"
+          type="url"
+          class="kb-link-field"
+          placeholder="https://example.com"
+          @keydown.enter.prevent="applyLink"
+        />
+        <button type="button" class="kb-chip on" @click="applyLink">Готово</button>
+        <button type="button" class="kb-chip" @click="clearLink">Убрать</button>
+        <button type="button" class="kb-chip" @click="linkOpen = false">Закрыть</button>
       </div>
-      <div class="kb-toolbar-group">
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('bulletList') }"
-          @click="run(() => editor!.chain().focus().toggleBulletList().run())"
-        >
-          <List class="size-4" />
-          <span>Список</span>
-        </button>
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('orderedList') }"
-          @click="run(() => editor!.chain().focus().toggleOrderedList().run())"
-        >
-          <ListOrdered class="size-4" />
-          <span>Нумерация</span>
-        </button>
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': editor?.isActive('blockquote') }"
-          @click="run(() => editor!.chain().focus().toggleBlockquote().run())"
-        >
-          <Quote class="size-4" />
-          <span>Цитата</span>
-        </button>
-      </div>
-      <div class="kb-toolbar-group">
-        <button
-          type="button"
-          class="kb-tool"
-          :class="{ 'is-on': canLink || linkOpen }"
-          @click="openLinkPanel"
-        >
-          <Link2 class="size-4" />
-          <span>Ссылка</span>
-        </button>
-        <button type="button" class="kb-tool" :disabled="uploading" @click="pickImage">
-          <ImagePlus class="size-4" />
-          <span>{{ uploading ? 'Загрузка…' : 'Картинка' }}</span>
-        </button>
-      </div>
-      <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFileChange" />
+      <p v-if="uploadError" class="kb-err">{{ uploadError }}</p>
     </div>
 
-    <div v-if="linkOpen" class="kb-link-bar">
-      <input
-        v-model="linkUrl"
-        type="url"
-        placeholder="https://…"
-        class="kb-link-input"
-        @keydown.enter.prevent="applyLink"
-      />
-      <button type="button" class="kb-link-btn primary" @click="applyLink">Ок</button>
-      <button type="button" class="kb-link-btn" @click="removeLink">Убрать</button>
-      <button type="button" class="kb-link-btn" @click="linkOpen = false">Закрыть</button>
-    </div>
-
-    <p v-if="uploadError" class="kb-upload-err">{{ uploadError }}</p>
-
-    <div class="kb-editor-surface">
-      <EditorContent v-if="ready" :editor="editor" />
-      <p v-else class="kb-editor-loading">Подготовка редактора…</p>
+    <div class="kb-doc-page">
+      <EditorContent v-if="editor" :editor="editor" />
+      <p v-else class="py-16 text-center text-sm text-muted">
+        {{ initError || 'Загрузка редактора…' }}
+      </p>
     </div>
   </div>
 </template>
-
-<style>
-.kb-editor {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-  overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: 1rem;
-  background: var(--color-panel);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 4%, transparent);
-}
-
-.kb-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
-  padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--color-line);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--color-surface) 92%, #fff),
-    var(--color-surface)
-  );
-}
-
-.kb-toolbar-group {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  padding-right: 0.45rem;
-  margin-right: 0.2rem;
-  border-right: 1px solid color-mix(in srgb, var(--color-line) 85%, transparent);
-}
-
-.kb-toolbar-group:last-of-type {
-  border-right: 0;
-  margin-right: 0;
-  padding-right: 0;
-}
-
-.kb-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  height: 2.15rem;
-  padding: 0 0.7rem;
-  border: 1px solid transparent;
-  border-radius: 0.65rem;
-  background: transparent;
-  color: var(--color-ink);
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
-}
-
-.kb-tool:hover:not(:disabled) {
-  background: var(--color-panel);
-  border-color: var(--color-line);
-}
-
-.kb-tool.is-on {
-  background: var(--color-brand-soft);
-  border-color: color-mix(in srgb, var(--color-brand) 25%, var(--color-line));
-  color: var(--color-brand);
-}
-
-.kb-tool:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.kb-tool span {
-  white-space: nowrap;
-}
-
-@media (max-width: 640px) {
-  .kb-tool span {
-    display: none;
-  }
-  .kb-tool {
-    width: 2.15rem;
-    padding: 0;
-    justify-content: center;
-  }
-}
-
-.kb-link-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: center;
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid var(--color-line);
-  background: var(--color-brand-soft);
-}
-
-.kb-link-input {
-  flex: 1 1 12rem;
-  min-width: 10rem;
-  height: 2.1rem;
-  padding: 0 0.75rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.65rem;
-  background: var(--color-panel);
-  color: var(--color-ink);
-  font-size: 0.8125rem;
-  outline: none;
-}
-
-.kb-link-input:focus {
-  border-color: var(--color-brand);
-}
-
-.kb-link-btn {
-  height: 2.1rem;
-  padding: 0 0.75rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.65rem;
-  background: var(--color-panel);
-  color: var(--color-ink);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.kb-link-btn.primary {
-  border-color: var(--color-brand);
-  background: var(--color-brand);
-  color: #fff;
-}
-
-.kb-upload-err {
-  margin: 0;
-  padding: 0.4rem 0.85rem;
-  font-size: 0.75rem;
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-}
-
-.kb-editor-surface {
-  flex: 1 1 auto;
-  min-height: 320px;
-  padding: 1rem 1.1rem 1.35rem;
-  background:
-    radial-gradient(
-      ellipse 80% 50% at 0% 0%,
-      color-mix(in srgb, var(--color-brand) 5%, transparent),
-      transparent 55%
-    ),
-    var(--color-panel);
-}
-
-.kb-editor-loading {
-  margin: 2rem 0;
-  text-align: center;
-  font-size: 0.875rem;
-  color: var(--color-muted);
-}
-
-.kb-tiptap-body {
-  min-height: 280px;
-  outline: none;
-  font-size: 1rem;
-  line-height: 1.75;
-  color: var(--color-ink);
-}
-
-.kb-tiptap-body p {
-  margin: 0.55em 0;
-}
-
-.kb-tiptap-body h2 {
-  margin: 1.15em 0 0.4em;
-  font-size: 1.4rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.kb-tiptap-body h3 {
-  margin: 1em 0 0.35em;
-  font-size: 1.12rem;
-  font-weight: 650;
-}
-
-.kb-tiptap-body ul {
-  list-style: disc;
-  padding-left: 1.4rem;
-  margin: 0.55em 0;
-}
-
-.kb-tiptap-body ol {
-  list-style: decimal;
-  padding-left: 1.4rem;
-  margin: 0.55em 0;
-}
-
-.kb-tiptap-body blockquote {
-  margin: 0.85em 0;
-  border-left: 3px solid var(--color-brand);
-  padding-left: 0.9rem;
-  color: var(--color-muted);
-  font-style: italic;
-}
-
-.kb-tiptap-body a.kb-link {
-  color: var(--color-brand);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.kb-tiptap-body img,
-.kb-img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 1rem 0;
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-line);
-}
-
-.kb-tiptap-body p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  float: left;
-  height: 0;
-  pointer-events: none;
-  color: color-mix(in srgb, var(--color-muted) 75%, transparent);
-  font-style: normal;
-}
-</style>
