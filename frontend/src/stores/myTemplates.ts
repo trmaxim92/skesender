@@ -25,6 +25,7 @@ function mapCategory(c: ApiTemplateCategory): TemplateCategory {
   return {
     id: String(c.id),
     name: c.name,
+    icon: c.icon ?? null,
     sortOrder: c.sort_order,
     updatedAt: c.updated_at,
   }
@@ -77,9 +78,12 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
     }
   }
 
-  async function addCategory(name: string) {
+  async function addCategory(name: string, icon?: string | null) {
     try {
-      const created = await createMyTemplateCategoryRequest({ name })
+      const created = await createMyTemplateCategoryRequest({
+        name,
+        icon: icon || null,
+      })
       const mapped = mapCategory(created)
       categories.value.push(mapped)
       categories.value.sort(
@@ -92,19 +96,28 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
     }
   }
 
-  async function renameCategory(id: string, name: string) {
+  async function updateCategory(
+    id: string,
+    payload: { name?: string; icon?: string | null },
+  ) {
     try {
-      const updated = await updateMyTemplateCategoryRequest(Number(id), { name })
+      const updated = await updateMyTemplateCategoryRequest(Number(id), payload)
       const mapped = mapCategory(updated)
       categories.value = categories.value.map((c) => (c.id === id ? mapped : c))
-      templates.value = templates.value.map((t) =>
-        t.categoryId === id ? { ...t, categoryName: mapped.name } : t,
-      )
+      if (payload.name != null) {
+        templates.value = templates.value.map((t) =>
+          t.categoryId === id ? { ...t, categoryName: mapped.name } : t,
+        )
+      }
       return true
     } catch (e) {
       error.value = e instanceof ApiError ? e.detail : 'Не удалось обновить категорию'
       return false
     }
+  }
+
+  async function renameCategory(id: string, name: string) {
+    return updateCategory(id, { name })
   }
 
   async function removeCategory(id: string) {
@@ -217,7 +230,12 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
     for (const cat of orderedCats) {
       const items = byCat.get(cat.id)
       if (items?.length) {
-        groups.push({ categoryId: cat.id, categoryName: cat.name, templates: items })
+        groups.push({
+          categoryId: cat.id,
+          categoryName: cat.name,
+          categoryIcon: cat.icon,
+          templates: items,
+        })
         byCat.delete(cat.id)
       }
     }
@@ -225,7 +243,13 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
       if (!items.length) continue
       const name =
         catId == null ? 'Без категории' : items[0]?.categoryName || 'Без категории'
-      groups.push({ categoryId: catId, categoryName: name, templates: items })
+      const icon = catId == null ? null : categories.value.find((c) => c.id === catId)?.icon ?? null
+      groups.push({
+        categoryId: catId,
+        categoryName: name,
+        categoryIcon: icon,
+        templates: items,
+      })
     }
     return groups
   }
@@ -237,6 +261,7 @@ export const useMyTemplatesStore = defineStore('myTemplates', () => {
     error,
     fetchAll,
     addCategory,
+    updateCategory,
     renameCategory,
     removeCategory,
     addTemplate,

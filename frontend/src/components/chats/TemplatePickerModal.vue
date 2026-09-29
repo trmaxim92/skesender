@@ -2,26 +2,16 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Building2,
   ChevronDown,
   ChevronRight,
   Copy,
-  FileText,
-  Gift,
   LayoutGrid,
-  LogIn,
-  MessageCircle,
-  Package,
   Pencil,
   Search,
-  Star,
-  Tag,
-  UserPlus,
-  Wallet,
-  Wrench,
   X,
 } from 'lucide-vue-next'
 import type { Template, TemplateGroup } from '@/types'
+import { resolveCategoryIcon } from '@/utils/templateCategoryIcons'
 
 const props = defineProps<{
   groups: TemplateGroup[]
@@ -44,28 +34,8 @@ const selectedId = ref<string | null>(null)
 const sortMode = ref<SortMode>('popular')
 const sortOpen = ref(false)
 
-const ICON_RULES: { match: RegExp; icon: typeof Tag }[] = [
-  { match: /акци|бонус|предлож/i, icon: Gift },
-  { match: /вход|логин|профиль/i, icon: LogIn },
-  { match: /регистр/i, icon: UserPlus },
-  { match: /поддерж|help|помощь/i, icon: MessageCircle },
-  { match: /финанс|оплат|вывод|комисс|платеж/i, icon: Wallet },
-  { match: /техн|ошибк|сбой/i, icon: Wrench },
-  { match: /заказ|доставк/i, icon: Package },
-  { match: /парк|fleet/i, icon: Building2 },
-  { match: /мои|личн/i, icon: Star },
-  { match: /друг/i, icon: Tag },
-]
-
 function groupKey(group: TemplateGroup) {
   return group.categoryId ?? `name:${group.categoryName}`
-}
-
-function iconFor(name: string) {
-  for (const rule of ICON_RULES) {
-    if (rule.match.test(name)) return rule.icon
-  }
-  return FileText
 }
 
 function isPopular(t: Template) {
@@ -90,7 +60,7 @@ const navItems = computed(() => {
     items.push({
       key: groupKey(g),
       name: g.categoryName,
-      icon: iconFor(g.categoryName),
+      icon: resolveCategoryIcon(g.categoryIcon, g.categoryName),
       count: g.templates.length,
     })
   }
@@ -124,7 +94,12 @@ function sortTemplates(list: Template[]) {
 
 const listSections = computed(() => {
   const q = query.value.trim().toLowerCase()
-  const sections: { key: string; name: string; templates: Template[] }[] = []
+  const sections: {
+    key: string
+    name: string
+    icon: string | null
+    templates: Template[]
+  }[] = []
 
   const source =
     categoryKey.value === ALL_KEY
@@ -139,6 +114,7 @@ const listSections = computed(() => {
     sections.push({
       key: groupKey(g),
       name: g.categoryName,
+      icon: g.categoryIcon,
       templates,
     })
   }
@@ -243,7 +219,7 @@ onUnmounted(() => {
     @click.self="emit('close')"
   >
     <div
-      class="flex max-h-[min(94vh,900px)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl"
+      class="flex h-[min(94vh,900px)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-label="Выбор шаблона"
@@ -391,7 +367,10 @@ onUnmounted(() => {
                           : 'bg-brand-soft text-brand'
                       "
                     >
-                      <component :is="iconFor(section.name)" class="size-4" />
+                      <component
+                        :is="resolveCategoryIcon(section.icon, section.name)"
+                        class="size-4"
+                      />
                     </div>
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">

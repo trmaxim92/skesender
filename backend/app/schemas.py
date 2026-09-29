@@ -604,6 +604,7 @@ WEBHOOK_EVENT_TYPES = (
 class TemplateCategoryOut(BaseModel):
     id: int
     name: str
+    icon: str | None = None
     sort_order: int = 0
     created_at: datetime
     updated_at: datetime
@@ -613,11 +614,13 @@ class TemplateCategoryOut(BaseModel):
 
 class TemplateCategoryCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    icon: str | None = Field(default=None, max_length=64)
     sort_order: int = 0
 
 
 class TemplateCategoryUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    icon: str | None = Field(default=None, max_length=64)
     sort_order: int | None = None
 
 

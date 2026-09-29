@@ -36,6 +36,7 @@ export interface ApiAccessRole {
 export interface ApiTemplateCategory {
   id: number
   name: string
+  icon?: string | null
   sort_order: number
   created_at: string
   updated_at: string
@@ -153,6 +154,7 @@ export async function listMyTemplateCategoriesRequest() {
 
 export async function createMyTemplateCategoryRequest(payload: {
   name: string
+  icon?: string | null
   sort_order?: number
 }) {
   return api<ApiTemplateCategory>('/api/me/template-categories', {
@@ -163,7 +165,7 @@ export async function createMyTemplateCategoryRequest(payload: {
 
 export async function updateMyTemplateCategoryRequest(
   id: number,
-  payload: { name?: string; sort_order?: number },
+  payload: { name?: string; icon?: string | null; sort_order?: number },
 ) {
   return api<ApiTemplateCategory>(`/api/me/template-categories/${id}`, {
     method: 'PATCH',

@@ -252,6 +252,7 @@ export interface MessageAttachment {
 export interface TemplateCategory {
   id: string
   name: string
+  icon: string | null
   sortOrder: number
   updatedAt: string
 }
@@ -275,6 +276,7 @@ export interface Template {
 export interface TemplateGroup {
   categoryId: string | null
   categoryName: string
+  categoryIcon: string | null
   templates: Template[]
 }
 

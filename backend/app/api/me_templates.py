@@ -273,6 +273,7 @@ async def create_my_category(
     _require_write(user)
     cat = TemplateCategory(
         name=body.name.strip(),
+        icon=(body.icon.strip() if body.icon else None),
         sort_order=body.sort_order,
         created_by_id=user.id,
     )
@@ -296,6 +297,8 @@ async def update_my_category(
         raise HTTPException(status_code=404, detail="Category not found")
     if body.name is not None:
         cat.name = body.name.strip()
+    if "icon" in body.model_fields_set:
+        cat.icon = body.icon.strip() if body.icon else None
     if body.sort_order is not None:
         cat.sort_order = body.sort_order
     await db.commit()

@@ -89,6 +89,12 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
+                "ALTER TABLE template_categories "
+                "ADD COLUMN IF NOT EXISTS icon VARCHAR(64)"
+            )
+        )
+        await conn.execute(
+            text(
                 "CREATE INDEX IF NOT EXISTS ix_template_categories_created_by_id "
                 "ON template_categories (created_by_id)"
             )
