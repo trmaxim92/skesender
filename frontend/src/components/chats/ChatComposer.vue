@@ -88,6 +88,7 @@ const groupedTemplates = computed(() => {
     {
       categoryId: null,
       categoryName: 'Шаблоны',
+      categoryIcon: null,
       templates: props.templates,
     },
   ]
