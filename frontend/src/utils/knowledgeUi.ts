@@ -33,25 +33,62 @@ export function pushKbRecent(id: number, title: string) {
 
 export type KbTocItem = {
   id: string
-  level: 2 | 3
+  level: 1 | 2 | 3
   text: string
 }
 
-/** Assign ids to h2/h3 and return TOC entries. Mutates the element tree. */
+/** Assign ids to h1–h3 and return TOC entries. Mutates the element tree. */
 export function buildKbToc(root: HTMLElement): KbTocItem[] {
-  const headings = root.querySelectorAll('h2, h3')
+  const headings = root.querySelectorAll('h1, h2, h3')
   const items: KbTocItem[] = []
   let i = 0
   headings.forEach((el) => {
-    const level = el.tagName.toLowerCase() === 'h2' ? 2 : 3
+    const tag = el.tagName.toLowerCase()
+    const level = (tag === 'h1' ? 1 : tag === 'h2' ? 2 : 3) as 1 | 2 | 3
     const text = (el.textContent || '').trim()
     if (!text) return
     i += 1
     const id = el.id || `kb-h-${i}`
     el.id = id
-    items.push({ id, level: level as 2 | 3, text })
+    items.push({ id, level, text })
   })
   return items
+}
+
+export type KbFlatArticle = {
+  id: number
+  title: string
+  folderId: number
+  folderTitle: string
+  isPublished: boolean
+}
+
+type KbTreeLike = {
+  id: number
+  title: string
+  articles: { id: number; title: string; isPublished: boolean }[]
+  children: KbTreeLike[]
+}
+
+/** Flatten tree into article list with parent folder title. */
+export function flattenKbArticles(nodes: KbTreeLike[]): KbFlatArticle[] {
+  const out: KbFlatArticle[] = []
+  const walk = (list: KbTreeLike[]) => {
+    for (const n of list) {
+      for (const a of n.articles) {
+        out.push({
+          id: a.id,
+          title: a.title,
+          folderId: n.id,
+          folderTitle: n.title,
+          isPublished: a.isPublished,
+        })
+      }
+      if (n.children.length) walk(n.children)
+    }
+  }
+  walk(nodes)
+  return out
 }
 
 /** Persist TipTap HTML: turn blob previews back into API paths via data-kb-src. */

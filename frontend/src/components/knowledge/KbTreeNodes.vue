@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Folder,
   FolderPlus,
   MoreHorizontal,
   Pencil,
@@ -39,15 +40,15 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <ul class="space-y-0.5" :style="{ paddingLeft: depth ? '0.65rem' : '0' }">
+  <ul class="space-y-0.5" :style="{ paddingLeft: depth ? '0.5rem' : '0' }">
     <li v-for="node in nodes" :key="node.id">
       <div
-        class="group relative flex items-center gap-0.5 rounded-lg hover:bg-surface"
+        class="group relative flex items-center gap-1 rounded-xl px-1.5 py-0.5 hover:bg-surface"
         :class="menuFolderId === node.id ? 'bg-surface' : ''"
       >
         <button
           type="button"
-          class="flex size-7 shrink-0 items-center justify-center rounded text-muted"
+          class="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted"
           @click="emit('toggle', node.id)"
         >
           <ChevronDown v-if="expanded.has(node.id)" class="size-3.5" />
@@ -55,19 +56,23 @@ const emit = defineEmits<{
         </button>
         <button
           type="button"
-          class="min-w-0 flex-1 truncate py-1.5 pr-1 text-left text-[13px] font-medium text-ink"
+          class="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
           @click="emit('toggle', node.id)"
         >
-          {{ node.title }}
-          <span class="ml-1 text-[10px] font-normal text-muted">{{
-            folderArticleCount(node)
+          <Folder class="size-4 shrink-0 text-brand/80" />
+          <span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{{
+            node.title
           }}</span>
+          <span
+            class="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-muted"
+            >{{ folderArticleCount(node) }}</span
+          >
         </button>
-        <div v-if="canWrite" class="relative shrink-0 pr-0.5">
+        <div v-if="canWrite" class="relative shrink-0">
           <button
             type="button"
-            class="flex size-7 items-center justify-center rounded text-muted opacity-70 transition hover:bg-line/60 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
-            :class="menuFolderId === node.id ? 'bg-line/60 opacity-100 md:opacity-100' : ''"
+            class="flex size-7 items-center justify-center rounded-lg text-muted opacity-70 transition hover:bg-line/50 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+            :class="menuFolderId === node.id ? 'bg-line/50 opacity-100 md:opacity-100' : ''"
             aria-label="Действия раздела"
             @click.stop="emit('menu', menuFolderId === node.id ? null : node.id)"
           >
@@ -126,23 +131,27 @@ const emit = defineEmits<{
         </div>
       </div>
       <template v-if="expanded.has(node.id)">
-        <ul class="mb-1 ml-3 space-y-0.5 border-l border-line/80 pl-2">
+        <ul class="mb-1 ml-4 space-y-0.5 border-l border-line/70 pl-2">
           <li v-for="art in node.articles" :key="'a' + art.id">
             <button
               type="button"
-              class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition"
+              class="relative flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] transition"
               :class="
                 activeId === art.id
-                  ? 'bg-brand-soft font-medium text-brand'
+                  ? 'bg-brand-soft font-semibold text-brand'
                   : 'text-ink/80 hover:bg-surface'
               "
               @click="emit('open', art.id)"
             >
-              <FileText class="size-3.5 shrink-0 opacity-50" />
+              <span
+                v-if="activeId === art.id"
+                class="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-brand"
+              />
+              <FileText class="size-3.5 shrink-0 opacity-55" />
               <span class="min-w-0 flex-1 truncate">{{ art.title }}</span>
               <span
                 v-if="!art.isPublished"
-                class="shrink-0 rounded bg-warn/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-warn"
+                class="shrink-0 rounded bg-warn/15 px-1 py-0.5 text-[9px] font-semibold uppercase text-warn"
                 >черн.</span
               >
             </button>
@@ -175,7 +184,5 @@ const emit = defineEmits<{
 </template>
 
 <script lang="ts">
-export default {
-  name: 'KbTreeNodes',
-}
+export default { name: 'KbTreeNodes' }
 </script>

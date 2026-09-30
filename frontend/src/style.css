@@ -373,77 +373,90 @@ input[type='checkbox']:indeterminate {
   min-width: 17.5rem;
 }
 
-/* --- Knowledge base (document editor) --- */
+/* --- Knowledge base --- */
+.kb-home-glow::before {
+  content: '';
+  position: absolute;
+  inset: -18px;
+  border-radius: 2rem;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-brand) 28%, transparent) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
 .kb-doc {
   display: flex;
   flex-direction: column;
   min-height: 28rem;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: var(--color-panel);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 4%, transparent);
 }
 .kb-doc-bar {
   position: sticky;
   top: 0;
   z-index: 5;
-  border: 1px solid var(--color-line);
-  border-radius: 1rem 1rem 0 0;
-  background: color-mix(in srgb, var(--color-panel) 92%, var(--color-surface));
-  backdrop-filter: blur(8px);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-ink) 6%, transparent);
+  border-bottom: 1px solid var(--color-line);
+  background: #f4f6fa;
 }
 .kb-doc-bar-inner {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.2rem;
   align-items: center;
-  padding: 0.65rem 0.75rem;
+  padding: 0.45rem 0.55rem;
 }
-.kb-chip {
+.kb-tool {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  height: 2rem;
-  padding: 0 0.7rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  background: var(--color-panel);
+  justify-content: center;
+  min-width: 1.85rem;
+  height: 1.85rem;
+  padding: 0 0.35rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
   color: var(--color-ink);
-  font-size: 0.72rem;
-  font-weight: 650;
+  font-size: 0.7rem;
+  font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
-.kb-chip:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-brand) 35%, var(--color-line));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 8%, transparent);
+.kb-tool:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
 }
-.kb-chip.on {
-  border-color: color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
+.kb-tool.on {
   background: var(--color-brand-soft);
   color: var(--color-brand);
 }
-.kb-chip:disabled {
-  opacity: 0.45;
+.kb-tool:disabled {
+  opacity: 0.4;
   cursor: default;
 }
 .kb-sep {
   width: 1px;
-  height: 1.25rem;
-  margin: 0 0.15rem;
+  height: 1.15rem;
+  margin: 0 0.2rem;
   background: var(--color-line);
 }
 .kb-link-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
   align-items: center;
-  padding: 0 0.75rem 0.65rem;
+  padding: 0 0.55rem 0.5rem;
 }
 .kb-link-field {
-  flex: 1 1 14rem;
-  height: 2rem;
-  padding: 0 0.75rem;
+  flex: 1 1 12rem;
+  height: 1.85rem;
+  padding: 0 0.65rem;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
+  border-radius: 0.5rem;
   background: var(--color-panel);
   font-size: 0.8125rem;
   outline: none;
@@ -454,17 +467,14 @@ input[type='checkbox']:indeterminate {
 }
 .kb-err {
   margin: 0;
-  padding: 0 0.85rem 0.55rem;
+  padding: 0 0.75rem 0.5rem;
   font-size: 0.75rem;
   color: var(--color-danger);
 }
 .kb-doc-page {
   flex: 1;
   min-height: 22rem;
-  padding: 1.25rem 1.35rem 2rem;
-  border: 1px solid var(--color-line);
-  border-top: 0;
-  border-radius: 0 0 1rem 1rem;
+  padding: 1.35rem 1.5rem 2.25rem;
   background: var(--color-panel);
 }
 .kb-doc-editor {
@@ -474,25 +484,83 @@ input[type='checkbox']:indeterminate {
   color: var(--color-ink);
 }
 .kb-doc-editor p { margin: 0.6em 0; }
+.kb-doc-editor h1 {
+  margin: 1.1em 0 0.45em;
+  font-size: 1.75rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
 .kb-doc-editor h2 {
   margin: 1.35em 0 0.45em;
-  font-size: 1.55rem;
+  font-size: 1.4rem;
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 .kb-doc-editor h3 {
   margin: 1.15em 0 0.4em;
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 650;
 }
 .kb-doc-editor ul { list-style: disc; padding-left: 1.4rem; margin: 0.6em 0; }
-.kb-doc-editor ol { list-style: decimal; padding-left: 1.4rem; margin: 0.6em 0; }
+.kb-doc-editor ol {
+  list-style: none;
+  counter-reset: kb-ol;
+  padding-left: 0;
+  margin: 0.75em 0;
+}
+.kb-doc-editor ol > li {
+  position: relative;
+  counter-increment: kb-ol;
+  padding-left: 2.1rem;
+  margin: 0.45em 0;
+}
+.kb-doc-editor ol > li::before {
+  content: counter(kb-ol);
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: var(--color-brand);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
 .kb-doc-editor blockquote {
-  margin: 0.9em 0;
-  border-left: 3px solid var(--color-brand);
-  padding: 0.15rem 0 0.15rem 0.95rem;
-  color: var(--color-muted);
-  font-style: italic;
+  margin: 1em 0;
+  border: 1px solid #cfe0f5;
+  border-radius: 0.85rem;
+  background: #eaf3fc;
+  padding: 0.9rem 1rem 0.9rem 2.75rem;
+  color: var(--color-ink);
+  font-style: normal;
+  position: relative;
+}
+.kb-doc-editor blockquote::before {
+  content: 'i';
+  position: absolute;
+  left: 0.85rem;
+  top: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #3b82c4;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  font-style: normal;
+}
+.kb-doc-editor hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--color-line);
 }
 .kb-doc-editor .kb-doc-img,
 .kb-doc-img {
@@ -511,39 +579,98 @@ input[type='checkbox']:indeterminate {
   color: color-mix(in srgb, var(--color-muted) 70%, transparent);
 }
 .kb-prose {
-  max-width: 46rem;
-  margin: 0 auto;
+  max-width: none;
   font-size: 1.05rem;
   line-height: 1.8;
   color: var(--color-ink);
 }
+.kb-prose h1 {
+  margin: 1.1em 0 0.45em;
+  font-size: 1.75rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  scroll-margin-top: 1rem;
+}
 .kb-prose h2 {
   margin: 1.5em 0 0.5em;
-  font-size: 1.55rem;
+  font-size: 1.4rem;
   font-weight: 700;
   letter-spacing: -0.025em;
   scroll-margin-top: 1rem;
 }
 .kb-prose h3 {
   margin: 1.25em 0 0.4em;
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 650;
   scroll-margin-top: 1rem;
 }
 .kb-prose p { margin: 0.65em 0; }
 .kb-prose ul { list-style: disc; padding-left: 1.4rem; margin: 0.65em 0; }
-.kb-prose ol { list-style: decimal; padding-left: 1.4rem; margin: 0.65em 0; }
-.kb-prose blockquote {
-  margin: 1em 0;
-  border-left: 3px solid var(--color-brand);
-  padding-left: 0.95rem;
-  color: var(--color-muted);
-  font-style: italic;
+.kb-prose ol {
+  list-style: none;
+  counter-reset: kb-ol;
+  padding-left: 0;
+  margin: 0.85em 0;
 }
+.kb-prose ol > li {
+  position: relative;
+  counter-increment: kb-ol;
+  padding-left: 2.15rem;
+  margin: 0.5em 0;
+}
+.kb-prose ol > li::before {
+  content: counter(kb-ol);
+  position: absolute;
+  left: 0;
+  top: 0.12em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: var(--color-brand);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.kb-prose blockquote {
+  margin: 1.1em 0;
+  border: 1px solid #cfe0f5;
+  border-radius: 0.85rem;
+  background: #eaf3fc;
+  padding: 0.95rem 1rem 0.95rem 2.75rem;
+  color: var(--color-ink);
+  font-style: normal;
+  position: relative;
+}
+.kb-prose blockquote::before {
+  content: 'i';
+  position: absolute;
+  left: 0.85rem;
+  top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #3b82c4;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.kb-prose blockquote p:first-child { margin-top: 0; }
+.kb-prose blockquote p:last-child { margin-bottom: 0; }
 .kb-prose a {
   color: var(--color-brand);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.kb-prose hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--color-line);
 }
 .kb-prose img {
   display: block;
