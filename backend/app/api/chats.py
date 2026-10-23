@@ -2001,23 +2001,45 @@ async def download_attachment(
                     "Attachment refresh download failed id=%s", attachment_id
                 )
                 data = None
-        if data is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File missing on disk",
+        if data is not None:
+            relative, safe_name, resolved_mime, size = save_bytes(
+                data=data,
+                file_name=att.file_name or "file",
+                message_id=msg.id,
+                mime_type=att.mime_type,
             )
-        relative, safe_name, resolved_mime, size = save_bytes(
-            data=data,
-            file_name=att.file_name or "file",
-            message_id=msg.id,
-            mime_type=att.mime_type,
-        )
-        att.storage_path = relative
-        att.file_name = safe_name
-        att.mime_type = resolved_mime or att.mime_type
-        att.size_bytes = size
-        await db.commit()
-        path = absolute_path(relative)
+            att.storage_path = relative
+            att.file_name = safe_name
+            att.mime_type = resolved_mime or att.mime_type
+            att.size_bytes = size
+            await db.commit()
+            path = absolute_path(relative)
+
+    # FORWARD stubs often have no remote_url — recover from raw_json / live MAX.
+    if path is None:
+        channel = await db.get(Channel, msg.channel_id)
+        if channel is not None and channel.transport == ChannelTransport.MAX.value:
+            try:
+                from app.integrations.max_personal.inbox import repair_message_media
+                from app.integrations.max_personal.runtime import runtime as max_runtime
+
+                client = await max_runtime.ensure_client(channel.id)
+                await repair_message_media(db, msg=msg, channel=channel, client=client)
+                await db.commit()
+                await db.refresh(att)
+                if att.storage_path:
+                    try:
+                        candidate = absolute_path(att.storage_path)
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail=str(exc)) from exc
+                    if candidate.exists():
+                        path = candidate
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception(
+                    "Attachment repair-on-download failed id=%s", attachment_id
+                )
 
     if path is None or not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")

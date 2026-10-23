@@ -628,13 +628,16 @@ async def ingest_pymax_message(
     attaches_list = list(attaches or [])
     resolved_text = (text or "").strip()
     link_meta: dict[str, Any] | None = None
-    # Forwards often arrive as link.type=FORWARD with empty attaches/text.
-    if link is not None and (not attaches_list or not resolved_text):
+    # Forwards often arrive as link.type=FORWARD with empty / stub attaches.
+    # Top-level PHOTO wrappers can be present but without baseUrl/photoId — prefer link payload.
+    if link is not None and (_attaches_lack_media(attaches_list) or not resolved_text):
         link_meta = _link_as_dict(link)
         link_text, link_attaches = await _expand_message_link(
             client, link, fallback_chat_id=chat_id
         )
-        if link_attaches and not attaches_list:
+        if link_attaches and (
+            not attaches_list or _attaches_lack_media(attaches_list)
+        ):
             attaches_list = link_attaches
             logger.info(
                 "Expanded FORWARD/link attaches=%s chat=%s id=%s",
@@ -877,6 +880,59 @@ def _clean_url(value: Any) -> str | None:
     return text
 
 
+def _field(obj: Any, *keys: str) -> Any:
+    """Read snake/camel keys from dicts or attributes from objects."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        for key in keys:
+            if key in obj and obj[key] is not None:
+                return obj[key]
+        return None
+    for key in keys:
+        if hasattr(obj, key):
+            value = getattr(obj, key)
+            if value is not None:
+                return value
+    return None
+
+
+def _attach_has_media_source(attach: Any) -> bool:
+    """True when attach already carries a CDN URL or provider id we can resolve."""
+    if _clean_url(
+        _field(
+            attach,
+            "base_url",
+            "baseUrl",
+            "url",
+            "photo_url",
+            "photoUrl",
+            "lottie_url",
+            "lottieUrl",
+        )
+    ):
+        return True
+    return _field(
+        attach,
+        "photo_id",
+        "photoId",
+        "video_id",
+        "videoId",
+        "file_id",
+        "fileId",
+        "audio_id",
+        "audioId",
+        "sticker_id",
+        "stickerId",
+    ) is not None
+
+
+def _attaches_lack_media(attaches: list[Any]) -> bool:
+    if not attaches:
+        return True
+    return not any(_attach_has_media_source(a) for a in attaches)
+
+
 def _link_as_dict(link: Any) -> dict[str, Any] | None:
     if link is None:
         return None
@@ -996,59 +1052,70 @@ async def _resolve_pymax_attach(
     type_name = _attach_type_name(attach)
 
     if isinstance(attach, PhotoAttachment) or type_name == "PHOTO":
+        photo_id = _field(attach, "photo_id", "photoId")
+        url = _clean_url(_field(attach, "base_url", "baseUrl", "url"))
         return (
             AttachmentKind.IMAGE,
-            f"photo_{getattr(attach, 'photo_id', 'img')}.jpg",
-            _clean_url(getattr(attach, "base_url", None)),
-            getattr(attach, "photo_id", None),
+            f"photo_{photo_id or 'img'}.jpg",
+            url,
+            photo_id,
             "image/jpeg",
         )
     if isinstance(attach, VideoAttachment) or type_name == "VIDEO":
-        url = None
-        video_id = getattr(attach, "video_id", None)
-        if client is not None and message_id is not None and video_id is not None:
+        url = _clean_url(_field(attach, "url", "base_url", "baseUrl"))
+        video_id = _field(attach, "video_id", "videoId")
+        if (
+            url is None
+            and client is not None
+            and message_id is not None
+            and video_id is not None
+        ):
             try:
                 req = await client.get_video_by_id(chat_id, message_id, int(video_id))
-                url = getattr(req, "url", None) if req else None
+                url = _clean_url(getattr(req, "url", None) if req else None)
             except Exception:
                 logger.exception("get_video_by_id failed")
         return (
             AttachmentKind.VIDEO,
             f"video_{video_id or 'clip'}.mp4",
-            _clean_url(url),
+            url,
             video_id,
             "video/mp4",
         )
     if isinstance(attach, FileAttachment) or type_name == "FILE":
-        url = None
-        file_id = getattr(attach, "file_id", None)
-        if client is not None and message_id is not None and file_id is not None:
+        url = _clean_url(_field(attach, "url", "base_url", "baseUrl"))
+        file_id = _field(attach, "file_id", "fileId")
+        if (
+            url is None
+            and client is not None
+            and message_id is not None
+            and file_id is not None
+        ):
             try:
                 req = await client.get_file_by_id(chat_id, message_id, int(file_id))
-                url = getattr(req, "url", None) if req else None
+                url = _clean_url(getattr(req, "url", None) if req else None)
             except Exception:
                 logger.exception("get_file_by_id failed")
-        name = getattr(attach, "name", None) or f"file_{file_id or 'doc'}"
+        name = _field(attach, "name") or f"file_{file_id or 'doc'}"
         return (
             AttachmentKind.FILE,
             str(name),
-            _clean_url(url),
+            url,
             file_id,
             None,
         )
     if isinstance(attach, AudioAttachment) or type_name == "AUDIO":
+        audio_id = _field(attach, "audio_id", "audioId")
         return (
             AttachmentKind.AUDIO,
-            f"voice_{getattr(attach, 'audio_id', 'track')}.ogg",
-            _clean_url(getattr(attach, "url", None)),
-            getattr(attach, "audio_id", None),
+            f"voice_{audio_id or 'track'}.ogg",
+            _clean_url(_field(attach, "url", "base_url", "baseUrl")),
+            audio_id,
             "audio/ogg",
         )
     if isinstance(attach, StickerAttachment) or type_name == "STICKER":
-        sticker_id = getattr(attach, "sticker_id", None)
-        url = _clean_url(getattr(attach, "url", None)) or _clean_url(
-            getattr(attach, "lottie_url", None)
-        )
+        sticker_id = _field(attach, "sticker_id", "stickerId")
+        url = _clean_url(_field(attach, "url", "lottie_url", "lottieUrl", "base_url", "baseUrl"))
         return (
             AttachmentKind.IMAGE,
             f"sticker_{sticker_id or 'pack'}.webp",
@@ -1057,7 +1124,7 @@ async def _resolve_pymax_attach(
             "image/webp",
         )
     if isinstance(attach, ShareAttachment) or type_name == "SHARE":
-        image = getattr(attach, "image", None) or {}
+        image = _field(attach, "image") or {}
         image_url = None
         if isinstance(image, dict):
             image_url = (
@@ -1066,11 +1133,13 @@ async def _resolve_pymax_attach(
                 or image.get("base_url")
                 or image.get("photoUrl")
             )
-        title = getattr(attach, "title", None) or getattr(attach, "url", None) or "link"
+        elif image is not None:
+            image_url = _field(image, "url", "baseUrl", "base_url", "photoUrl", "photo_url")
+        title = _field(attach, "title", "url") or "link"
         if image_url:
             return (
                 AttachmentKind.IMAGE,
-                f"share_{getattr(attach, 'url', 'preview')}.jpg",
+                f"share_{_field(attach, 'url') or 'preview'}.jpg",
                 _clean_url(image_url),
                 None,
                 "image/jpeg",
@@ -1078,14 +1147,14 @@ async def _resolve_pymax_attach(
         return (
             AttachmentKind.FILE,
             str(title)[:200],
-            _clean_url(getattr(attach, "url", None)),
+            _clean_url(_field(attach, "url")),
             None,
             "text/uri-list",
         )
     if isinstance(attach, ContactAttachment) or type_name == "CONTACT":
-        contact_id = getattr(attach, "contact_id", None)
-        photo = getattr(attach, "photo_url", None)
-        name = getattr(attach, "name", None) or "contact"
+        contact_id = _field(attach, "contact_id", "contactId")
+        photo = _field(attach, "photo_url", "photoUrl")
+        name = _field(attach, "name") or "contact"
         if photo:
             return (
                 AttachmentKind.IMAGE,
@@ -1133,6 +1202,95 @@ async def _refresh_attachment_remote_url(
         return None
 
 
+def _attaches_from_raw_json(raw_json: str | None) -> list[Any]:
+    """Recover FORWARD photo payloads saved in message.raw_json at ingest time."""
+    if not raw_json:
+        return []
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    link = payload.get("link")
+    if not isinstance(link, dict):
+        return []
+    nested = link.get("message")
+    if not isinstance(nested, dict):
+        return []
+    attaches = nested.get("attaches")
+    return list(attaches) if isinstance(attaches, list) else []
+
+
+async def _fill_stub_attachments(
+    session: AsyncSession,
+    *,
+    msg: ChatMessage,
+    stubs: list[MessageAttachment],
+    attaches: list[Any],
+    client: Any | None,
+    chat_id: int,
+    message_id: int | None,
+) -> list[MessageAttachment]:
+    """Download resolved attaches into existing empty stub rows (or create new ones)."""
+    settings = get_settings()
+    filled: list[MessageAttachment] = []
+    for idx, attach in enumerate(attaches):
+        kind, file_name, remote_url, provider_id, mime = await _resolve_pymax_attach(
+            attach,
+            client=client,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        if kind is None:
+            continue
+        att = stubs[idx] if idx < len(stubs) else None
+        if att is None:
+            att = MessageAttachment(
+                message_id=msg.id,
+                kind=kind.value,
+                file_name=file_name,
+                mime_type=mime,
+            )
+            session.add(att)
+            stubs.append(att)
+        else:
+            att.kind = kind.value
+            att.file_name = file_name
+            att.mime_type = mime or att.mime_type
+        att.remote_url = remote_url or att.remote_url
+        if provider_id is not None:
+            att.provider_file_id = str(provider_id)
+        if att.storage_path:
+            filled.append(att)
+            continue
+        if not remote_url:
+            filled.append(att)
+            continue
+        try:
+            data = await fetch_url_bytes(remote_url, verify=settings.max_api_verify_ssl)
+            relative, safe_name, resolved_mime, size = save_bytes(
+                data=data,
+                file_name=file_name,
+                message_id=msg.id,
+                mime_type=mime,
+            )
+            att.storage_path = relative
+            att.file_name = safe_name
+            att.mime_type = resolved_mime or att.mime_type
+            att.size_bytes = size
+        except Exception:
+            logger.exception(
+                "Repair download failed message=%s stub_idx=%s url=%s",
+                msg.id,
+                idx,
+                remote_url,
+            )
+        filled.append(att)
+    await session.flush()
+    return filled
+
+
 async def repair_message_media(
     session: AsyncSession,
     *,
@@ -1148,18 +1306,17 @@ async def repair_message_media(
     dialog = await session.get(Dialog, msg.dialog_id)
     chat_id = int(dialog.external_chat_id) if dialog and dialog.external_chat_id else None
     message_id = int(msg.external_id)
+    stubs = [att for att in existing if not att.storage_path]
 
-    if existing and chat_id is not None:
+    # 1) Re-download stubs that already have remote_url / provider id.
+    if stubs and chat_id is not None:
         changed = False
-        for att in existing:
-            if att.storage_path:
-                continue
+        for att in stubs:
             url = att.remote_url
             if not url or att.kind in {
                 AttachmentKind.VIDEO.value,
                 AttachmentKind.FILE.value,
             }:
-                # Prefer a fresh signed URL — okcdn links can go stale quickly.
                 refreshed = await _refresh_attachment_remote_url(
                     att, client=client, chat_id=chat_id, message_id=message_id
                 )
@@ -1186,29 +1343,76 @@ async def repair_message_media(
                 )
         if changed:
             await session.flush()
-        if any(att.storage_path for att in existing):
+        stubs = [att for att in existing if not att.storage_path]
+        if not stubs:
             return existing
 
-    if dialog is None or not dialog.external_chat_id:
+    # 2) Recover FORWARD payloads from raw_json (camelCase dict attaches).
+    raw_attaches = _attaches_from_raw_json(msg.raw_json)
+    if stubs and raw_attaches and chat_id is not None:
+        await _fill_stub_attachments(
+            session,
+            msg=msg,
+            stubs=stubs,
+            attaches=raw_attaches,
+            client=client,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        await session.refresh(msg, attribute_names=["attachments"])
+        existing = list(msg.attachments or [])
+        stubs = [att for att in existing if not att.storage_path]
+        if not stubs:
+            return existing
+
+    if dialog is None or not dialog.external_chat_id or chat_id is None:
         return existing
+
+    # 3) Live refetch + FORWARD link expand.
     attaches = await _fetch_message_attaches(client, chat_id, message_id)
-    if not attaches:
+    if _attaches_lack_media(attaches):
         try:
             full = await client.get_message(chat_id, message_id)
             link = getattr(full, "link", None) if full else None
+            if link is None and msg.raw_json:
+                try:
+                    payload = json.loads(msg.raw_json)
+                    link = payload.get("link") if isinstance(payload, dict) else None
+                except Exception:
+                    link = None
             if link is not None:
                 link_text, link_attaches = await _expand_message_link(
                     client, link, fallback_chat_id=chat_id
                 )
-                attaches = link_attaches
-                if link_text and (not msg.text or msg.text in {"[медиа]", "[media]"}):
+                if link_attaches:
+                    attaches = link_attaches
+                if link_text and (
+                    not msg.text
+                    or msg.text in {"[медиа]", "[media]", "📷 Фото"}
+                ):
                     msg.text = link_text.strip() or msg.text
         except Exception:
             logger.exception("repair link expand failed message=%s", msg.id)
-    if not attaches:
+
+    if _attaches_lack_media(attaches):
         return existing
+
+    if stubs:
+        await _fill_stub_attachments(
+            session,
+            msg=msg,
+            stubs=stubs,
+            attaches=attaches,
+            client=client,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        await session.refresh(msg, attribute_names=["attachments"])
+        return list(msg.attachments or [])
+
     if existing:
         return existing
+
     stored = await _persist_pymax_attachments(
         session,
         msg,
