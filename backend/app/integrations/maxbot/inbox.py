@@ -347,20 +347,21 @@ async def repair_maxbot_message_media(
                 att.remote_url,
             )
 
-    if (not (msg.text or "").strip() or msg.text == "[медиа]") and fwd_text:
-        msg.text = fwd_text
-        changed = True
-    elif not (msg.text or "").strip() or msg.text == "[медиа]":
-        preview = message_preview_text("", list(msg.attachments or []))
-        if preview:
+    atts_now = list(msg.attachments or []) or existing
+    if not (msg.text or "").strip() or msg.text == "[медиа]":
+        preview = message_preview_text("", atts_now)
+        if fwd_text and not atts_now:
+            msg.text = fwd_text
+            changed = True
+        elif preview:
             msg.text = preview
             changed = True
         elif fwd_text:
             msg.text = fwd_text
             changed = True
-        elif msg.text == "[медиа]" and not list(msg.attachments or []):
+        elif msg.text == "[медиа]" and not atts_now:
             # Empty forward wrapper — clear fake media label.
-            msg.text = fwd_text or ""
+            msg.text = ""
             changed = True
 
     if changed:
