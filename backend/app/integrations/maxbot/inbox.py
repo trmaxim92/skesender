@@ -60,6 +60,38 @@ def _reply_mid_from_payload(message: dict[str, Any], body: dict[str, Any]) -> st
     return str(mid) if mid is not None else None
 
 
+def _forward_payload(
+    message: dict[str, Any], body: dict[str, Any]
+) -> tuple[str, list[Any]]:
+    """Pull text/attachments from link.type=forward (body is often empty)."""
+    link = body.get("link") or message.get("link")
+    if not isinstance(link, dict):
+        return "", []
+    if str(link.get("type") or "").lower() != "forward":
+        return "", []
+    nested = link.get("message")
+    if not isinstance(nested, dict):
+        return "", []
+    text = (nested.get("text") or "").strip()
+    atts = nested.get("attachments") or []
+    return text, atts if isinstance(atts, list) else []
+
+
+def _attachments_from_raw_json(raw_json: str | None) -> tuple[str, list[Any]]:
+    """Recover forward text/attachments saved in message.raw_json."""
+    if not raw_json:
+        return "", []
+    try:
+        update = json.loads(raw_json)
+    except Exception:
+        return "", []
+    if not isinstance(update, dict):
+        return "", []
+    message = update.get("message") if isinstance(update.get("message"), dict) else {}
+    body = message.get("body") if isinstance(message.get("body"), dict) else {}
+    return _forward_payload(message, body)
+
+
 def _ts_to_dt(value: Any) -> datetime:
     if isinstance(value, (int, float)):
         ts = float(value)
@@ -150,6 +182,19 @@ async def _handle_message_created(
     text = (body.get("text") or message.get("text") or "").strip()
     mid = body.get("mid") or body.get("seq") or message.get("id") or message.get("mid")
     raw_attachments = body.get("attachments") or message.get("attachments") or []
+    if not isinstance(raw_attachments, list):
+        raw_attachments = []
+    # Forwards: media/text live under link.message, while body is empty.
+    fwd_text, fwd_attachments = _forward_payload(message, body)
+    if not text and fwd_text:
+        text = fwd_text
+    if not raw_attachments and fwd_attachments:
+        raw_attachments = fwd_attachments
+        logger.info(
+            "Expanded maxbot FORWARD attaches=%s mid=%s",
+            len(fwd_attachments),
+            mid,
+        )
 
     chat_id = recipient.get("chat_id") or recipient.get("chatId") or update.get("chat_id")
     user_id = None
@@ -211,20 +256,18 @@ async def _handle_message_created(
     stored = await _persist_bot_attachments(
         session,
         msg,
-        raw_attachments if isinstance(raw_attachments, list) else [],
+        raw_attachments,
         download=download_media,
     )
     if not msg.text:
         msg.text = (
             message_preview_text("", stored)
-            or _attachment_fallback_label(
-                raw_attachments if isinstance(raw_attachments, list) else []
-            )
-            or "[медиа]"
+            or _attachment_fallback_label(raw_attachments)
+            or ("[медиа]" if stored or raw_attachments else "")
         )
 
     # Contact share → try to fill dialog phone / name from payload.
-    if direction == MessageDirection.IN.value and isinstance(raw_attachments, list):
+    if direction == MessageDirection.IN.value and raw_attachments:
         if _apply_contact_attachment_to_dialog(dialog, raw_attachments):
             await ensure_dialog_crm_contact(session, dialog)
 
@@ -260,6 +303,72 @@ async def _handle_message_created(
     return msg
 
 
+async def repair_maxbot_message_media(
+    session: AsyncSession, msg: ChatMessage
+) -> bool:
+    """Heal FORWARD stubs from raw_json and download missing files. Returns True if changed."""
+    changed = False
+    fwd_text, fwd_attachments = _attachments_from_raw_json(msg.raw_json)
+    existing = list(msg.attachments or [])
+
+    if not existing and fwd_attachments:
+        stored = await _persist_bot_attachments(
+            session, msg, fwd_attachments, download=True
+        )
+        if stored:
+            changed = True
+            existing = stored
+            logger.info(
+                "Repaired maxbot FORWARD attaches=%s message=%s",
+                len(stored),
+                msg.id,
+            )
+
+    for att in existing:
+        if att.storage_path or not att.remote_url:
+            continue
+        try:
+            data = await max_client.download_url(att.remote_url)
+            relative, safe_name, resolved_mime, size = save_bytes(
+                data=data,
+                file_name=att.file_name or "file",
+                message_id=msg.id,
+                mime_type=att.mime_type,
+            )
+            att.storage_path = relative
+            att.file_name = safe_name
+            att.mime_type = resolved_mime
+            att.size_bytes = size
+            changed = True
+        except Exception:
+            logger.exception(
+                "Backfill maxbot attachment failed message=%s url=%s",
+                msg.id,
+                att.remote_url,
+            )
+
+    if (not (msg.text or "").strip() or msg.text == "[медиа]") and fwd_text:
+        msg.text = fwd_text
+        changed = True
+    elif not (msg.text or "").strip() or msg.text == "[медиа]":
+        preview = message_preview_text("", list(msg.attachments or []))
+        if preview:
+            msg.text = preview
+            changed = True
+        elif fwd_text:
+            msg.text = fwd_text
+            changed = True
+        elif msg.text == "[медиа]" and not list(msg.attachments or []):
+            # Empty forward wrapper — clear fake media label.
+            msg.text = fwd_text or ""
+            changed = True
+
+    if changed:
+        await session.flush()
+        await session.refresh(msg, attribute_names=["attachments"])
+    return changed
+
+
 async def backfill_maxbot_attachments(message_id: int) -> None:
     """Download stub attachments after ingest commit (C2)."""
     from app.db import SessionLocal
@@ -276,33 +385,9 @@ async def backfill_maxbot_attachments(message_id: int) -> None:
         msg = result.scalar_one_or_none()
         if msg is None:
             return
-        changed = False
-        for att in list(msg.attachments or []):
-            if att.storage_path or not att.remote_url:
-                continue
-            try:
-                data = await max_client.download_url(att.remote_url)
-                relative, safe_name, resolved_mime, size = save_bytes(
-                    data=data,
-                    file_name=att.file_name or "file",
-                    message_id=msg.id,
-                    mime_type=att.mime_type,
-                )
-                att.storage_path = relative
-                att.file_name = safe_name
-                att.mime_type = resolved_mime
-                att.size_bytes = size
-                changed = True
-            except Exception:
-                logger.exception(
-                    "Backfill maxbot attachment failed message=%s url=%s",
-                    message_id,
-                    att.remote_url,
-                )
+        changed = await repair_maxbot_message_media(session, msg)
         if not changed:
             return
-        if not (msg.text or "").strip() or msg.text == "[медиа]":
-            msg.text = message_preview_text("", list(msg.attachments or [])) or "[медиа]"
         dialog = await session.get(Dialog, msg.dialog_id)
         channel = await session.get(Channel, msg.channel_id)
         event = None
