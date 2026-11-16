@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 
 from app.appeals import close_appeal_with_status, ensure_open_appeal, get_current_appeal
 from app.config import get_settings
+from app.integrations.max_ssl import max_ssl_verify
 from app.db import get_db
 from app.departments import accessible_department_ids, ensure_department_access
 from app.deps import bearer, get_current_user
@@ -1960,12 +1961,11 @@ async def download_attachment(
     # MAX okcdn URLs are IP-bound to the server — never redirect the browser.
     # Materialize missing files from remote_url with a browser User-Agent.
     if path is None and (att.remote_url or att.provider_file_id):
-        settings = get_settings()
         url = att.remote_url
         data = None
         if url:
             try:
-                data = await fetch_url_bytes(url, verify=settings.max_api_verify_ssl)
+                data = await fetch_url_bytes(url, verify=max_ssl_verify())
             except Exception:
                 logger.warning(
                     "Attachment remote download failed id=%s, will try refresh",
@@ -1994,7 +1994,7 @@ async def download_attachment(
                     )
                     if url:
                         data = await fetch_url_bytes(
-                            url, verify=settings.max_api_verify_ssl
+                            url, verify=max_ssl_verify()
                         )
             except Exception:
                 logger.exception(

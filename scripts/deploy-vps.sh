@@ -15,7 +15,14 @@ if ! command -v node >/dev/null 2>&1; then
   apt-get install -y -qq nodejs
 fi
 
-echo "==> clone from GitHub"
+echo "==> clone from GitHub (owner deploy if present)"
+DEPLOY_USER="${DEPLOY_USER:-deploy}"
+if id -u "$DEPLOY_USER" >/dev/null 2>&1; then
+  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$APP_DIR"
+else
+  DEPLOY_USER=root
+  mkdir -p "$APP_DIR"
+fi
 if [[ -d "$APP_DIR/.git" ]]; then
   cd "$APP_DIR"
   git fetch --depth 1 origin main
@@ -26,6 +33,10 @@ else
 fi
 cd "$APP_DIR"
 echo "COMMIT=$(git rev-parse --short HEAD)"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
+
+echo "==> Russian Trusted CA (MAX platform-api2 / Минцифры)"
+bash "$APP_DIR/scripts/install-russian-ca.sh" || true
 
 SECRET=$(openssl rand -hex 32)
 DB_PASS=$(openssl rand -hex 16)
@@ -62,7 +73,7 @@ SEED_ADMIN_PASSWORD=ChangeMeNow1!
 SEED_ADMIN_NAME=Admin
 SEED_MAX_BOT_TOKEN=
 MAX_API_BASE=https://platform-api2.max.ru
-MAX_API_VERIFY_SSL=false
+MAX_API_VERIFY_SSL=true
 MAX_PERSONAL_DATA_DIR=./data/max_personal
 TELEGRAM_API_ID=26368063
 TELEGRAM_API_HASH=e16c6d63c89cf3a8bc15d6f6b118e55b
@@ -71,8 +82,15 @@ TELEGRAM_USER_DATA_DIR=./data/telegram_user
 TELEGRAM_PROXY=
 EOF
 chmod 600 "$APP_DIR/backend/.env"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/backend/.env"
 umask 077
-printf '%s\n' "$DB_PASS" > /root/order-elite-db-pass.txt
+PASS_FILE="/home/${DEPLOY_USER}/order-elite-db-pass.txt"
+if [[ "$DEPLOY_USER" == "root" ]]; then
+  PASS_FILE=/root/order-elite-db-pass.txt
+fi
+printf '%s\n' "$DB_PASS" > "$PASS_FILE"
+chmod 600 "$PASS_FILE"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$PASS_FILE"
 
 echo "==> python venv"
 cd "$APP_DIR/backend"
@@ -88,61 +106,18 @@ cd "$APP_DIR/frontend"
 npm install
 npm run build
 
-echo "==> systemd"
-cat > /etc/systemd/system/order-elite.service <<'UNIT'
-[Unit]
-Description=SkySender API
-After=network.target postgresql.service
-Requires=postgresql.service
+echo "==> ownership for runtime user"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/order-elite/backend
-Environment=PATH=/opt/order-elite/backend/.venv/bin:/usr/bin
-ExecStart=/opt/order-elite/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+echo "==> systemd (User=${DEPLOY_USER})"
+cp "$APP_DIR/scripts/order-elite.service" /etc/systemd/system/order-elite.service
+if [[ "$DEPLOY_USER" != "deploy" ]]; then
+  sed -i "s/^User=deploy$/User=${DEPLOY_USER}/; s/^Group=deploy$/Group=${DEPLOY_USER}/" \
+    /etc/systemd/system/order-elite.service
+fi
 
 echo "==> nginx"
-cat > /etc/nginx/sites-available/order-elite <<'NGINX'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    root /opt/order-elite/frontend/dist;
-    index index.html;
-
-    client_max_body_size 50m;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-
-    location /health {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-NGINX
+cp "$APP_DIR/scripts/nginx-order-elite.http.conf" /etc/nginx/sites-available/order-elite
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sfn /etc/nginx/sites-available/order-elite /etc/nginx/sites-enabled/order-elite
@@ -155,7 +130,8 @@ systemctl reload nginx
 sleep 2
 curl -sf http://127.0.0.1/health || curl -sf http://127.0.0.1:8000/health
 echo
-bash "$APP_DIR/scripts/wait-max-personal.sh"
+bash "$APP_DIR/scripts/wait-max-personal.sh" || true
 systemctl --no-pager --full status order-elite | head -20
 echo "DEPLOY_OK http://${HOST}/"
 echo "Admin: admin@order-elite.local / ChangeMeNow1!"
+echo "Runtime user: ${DEPLOY_USER}"

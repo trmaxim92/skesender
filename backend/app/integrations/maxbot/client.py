@@ -5,6 +5,7 @@ import httpx
 
 from app.config import get_settings
 from app.integrations.base import IntegrationError
+from app.integrations.max_ssl import max_ssl_verify
 
 
 class MaxApiError(IntegrationError):
@@ -19,7 +20,7 @@ def _client(timeout: float = 20.0) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=settings.max_api_base,
         timeout=timeout,
-        verify=settings.max_api_verify_ssl,
+        verify=max_ssl_verify(),
     )
 
 
@@ -176,9 +177,8 @@ async def upload_file_bytes(
     """
     mime = content_type or "application/octet-stream"
     files = {"data": (filename or "file", data, mime)}
-    settings = get_settings()
     try:
-        async with httpx.AsyncClient(timeout=120.0, verify=settings.max_api_verify_ssl) as client:
+        async with httpx.AsyncClient(timeout=120.0, verify=max_ssl_verify()) as client:
             response = await client.post(upload_url, files=files)
     except httpx.HTTPError as exc:
         raise MaxApiError(f"MAX upload error: {exc}") from exc
@@ -384,9 +384,8 @@ async def delete_message(token: str, *, message_id: str) -> dict[str, Any]:
 async def download_url(url: str) -> bytes:
     from app.integrations.media_fetch import fetch_url_bytes
 
-    settings = get_settings()
     try:
-        return await fetch_url_bytes(url, timeout=120.0, verify=settings.max_api_verify_ssl)
+        return await fetch_url_bytes(url, timeout=120.0, verify=max_ssl_verify())
     except Exception as exc:
         raise MaxApiError(f"Download failed: {exc}") from exc
 

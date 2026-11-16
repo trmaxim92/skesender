@@ -19,7 +19,7 @@ async def fetch_url_bytes(
     url: str,
     *,
     timeout: float = 120.0,
-    verify: bool = True,
+    verify: bool | str = True,
 ) -> bytes:
     async with httpx.AsyncClient(
         timeout=timeout,

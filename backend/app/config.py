@@ -42,8 +42,10 @@ class Settings(BaseSettings):
     seed_admin_name: str = "Admin"
     seed_max_bot_token: str = ""
     max_api_base: str = "https://platform-api2.max.ru"
-    # Max рекомендует сертификат Минцифры; для локальной разработки можно false
+    # Max API (platform-api2) подписан УЦ Минцифры — нужен CA в bundle (см. max_ssl / certs/)
     max_api_verify_ssl: bool = False
+    # Optional override path to CA PEM; empty = auto (certs/ + certifi or system store)
+    max_api_ca_bundle: str = ""
     max_personal_data_dir: str = str(BACKEND_DIR / "data" / "max_personal")
     telegram_api_id: int = 0
     telegram_api_hash: str = ""

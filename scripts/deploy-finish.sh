@@ -17,59 +17,19 @@ if [[ ! -x .venv/bin/uvicorn ]]; then
 fi
 mkdir -p data/max_personal data/telegram_user data/attachments
 
-cat > /etc/systemd/system/order-elite.service <<'UNIT'
-[Unit]
-Description=SkySender API
-After=network.target postgresql.service
-Requires=postgresql.service
+DEPLOY_USER="${DEPLOY_USER:-deploy}"
+if ! id -u "$DEPLOY_USER" >/dev/null 2>&1; then
+  DEPLOY_USER=root
+fi
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/order-elite/backend
-Environment=PATH=/opt/order-elite/backend/.venv/bin:/usr/bin
-ExecStart=/opt/order-elite/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
-Restart=always
-RestartSec=3
+cp "$APP_DIR/scripts/order-elite.service" /etc/systemd/system/order-elite.service
+if [[ "$DEPLOY_USER" != "deploy" ]]; then
+  sed -i "s/^User=deploy$/User=${DEPLOY_USER}/; s/^Group=deploy$/Group=${DEPLOY_USER}/" \
+    /etc/systemd/system/order-elite.service
+fi
 
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-cat > /etc/nginx/sites-available/order-elite <<'NGINX'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    root /opt/order-elite/frontend/dist;
-    index index.html;
-
-    client_max_body_size 50m;
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-
-    location /health {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-NGINX
+cp "$APP_DIR/scripts/nginx-order-elite.http.conf" /etc/nginx/sites-available/order-elite
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sfn /etc/nginx/sites-available/order-elite /etc/nginx/sites-enabled/order-elite
@@ -81,7 +41,8 @@ systemctl reload nginx
 sleep 3
 curl -sf http://127.0.0.1/health
 echo
-bash "$APP_DIR/scripts/wait-max-personal.sh"
+bash "$APP_DIR/scripts/wait-max-personal.sh" || true
 curl -sf -o /dev/null -w "UI:%{http_code}\n" http://127.0.0.1/
 systemctl --no-pager --full status order-elite | sed -n "1,18p"
 echo "DEPLOY_OK http://${HOST}/"
+echo "Runtime user: ${DEPLOY_USER}"

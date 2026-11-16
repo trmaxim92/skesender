@@ -1,0 +1,24 @@
+[Unit]
+Description=SkySender API
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/order-elite/backend
+Environment=PATH=/opt/order-elite/backend/.venv/bin:/usr/bin
+# Prefer system CA (after scripts/install-russian-ca.sh) over certifi-only bundle
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+Environment=REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ExecStart=/opt/order-elite/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+
+# Hardening extras (optional, uncomment if supported by distro):
+# NoNewPrivileges=true
+# PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

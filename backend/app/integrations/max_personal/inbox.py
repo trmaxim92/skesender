@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.appeals import ensure_open_appeal
-from app.config import get_settings
+from app.integrations.max_ssl import max_ssl_verify
 from app.dialogs import bump_unread, clear_unread, get_or_create_dialog, try_insert_message
 from app.dialogs import ensure_dialog_crm_contact, format_contact_phone
 from app.models import (
@@ -1233,7 +1233,6 @@ async def _fill_stub_attachments(
     message_id: int | None,
 ) -> list[MessageAttachment]:
     """Download resolved attaches into existing empty stub rows (or create new ones)."""
-    settings = get_settings()
     filled: list[MessageAttachment] = []
     for idx, attach in enumerate(attaches):
         kind, file_name, remote_url, provider_id, mime = await _resolve_pymax_attach(
@@ -1268,7 +1267,7 @@ async def _fill_stub_attachments(
             filled.append(att)
             continue
         try:
-            data = await fetch_url_bytes(remote_url, verify=settings.max_api_verify_ssl)
+            data = await fetch_url_bytes(remote_url, verify=max_ssl_verify())
             relative, safe_name, resolved_mime, size = save_bytes(
                 data=data,
                 file_name=file_name,
@@ -1302,7 +1301,6 @@ async def repair_message_media(
     if not msg.external_id:
         return list(msg.attachments or [])
     existing = list(msg.attachments or [])
-    settings = get_settings()
     dialog = await session.get(Dialog, msg.dialog_id)
     chat_id = int(dialog.external_chat_id) if dialog and dialog.external_chat_id else None
     message_id = int(msg.external_id)
@@ -1325,7 +1323,7 @@ async def repair_message_media(
             if not url:
                 continue
             try:
-                data = await fetch_url_bytes(url, verify=settings.max_api_verify_ssl)
+                data = await fetch_url_bytes(url, verify=max_ssl_verify())
                 relative, safe_name, resolved_mime, size = save_bytes(
                     data=data,
                     file_name=att.file_name or "file",
@@ -1431,7 +1429,6 @@ async def backfill_max_personal_attachments(message_id: int) -> None:
     """Download stub attachments after ingest when CDN fetch failed."""
     from app.db import SessionLocal
 
-    settings = get_settings()
     async with SessionLocal() as session:
         result = await session.execute(
             select(ChatMessage)
@@ -1448,7 +1445,7 @@ async def backfill_max_personal_attachments(message_id: int) -> None:
             try:
                 data = await fetch_url_bytes(
                     att.remote_url,
-                    verify=settings.max_api_verify_ssl,
+                    verify=max_ssl_verify(),
                 )
                 relative, safe_name, resolved_mime, size = save_bytes(
                     data=data,
@@ -1513,8 +1510,7 @@ async def _fetch_message_attaches(client: Any, chat_id: int, message_id: int) ->
 
 
 async def _download(url: str) -> bytes:
-    settings = get_settings()
-    return await fetch_url_bytes(url, timeout=120.0, verify=settings.max_api_verify_ssl)
+    return await fetch_url_bytes(url, timeout=120.0, verify=max_ssl_verify())
 
 
 async def load_message_with_attachments(session: AsyncSession, message_id: int) -> ChatMessage | None:
