@@ -1089,7 +1089,7 @@ class AiDepartmentProfile(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mode: Mapped[str] = mapped_column(String(16), default=AiAgentMode.HYBRID.value)
     system_prompt: Mapped[str] = mapped_column(Text, default="")
-    auto_confidence_min: Mapped[int] = mapped_column(Integer, default=75)  # 0–100
+    auto_confidence_min: Mapped[int] = mapped_column(Integer, default=55)  # 0–100
     max_auto_replies_per_dialog: Mapped[int] = mapped_column(Integer, default=3)
     gigachat_model: Mapped[str] = mapped_column(String(128), default="GigaChat")
     primary_intents: Mapped[str] = mapped_column(

@@ -34,6 +34,20 @@ _JSON_RE = re.compile(r"\{[\s\S]*\}")
 
 PRIMARY_DEFAULT = {"faq", "status", "hours", "greeting", "thanks"}
 
+# If the model admits it has no answer, never auto-send.
+_ESCALATE_MARKERS = (
+    "нет в базе",
+    "отсутствует в нашей базе",
+    "отсутствует в базе",
+    "нет информации",
+    "не могу найти",
+    "данных нет",
+    "дождаться оператора",
+    "передам оператору",
+    "нужна помощь оператора",
+    "обратитесь к оператору",
+)
+
 
 @dataclass
 class PipelineResult:
@@ -251,6 +265,9 @@ async def process_inbound_message(
     if not has_rag:
         needs_human = True
         confidence = min(confidence, 40)
+    reply_l = reply.lower()
+    if any(marker in reply_l for marker in _ESCALATE_MARKERS):
+        needs_human = True
 
     sources = [c.as_source() for c in chunks]
 
@@ -276,10 +293,14 @@ async def process_inbound_message(
         if p.strip()
     } or set(PRIMARY_DEFAULT)
 
+    confidence_min = int(profile.auto_confidence_min or 55)
+    # Safe short intents: slightly lower bar when RAG matched.
+    if intent in {"greeting", "thanks"} and has_rag:
+        confidence_min = min(confidence_min, 50)
     can_auto = (
         mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
         and not needs_human
-        and confidence >= int(profile.auto_confidence_min or 75)
+        and confidence >= confidence_min
         and intent in primary
     )
     if runtime.require_rag_for_auto and not has_rag:
