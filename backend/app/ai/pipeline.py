@@ -32,7 +32,37 @@ logger = logging.getLogger(__name__)
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
 
-PRIMARY_DEFAULT = {"faq", "status", "hours", "greeting", "thanks"}
+PRIMARY_DEFAULT = {
+    "faq",
+    "status",
+    "hours",
+    "greeting",
+    "thanks",
+    "commission",
+    "conditions",
+    "tariff",
+    "tariffs",
+}
+
+
+def _intent_tokens(intent: str) -> set[str]:
+    return {
+        part.strip().lower()
+        for part in re.split(r"[|,/;]+", intent or "")
+        if part.strip()
+    }
+
+
+def _intent_allows_auto(intent: str, primary: set[str]) -> bool:
+    tokens = _intent_tokens(intent)
+    if not tokens:
+        return False
+    if tokens & primary:
+        return True
+    # Models often return "faq|commission" — treat faq-family as auto-eligible.
+    if "faq" in tokens and primary & {"faq", "commission", "conditions", "tariff", "tariffs"}:
+        return True
+    return False
 
 # If the model admits it has no answer, never auto-send.
 _ESCALATE_MARKERS = (
@@ -439,26 +469,28 @@ async def process_inbound_message(
     } or set(PRIMARY_DEFAULT)
 
     confidence_min = int(profile.auto_confidence_min or 55)
+    intent_tokens = _intent_tokens(intent)
     # Safe short intents: slightly lower bar when RAG matched.
-    if intent in {"greeting", "thanks"} and has_rag:
+    if intent_tokens & {"greeting", "thanks"} and has_rag:
         confidence_min = min(confidence_min, 50)
     can_auto = (
         mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
         and not needs_human
         and confidence >= confidence_min
-        and intent in primary
+        and _intent_allows_auto(intent, primary)
     )
     if runtime.require_rag_for_auto and not has_rag:
         can_auto = False
     if can_auto:
         auto_count = await _count_auto_replies(session, dialog_id)
-        if auto_count >= int(profile.max_auto_replies_per_dialog or 3):
+        if auto_count >= int(profile.max_auto_replies_per_dialog or 10):
             can_auto = False
 
     channel = dialog.channel
     if channel is None:
         channel = await session.get(Channel, dialog.channel_id)
     if can_auto and channel is not None and channel.status == ChannelStatus.ONLINE.value:
+        suggestion_id = suggestion.id
         try:
             sent = await send_ai_text(
                 session,
@@ -467,6 +499,11 @@ async def process_inbound_message(
                 text=reply,
                 reply_to_message_id=message_id,
             )
+            # send_ai_text commits its own session work — reload suggestion row.
+            suggestion = await session.get(AiSuggestion, suggestion_id)
+            if suggestion is None:
+                await session.commit()
+                return None
             suggestion.status = AiSuggestionStatus.AUTO_SENT.value
             suggestion.auto_sent_message_id = sent.id
             suggestion.resolved_at = sent.created_at
@@ -475,8 +512,10 @@ async def process_inbound_message(
             return PipelineResult(suggestion=suggestion, auto_sent=True)
         except Exception:
             logger.exception("AI auto-send failed dialog=%s", dialog_id)
-            suggestion.status = AiSuggestionStatus.PENDING.value
-            suggestion.auto_sent_message_id = None
+            suggestion = await session.get(AiSuggestion, suggestion_id)
+            if suggestion is not None:
+                suggestion.status = AiSuggestionStatus.PENDING.value
+                suggestion.auto_sent_message_id = None
 
     await session.commit()
     return PipelineResult(suggestion=suggestion, auto_sent=False)

@@ -962,7 +962,7 @@ async def ensure_schema() -> None:
                     mode VARCHAR(16) NOT NULL DEFAULT 'hybrid',
                     system_prompt TEXT NOT NULL DEFAULT '',
                     auto_confidence_min INTEGER NOT NULL DEFAULT 55,
-                    max_auto_replies_per_dialog INTEGER NOT NULL DEFAULT 3,
+                    max_auto_replies_per_dialog INTEGER NOT NULL DEFAULT 10,
                     gigachat_model VARCHAR(128) NOT NULL DEFAULT 'GigaChat',
                     primary_intents TEXT NOT NULL DEFAULT 'faq,status,hours,greeting,thanks',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

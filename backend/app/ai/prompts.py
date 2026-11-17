@@ -23,7 +23,9 @@ OUTPUT_CONTRACT = """
 8) Если в контексте действительно нет ответа — needs_human=true, reply одной короткой фразой про оператора.
 9) Если клиент просит оператора/менеджера/человека — needs_human=true, reply одной фразой о передаче.
 10) Верни ТОЛЬКО один JSON-объект без markdown и без текста вокруг:
-{"reply":"...","confidence":0-100,"intent":"faq|status|hours|greeting|thanks|sales|reactivation|operator|other","needs_human":true|false,"citations":[]}
+{"reply":"...","confidence":0-100,"intent":"faq","needs_human":true|false,"citations":[]}
+   intent — ОДНО значение из: faq,status,hours,greeting,thanks,sales,reactivation,operator,other
+   (без склеек вида faq|commission).
 11) confidence: 80–100 если ответ прямо из базы; 65–79 если частично; greeting/thanks — не ниже 70; 0–40 если базы нет.
 12) needs_human=true при жалобе, ПДн, юриспруденции, неясном запросе, отсутствии данных или запросе оператора.
 """.strip()
