@@ -128,6 +128,22 @@ def _trim_fluff(reply: str) -> str:
     return cleaned or (reply or "").strip()
 
 
+def _normalize_for_sim(text: str) -> set[str]:
+    return {
+        t
+        for t in re.findall(r"[\wа-яёА-ЯЁ]{3,}", (text or "").lower(), flags=re.IGNORECASE)
+    }
+
+
+def _too_similar(a: str, b: str, *, threshold: float = 0.72) -> bool:
+    ta, tb = _normalize_for_sim(a), _normalize_for_sim(b)
+    if not ta or not tb:
+        return False
+    inter = len(ta & tb)
+    union = len(ta | tb)
+    return (inter / union) >= threshold if union else False
+
+
 @dataclass
 class PipelineResult:
     suggestion: AiSuggestion
@@ -222,9 +238,13 @@ def _build_prompt(
         f"[{c.kind}:{c.ref_id}] {c.title}\n{c.text}" for c in chunks
     ) or "(нет фрагментов базы)"
     hist_lines = []
+    last_inbound = ""
     for msg in history:
         role = "Клиент" if msg.direction == MessageDirection.IN.value else "Оператор"
-        hist_lines.append(f"{role}: {(msg.text or '').strip()[:500]}")
+        text = (msg.text or "").strip()[:500]
+        hist_lines.append(f"{role}: {text}")
+        if msg.direction == MessageDirection.IN.value and text:
+            last_inbound = text
     hist_block = "\n".join(hist_lines) or "(пусто)"
     contact = dialog.contact_name or "Клиент"
     extra = ""
@@ -240,7 +260,9 @@ def _build_prompt(
         f"История:\n{hist_block}\n\n"
         f"База знаний и примеры:\n{kb_block}\n"
         f"{extra}\n"
-        "Сформулируй ответ клиенту строго по правилам system."
+        f"Текущий вопрос клиента (ответь ИМЕННО на него, не на прошлую тему):\n{last_inbound or '(см. историю)'}\n\n"
+        "Сформулируй ответ клиенту строго по правилам system. "
+        "Не повторяй предыдущий ответ бота, если вопрос изменился."
     )
     return [
         {"role": "system", "content": system},
@@ -438,6 +460,14 @@ async def process_inbound_message(
     if any(marker in reply_l for marker in _ESCALATE_MARKERS):
         needs_human = True
 
+    last_ai_text = ""
+    for msg in reversed(history):
+        if msg.direction == MessageDirection.OUT.value and bool(getattr(msg, "is_ai", False)):
+            last_ai_text = (msg.text or "").strip()
+            break
+    # Never auto-spam the same tariff blurb when the client changed the topic.
+    block_duplicate_auto = bool(last_ai_text and _too_similar(reply, last_ai_text))
+
     sources = [c.as_source() for c in chunks]
 
     suggestion = AiSuggestion(
@@ -478,6 +508,7 @@ async def process_inbound_message(
         and not needs_human
         and confidence >= confidence_min
         and _intent_allows_auto(intent, primary)
+        and not block_duplicate_auto
     )
     if runtime.require_rag_for_auto and not has_rag:
         can_auto = False

@@ -184,14 +184,19 @@ async def retrieve_context(
             ranked.append((_score(query, article.title or "", plain), article, plain))
         ranked.sort(key=lambda x: x[0], reverse=True)
         tariff_q = is_tariff_query(query)
-        for idx, (score, article, plain) in enumerate(ranked):
+        top_score = ranked[0][0] if ranked else 0
+        # Keep only competitive hits so a weak token match (e.g. «заказов»)
+        # does not drag unrelated tariff text into a «нет заказов» question.
+        min_keep = max(2, top_score - 3) if top_score > 0 else 1
+        kept = 0
+        for score, article, plain in ranked:
             if score <= 0 and query.strip():
                 continue
-            # Top hit / tariff topics get a larger window from KB (no hard-coded facts).
-            if tariff_q and idx == 0:
-                # Prefer full article when it fits — avoids cutting FAQ/rules at the end.
+            if score < min_keep:
+                continue
+            if tariff_q and kept == 0:
                 window = max(_TARIFF_CHUNK_CHARS, min(len(plain) + 32, 12000))
-            elif idx == 0:
+            elif kept == 0:
                 window = _CHUNK_CHARS
             else:
                 window = max(1800, _CHUNK_CHARS // 2)
@@ -203,7 +208,8 @@ async def retrieve_context(
                     text=_excerpt(plain, query, max_chars=window),
                 )
             )
-            if len(chunks) >= limit:
+            kept += 1
+            if kept >= limit:
                 break
 
     if department_id is not None and len(chunks) < limit:
@@ -247,32 +253,5 @@ async def retrieve_context(
             if len(chunks) >= limit:
                 break
 
-    # If nothing matched query tokens, still give a few recent dept articles.
-    if not chunks and folder_ids:
-        articles = list(
-            (
-                await session.execute(
-                    select(KnowledgeArticle)
-                    .where(
-                        KnowledgeArticle.folder_id.in_(folder_ids),
-                        KnowledgeArticle.is_published.is_(True),
-                    )
-                    .order_by(KnowledgeArticle.updated_at.desc())
-                    .limit(min(3, limit))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for article in articles:
-            plain = strip_html(article.body_html or "")
-            chunks.append(
-                RagChunk(
-                    kind="article",
-                    ref_id=article.id,
-                    title=article.title or f"Статья #{article.id}",
-                    text=_excerpt(plain, query),
-                )
-            )
-
+    # No silent fallback to random recent articles — that caused off-topic answers.
     return chunks
