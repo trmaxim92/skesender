@@ -89,6 +89,7 @@ export interface ApiMessage {
   edited_at?: string | null
   deleted_at?: string | null
   is_internal?: boolean
+  is_ai?: boolean
   appeal_id?: number | null
   attachments?: ApiAttachment[]
   reply_to?: {

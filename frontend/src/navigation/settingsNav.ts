@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import {
+  Bot,
   FileText,
   FormInput,
   GitBranch,
@@ -95,6 +96,13 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         label: 'Диспетчер',
         description: 'Гибкие правила: событие → условия → действия',
         icon: GitBranch,
+        permission: 'section.settings',
+      },
+      {
+        to: '/settings/ai',
+        label: 'ИИ (GigaChat)',
+        description: 'Рекомендации и автоответы по отделам',
+        icon: Bot,
         permission: 'section.settings',
       },
     ],

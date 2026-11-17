@@ -153,6 +153,7 @@ def _build_tree(
                 KbFolderNodeOut(
                     id=f.id,
                     parent_id=f.parent_id,
+                    department_id=getattr(f, "department_id", None),
                     title=f.title,
                     icon=f.icon,
                     sort_order=f.sort_order,
@@ -323,6 +324,7 @@ async def create_folder(
     folder = KnowledgeFolder(
         title=body.title.strip(),
         parent_id=body.parent_id,
+        department_id=body.department_id,
         icon=(body.icon.strip() if body.icon else None),
         sort_order=body.sort_order,
     )
@@ -332,6 +334,7 @@ async def create_folder(
     return KbFolderNodeOut(
         id=folder.id,
         parent_id=folder.parent_id,
+        department_id=folder.department_id,
         title=folder.title,
         icon=folder.icon,
         sort_order=folder.sort_order,
@@ -367,6 +370,8 @@ async def update_folder(
                     detail="Нельзя переместить папку внутрь собственного потомка",
                 )
         folder.parent_id = new_parent
+    if "department_id" in body.model_fields_set:
+        folder.department_id = body.department_id
     folder.updated_at = datetime.now(timezone.utc)
     await db.commit()
     result = await db.execute(
@@ -379,6 +384,7 @@ async def update_folder(
     return KbFolderNodeOut(
         id=folder.id,
         parent_id=folder.parent_id,
+        department_id=folder.department_id,
         title=folder.title,
         icon=folder.icon,
         sort_order=folder.sort_order,

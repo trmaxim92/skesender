@@ -24,9 +24,14 @@ import {
   type ApiDialogSidebar,
   type ApiMessage,
 } from '@/api/chats'
+import {
+  acceptAiSuggestion,
+  listDialogSuggestions,
+  rejectAiSuggestion,
+} from '@/api/ai'
 import { ApiError, AUTH_EXPIRED_EVENT } from '@/api/client'
 import { ChatsSocket, type ChatSocketEvent } from '@/api/ws'
-import type { Appeal, Dialog, DialogSidebar, Message, Template, User } from '@/types'
+import type { AiSuggestion, Appeal, Dialog, DialogSidebar, Message, Template, User } from '@/types'
 import { useAuthStore } from '@/stores/auth'
 import { notifyChatAssigned, notifyIncomingMessage, showInAppToast } from '@/utils/notify'
 
@@ -121,6 +126,7 @@ function mapMessage(m: ApiMessage): Message {
     editedAt: m.edited_at ?? null,
     deletedAt: m.deleted_at ?? null,
     isInternal: Boolean(m.is_internal),
+    isAi: Boolean(m.is_ai),
     appealId: m.appeal_id ?? null,
     attachments: (m.attachments || []).map((a) => ({
       id: a.id,
@@ -146,6 +152,7 @@ export const useChatsStore = defineStore('chats', () => {
   const messages = ref<Message[]>([])
   const operators = ref<User[]>([])
   const activeDialogId = ref<string | null>(null)
+  const aiSuggestion = ref<AiSuggestion | null>(null)
   const draft = ref('')
   const pendingFiles = ref<File[]>([])
   const noteMode = ref(false)
@@ -396,7 +403,75 @@ export const useChatsStore = defineStore('chats', () => {
       typingTimer = window.setTimeout(() => {
         if (typingDialogId.value === id) typingDialogId.value = null
       }, 4000)
+      return
     }
+
+    if (event.type === 'ai.suggestion') {
+      const s = event.suggestion
+      if (String(s.dialog_id) !== activeDialogId.value) return
+      if (s.status !== 'pending') {
+        if (aiSuggestion.value?.id === s.id) aiSuggestion.value = null
+        return
+      }
+      aiSuggestion.value = mapAiSuggestion(s)
+    }
+  }
+
+  function mapAiSuggestion(s: {
+    id: number
+    dialog_id: number
+    message_id: number
+    status: string
+    draft_text: string
+    confidence: number
+    intent: string | null
+    needs_human: boolean
+    auto_sent?: boolean
+  }): AiSuggestion {
+    return {
+      id: s.id,
+      dialogId: String(s.dialog_id),
+      messageId: String(s.message_id),
+      status: s.status,
+      draftText: s.draft_text,
+      confidence: s.confidence,
+      intent: s.intent,
+      needsHuman: s.needs_human,
+      autoSent: Boolean(s.auto_sent),
+    }
+  }
+
+  async function loadAiSuggestion(dialogId: string) {
+    try {
+      const rows = await listDialogSuggestions(Number(dialogId), 'pending')
+      const first = rows[0]
+      aiSuggestion.value = first ? mapAiSuggestion(first) : null
+    } catch {
+      aiSuggestion.value = null
+    }
+  }
+
+  async function applyAiSuggestion() {
+    const s = aiSuggestion.value
+    if (!s) return
+    draft.value = s.draftText
+    try {
+      await acceptAiSuggestion(s.id)
+    } catch {
+      // draft still applied locally
+    }
+    aiSuggestion.value = null
+  }
+
+  async function dismissAiSuggestion() {
+    const s = aiSuggestion.value
+    if (!s) return
+    try {
+      await rejectAiSuggestion(s.id)
+    } catch {
+      // ignore
+    }
+    aiSuggestion.value = null
   }
 
   let markReadInflight: string | null = null
@@ -599,6 +674,7 @@ export const useChatsStore = defineStore('chats', () => {
       const d = dialogs.value.find((x) => x.id === dialogId)
       if (d && (targetAppealId == null || targetAppealId === d.appealId)) d.unread = 0
       void fetchUnreadSummary()
+      void loadAiSuggestion(dialogId)
     } catch (e) {
       if (reqId !== messagesRequestId || activeDialogId.value !== requested) return
       error.value = e instanceof ApiError ? e.detail : 'Не удалось загрузить сообщения'
@@ -660,6 +736,7 @@ export const useChatsStore = defineStore('chats', () => {
     if (activeDialogId.value === id) return
     saveDraftFor(activeDialogId.value)
     activeDialogId.value = id
+    aiSuggestion.value = null
     restoreDraftFor(id)
     replyingTo.value = null
     noteMode.value = false
@@ -676,6 +753,7 @@ export const useChatsStore = defineStore('chats', () => {
   function clearActiveDialog() {
     saveDraftFor(activeDialogId.value)
     activeDialogId.value = null
+    aiSuggestion.value = null
     viewingAppealId.value = null
     dialogAppeals.value = []
     replyingTo.value = null
@@ -1202,6 +1280,7 @@ export const useChatsStore = defineStore('chats', () => {
     messages,
     operators,
     activeDialogId,
+    aiSuggestion,
     draft,
     pendingFiles,
     noteMode,
@@ -1262,5 +1341,8 @@ export const useChatsStore = defineStore('chats', () => {
     addFiles,
     removePendingFile,
     applyTemplate,
+    applyAiSuggestion,
+    dismissAiSuggestion,
+    loadAiSuggestion,
   }
 })

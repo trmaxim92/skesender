@@ -263,9 +263,23 @@ export interface Message {
   deletedAt?: string | null
   /** Manager-only note; never sent to the client */
   isInternal?: boolean
+  /** Outbound from AI module */
+  isAi?: boolean
   appealId?: number | null
   /** Local optimistic bubble not yet confirmed by API */
   pending?: boolean
+}
+
+export interface AiSuggestion {
+  id: number
+  dialogId: string
+  messageId: string
+  status: string
+  draftText: string
+  confidence: number
+  intent: string | null
+  needsHuman: boolean
+  autoSent: boolean
 }
 
 export interface ReplyPreview {

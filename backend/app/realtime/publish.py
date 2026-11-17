@@ -162,6 +162,21 @@ async def emit_event(event: dict[str, Any]) -> None:
 
         asyncio.create_task(_fanout())
 
+    # AI module: enqueue inbound customer messages (leader worker consumes).
+    if event_type == "message.created" and not is_internal:
+        try:
+            message = event.get("message") or {}
+            dialog = event.get("dialog") or {}
+            if message.get("direction") == "in" and not message.get("is_ai"):
+                dialog_id = dialog.get("id")
+                message_id = message.get("id")
+                if dialog_id is not None and message_id is not None:
+                    from app.ai.worker import worker as ai_worker
+
+                    ai_worker.enqueue(int(dialog_id), int(message_id))
+        except Exception:
+            logger.exception("AI enqueue failed")
+
 
 async def _fanout_web_push(event_type: str, event: dict[str, Any]) -> None:
     try:

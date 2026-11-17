@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    ai,
     appeal_statuses,
     appeals,
     auth,
@@ -43,6 +44,7 @@ api_router.include_router(settings_fields.router)
 api_router.include_router(templates.router)
 api_router.include_router(dispatcher.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(ai.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(push.router)
 api_router.include_router(notifications.router)

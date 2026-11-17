@@ -557,6 +557,7 @@ class MessageOut(BaseModel):
     edited_at: datetime | None = None
     deleted_at: datetime | None = None
     is_internal: bool = False
+    is_ai: bool = False
     appeal_id: int | None = None
     attachments: list[AttachmentOut] = []
     reply_to: ReplyPreview | None = None
@@ -1076,6 +1077,7 @@ class KbArticleSummaryOut(BaseModel):
 class KbFolderNodeOut(BaseModel):
     id: int
     parent_id: int | None = None
+    department_id: int | None = None
     title: str
     icon: str | None = None
     sort_order: int = 0
@@ -1105,6 +1107,7 @@ class KbArticleOut(BaseModel):
 class KbFolderCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     parent_id: int | None = None
+    department_id: int | None = None
     icon: str | None = Field(default=None, max_length=64)
     sort_order: int = 0
 
@@ -1112,6 +1115,7 @@ class KbFolderCreateRequest(BaseModel):
 class KbFolderUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     parent_id: int | None = None
+    department_id: int | None = None
     icon: str | None = Field(default=None, max_length=64)
     sort_order: int | None = None
 
@@ -1156,4 +1160,127 @@ class KbSearchOut(BaseModel):
 class KbImageOut(BaseModel):
     url: str
     file_name: str
+
+
+# --- AI module ---
+
+
+class AiProfileOut(BaseModel):
+    id: int | None = None
+    department_id: int
+    enabled: bool = False
+    mode: str = "hybrid"
+    system_prompt: str = ""
+    auto_confidence_min: int = 75
+    max_auto_replies_per_dialog: int = 3
+    gigachat_model: str = "GigaChat"
+    primary_intents: str = "faq,status,hours,greeting,thanks"
+
+    model_config = {"from_attributes": True}
+
+
+class AiProfileUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    mode: str | None = None
+    system_prompt: str | None = None
+    auto_confidence_min: int | None = Field(default=None, ge=0, le=100)
+    max_auto_replies_per_dialog: int | None = Field(default=None, ge=0, le=50)
+    gigachat_model: str | None = None
+    primary_intents: str | None = None
+
+
+class AiSuggestionOut(BaseModel):
+    id: int
+    dialog_id: int
+    message_id: int
+    department_id: int | None = None
+    status: str
+    draft_text: str
+    confidence: int = 0
+    intent: str | None = None
+    needs_human: bool = True
+    sources_json: str = "[]"
+    auto_sent_message_id: int | None = None
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AiSuggestionActionRequest(BaseModel):
+    edited_text: str | None = Field(default=None, max_length=4000)
+
+
+class AiLearningExampleOut(BaseModel):
+    id: int
+    department_id: int
+    dialog_id: int | None = None
+    suggestion_id: int | None = None
+    user_question: str
+    operator_answer: str
+    quality: str
+    status: str
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AiLearningReviewRequest(BaseModel):
+    status: str = Field(description="approved | rejected")
+
+
+class AiStatusOut(BaseModel):
+    ai_enabled: bool
+    gigachat_configured: bool
+    gigachat_ping: dict | None = None
+
+
+class AiGlobalSettingsOut(BaseModel):
+    enabled: bool = False
+    client_id: str = ""
+    client_secret_set: bool = False
+    scope: str = "GIGACHAT_API_PERS"
+    auth_url: str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    api_base: str = "https://gigachat.devices.sberbank.ru/api/v1"
+    default_model: str = "GigaChat"
+    verify_ssl: bool = True
+    temperature: float = 0.3
+    max_tokens: int = 512
+    repetition_penalty: float = 1.0
+    max_reply_words: int = 80
+    require_rag_for_auto: bool = True
+    updated_at: datetime | None = None
+
+
+class AiGlobalSettingsUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    client_id: str | None = None
+    client_secret: str | None = Field(
+        default=None,
+        description="Leave empty to keep existing secret; set clear_secret to remove",
+    )
+    clear_secret: bool = False
+    scope: str | None = None
+    auth_url: str | None = None
+    api_base: str | None = None
+    default_model: str | None = None
+    verify_ssl: bool | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=16, le=4096)
+    repetition_penalty: float | None = Field(default=None, ge=0.1, le=2)
+    max_reply_words: int | None = Field(default=None, ge=20, le=300)
+    require_rag_for_auto: bool | None = None
+
+
+class AiMetricsOut(BaseModel):
+    department_id: int
+    suggestions_total: int = 0
+    pending: int = 0
+    accepted: int = 0
+    edited: int = 0
+    rejected: int = 0
+    auto_sent: int = 0
+    learning_pending: int = 0
+    learning_approved: int = 0
 

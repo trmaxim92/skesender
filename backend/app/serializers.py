@@ -67,6 +67,7 @@ def message_to_out(message: ChatMessage) -> MessageOut:
         edited_at=message.edited_at,
         deleted_at=message.deleted_at,
         is_internal=bool(getattr(message, "is_internal", False)),
+        is_ai=bool(getattr(message, "is_ai", False)),
         appeal_id=message.appeal_id,
         attachments=[] if message.deleted_at else attachments,
         reply_to=None if message.deleted_at else _reply_preview(message),

@@ -132,6 +132,12 @@ const router = createRouter({
           meta: { permission: 'section.settings' },
         },
         {
+          path: 'settings/ai',
+          name: 'settings-ai',
+          component: () => import('@/views/settings/AiSettingsView.vue'),
+          meta: { permission: 'section.settings' },
+        },
+        {
           path: 'settings/presence-statuses',
           name: 'presence-statuses',
           component: () => import('@/views/settings/PresenceStatusesView.vue'),

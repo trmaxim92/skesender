@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     fleet_sync_interval_sec: int = 3600
     # Comma-separated Fleet work_status filter (empty = all, including fired)
     fleet_work_statuses: str = "working,not_working"
+    # Legacy unused: GigaChat/AI runtime settings live in ai_global_settings (UI module).
 
     @property
     def cors_origin_list(self) -> list[str]:

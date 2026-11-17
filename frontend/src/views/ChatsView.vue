@@ -1277,22 +1277,59 @@ onUnmounted(() => {
       >
         Обращение закрыто. Новое откроется, когда клиент напишет снова.
       </div>
-      <ChatComposer
-        v-else-if="canWrite && chats.canCompose"
-        v-model="chats.draft"
-        :note-mode="chats.noteMode"
-        :files="chats.pendingFiles"
-        :sending="chats.sending"
-        :templates="composerTemplates"
-        :template-groups="composerTemplateGroups"
-        :replying-to="chats.replyingTo"
-        @update:note-mode="chats.setNoteMode($event)"
-        @add-files="chats.addFiles($event)"
-        @remove-file="chats.removePendingFile($event)"
-        @apply-template="chats.applyTemplate($event)"
-        @clear-reply="chats.clearReply()"
-        @send="chats.sendMessage()"
-      />
+      <template v-else-if="canWrite && chats.canCompose">
+        <div
+          v-if="chats.aiSuggestion"
+          class="shrink-0 border-t border-line bg-panel px-3 py-2 md:px-5"
+        >
+          <div class="rounded-xl border border-brand/25 bg-brand/5 px-3 py-2.5">
+            <div class="mb-1 flex items-center justify-between gap-2 text-xs text-muted">
+              <span>
+                Рекомендация ИИ
+                <template v-if="chats.aiSuggestion.confidence">
+                  · {{ chats.aiSuggestion.confidence }}%
+                </template>
+                <template v-if="chats.aiSuggestion.intent">
+                  · {{ chats.aiSuggestion.intent }}
+                </template>
+              </span>
+              <span v-if="chats.aiSuggestion.needsHuman" class="text-amber-600">нужен оператор</span>
+            </div>
+            <p class="mb-2 whitespace-pre-wrap text-sm text-ink">{{ chats.aiSuggestion.draftText }}</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
+                @click="chats.applyAiSuggestion()"
+              >
+                Вставить в ответ
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-muted"
+                @click="chats.dismissAiSuggestion()"
+              >
+                Отклонить
+              </button>
+            </div>
+          </div>
+        </div>
+        <ChatComposer
+          v-model="chats.draft"
+          :note-mode="chats.noteMode"
+          :files="chats.pendingFiles"
+          :sending="chats.sending"
+          :templates="composerTemplates"
+          :template-groups="composerTemplateGroups"
+          :replying-to="chats.replyingTo"
+          @update:note-mode="chats.setNoteMode($event)"
+          @add-files="chats.addFiles($event)"
+          @remove-file="chats.removePendingFile($event)"
+          @apply-template="chats.applyTemplate($event)"
+          @clear-reply="chats.clearReply()"
+          @send="chats.sendMessage()"
+        />
+      </template>
       <div
         v-else
         class="shrink-0 border-t border-line bg-panel px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] text-center text-xs text-muted md:px-5 md:pb-3"

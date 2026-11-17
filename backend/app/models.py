@@ -492,6 +492,8 @@ class ChatMessage(Base):
     delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Internal manager note — visible in CRM only, never sent to the client.
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Outbound generated / auto-sent by the AI module.
+    is_ai: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     operator_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reply_to_message_id: Mapped[int | None] = mapped_column(
@@ -1025,6 +1027,145 @@ class DispatcherRuleRun(Base):
     rule: Mapped[DispatcherRule] = relationship(back_populates="runs")
 
 
+class AiAgentMode(StrEnum):
+    ASSIST = "assist"
+    HYBRID = "hybrid"
+    AUTO = "auto"
+
+
+class AiSuggestionStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    EDITED = "edited"
+    REJECTED = "rejected"
+    AUTO_SENT = "auto_sent"
+
+
+class AiLearningStatus(StrEnum):
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class AiGlobalSettings(Base):
+    """Singleton (id=1) install-wide AI / GigaChat settings — edited in UI, not .env."""
+
+    __tablename__ = "ai_global_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # always 1
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    client_id: Mapped[str] = mapped_column(String(255), default="")
+    client_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[str] = mapped_column(String(128), default="GIGACHAT_API_PERS")
+    auth_url: Mapped[str] = mapped_column(
+        String(512), default="https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    )
+    api_base: Mapped[str] = mapped_column(
+        String(512), default="https://gigachat.devices.sberbank.ru/api/v1"
+    )
+    default_model: Mapped[str] = mapped_column(String(128), default="GigaChat")
+    verify_ssl: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Generation params (Sber GigaChat prompt-engineering)
+    temperature: Mapped[str] = mapped_column(String(16), default="0.3")  # stored as str for simplicity
+    max_tokens: Mapped[int] = mapped_column(Integer, default=512)
+    repetition_penalty: Mapped[str] = mapped_column(String(16), default="1.0")
+    max_reply_words: Mapped[int] = mapped_column(Integer, default=80)
+    require_rag_for_auto: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class AiDepartmentProfile(Base):
+    """Per-department AI behaviour (one module, many channels via dialog.department_id)."""
+
+    __tablename__ = "ai_department_profiles"
+    __table_args__ = (UniqueConstraint("department_id", name="uq_ai_department_profile"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), index=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mode: Mapped[str] = mapped_column(String(16), default=AiAgentMode.HYBRID.value)
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    auto_confidence_min: Mapped[int] = mapped_column(Integer, default=75)  # 0–100
+    max_auto_replies_per_dialog: Mapped[int] = mapped_column(Integer, default=3)
+    gigachat_model: Mapped[str] = mapped_column(String(128), default="GigaChat")
+    primary_intents: Mapped[str] = mapped_column(
+        Text,
+        default="faq,status,hours,greeting,thanks",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    department: Mapped["Department"] = relationship()
+
+
+class AiSuggestion(Base):
+    __tablename__ = "ai_suggestions"
+    __table_args__ = (
+        Index("ix_ai_suggestions_dialog_status", "dialog_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dialog_id: Mapped[int] = mapped_column(ForeignKey("dialogs.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    )
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default=AiSuggestionStatus.PENDING.value)
+    draft_text: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[int] = mapped_column(Integer, default=0)  # 0–100
+    intent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    needs_human: Mapped[bool] = mapped_column(Boolean, default=True)
+    sources_json: Mapped[str] = mapped_column(Text, default="[]")
+    raw_response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_sent_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    dialog: Mapped["Dialog"] = relationship(foreign_keys=[dialog_id])
+    message: Mapped["ChatMessage"] = relationship(foreign_keys=[message_id])
+
+
+class AiLearningExample(Base):
+    __tablename__ = "ai_learning_examples"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="CASCADE"), index=True
+    )
+    dialog_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dialogs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    suggestion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_suggestions.id", ondelete="SET NULL"), nullable=True
+    )
+    user_question: Mapped[str] = mapped_column(Text, default="")
+    operator_answer: Mapped[str] = mapped_column(Text, default="")
+    quality: Mapped[str] = mapped_column(String(16), default="accepted")  # accepted|edited
+    status: Mapped[str] = mapped_column(
+        String(16), default=AiLearningStatus.PENDING_REVIEW.value, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    department: Mapped["Department"] = relationship()
+
+
 class KnowledgeFolder(Base):
     """Nested folder node for the operator knowledge base."""
 
@@ -1033,6 +1174,9 @@ class KnowledgeFolder(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("kb_folders.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), default="")
     icon: Mapped[str | None] = mapped_column(String(64), nullable=True)

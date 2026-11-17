@@ -1106,6 +1106,49 @@ async def send_dialog_message(
     for event in events:
         await emit_event(event)
 
+    # AI learning: if there was a pending suggestion, resolve + queue example.
+    try:
+        from app.ai.learning import record_from_operator_reply, resolve_suggestion
+        from app.models import AiSuggestion, AiSuggestionStatus
+
+        pending = await db.scalar(
+            select(AiSuggestion)
+            .where(
+                AiSuggestion.dialog_id == dialog_id,
+                AiSuggestion.status == AiSuggestionStatus.PENDING.value,
+            )
+            .order_by(AiSuggestion.created_at.desc())
+            .limit(1)
+        )
+        if pending is not None and created:
+            last_out = created[-1]
+            draft = (pending.draft_text or "").strip()
+            sent = (last_out.text or "").strip()
+            quality = "accepted" if draft and sent == draft else "edited"
+            status_value = (
+                AiSuggestionStatus.ACCEPTED.value
+                if quality == "accepted"
+                else AiSuggestionStatus.EDITED.value
+            )
+            await resolve_suggestion(
+                db,
+                suggestion=pending,
+                status=status_value,
+                user_id=user.id,
+                edited_text=sent if quality == "edited" else None,
+            )
+            await record_from_operator_reply(
+                db,
+                dialog=dialog_loaded,
+                outbound=last_out,
+                suggestion=pending,
+                quality=quality,
+                user_id=user.id,
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("AI learning hook failed dialog=%s", dialog_id)
+
     if send_error:
         # Partial success: messages already committed + pushed over WS.
         # Return 200 so the client does not treat the whole send as failed.

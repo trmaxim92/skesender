@@ -872,6 +872,175 @@ async def ensure_schema() -> None:
         await conn.execute(
             text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_error TEXT")
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_ai "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_messages_is_ai ON messages (is_ai)")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE kb_folders ADD COLUMN IF NOT EXISTS department_id "
+                "INTEGER REFERENCES departments(id) ON DELETE SET NULL"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_kb_folders_department_id "
+                "ON kb_folders (department_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS ai_global_settings (
+                    id INTEGER PRIMARY KEY,
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    client_id VARCHAR(255) NOT NULL DEFAULT '',
+                    client_secret_enc TEXT,
+                    scope VARCHAR(128) NOT NULL DEFAULT 'GIGACHAT_API_PERS',
+                    auth_url VARCHAR(512) NOT NULL DEFAULT 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth',
+                    api_base VARCHAR(512) NOT NULL DEFAULT 'https://gigachat.devices.sberbank.ru/api/v1',
+                    default_model VARCHAR(128) NOT NULL DEFAULT 'GigaChat',
+                    verify_ssl BOOLEAN NOT NULL DEFAULT TRUE,
+                    temperature VARCHAR(16) NOT NULL DEFAULT '0.3',
+                    max_tokens INTEGER NOT NULL DEFAULT 512,
+                    repetition_penalty VARCHAR(16) NOT NULL DEFAULT '1.0',
+                    max_reply_words INTEGER NOT NULL DEFAULT 80,
+                    require_rag_for_auto BOOLEAN NOT NULL DEFAULT TRUE,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ai_global_settings ADD COLUMN IF NOT EXISTS temperature "
+                "VARCHAR(16) NOT NULL DEFAULT '0.3'"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ai_global_settings ADD COLUMN IF NOT EXISTS max_tokens "
+                "INTEGER NOT NULL DEFAULT 512"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ai_global_settings ADD COLUMN IF NOT EXISTS repetition_penalty "
+                "VARCHAR(16) NOT NULL DEFAULT '1.0'"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ai_global_settings ADD COLUMN IF NOT EXISTS max_reply_words "
+                "INTEGER NOT NULL DEFAULT 80"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE ai_global_settings ADD COLUMN IF NOT EXISTS require_rag_for_auto "
+                "BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS ai_department_profiles (
+                    id SERIAL PRIMARY KEY,
+                    department_id INTEGER NOT NULL UNIQUE REFERENCES departments(id) ON DELETE CASCADE,
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    mode VARCHAR(16) NOT NULL DEFAULT 'hybrid',
+                    system_prompt TEXT NOT NULL DEFAULT '',
+                    auto_confidence_min INTEGER NOT NULL DEFAULT 75,
+                    max_auto_replies_per_dialog INTEGER NOT NULL DEFAULT 3,
+                    gigachat_model VARCHAR(128) NOT NULL DEFAULT 'GigaChat',
+                    primary_intents TEXT NOT NULL DEFAULT 'faq,status,hours,greeting,thanks',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_department_profiles_department_id "
+                "ON ai_department_profiles (department_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS ai_suggestions (
+                    id SERIAL PRIMARY KEY,
+                    dialog_id INTEGER NOT NULL REFERENCES dialogs(id) ON DELETE CASCADE,
+                    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                    department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    draft_text TEXT NOT NULL DEFAULT '',
+                    confidence INTEGER NOT NULL DEFAULT 0,
+                    intent VARCHAR(64),
+                    needs_human BOOLEAN NOT NULL DEFAULT TRUE,
+                    sources_json TEXT NOT NULL DEFAULT '[]',
+                    raw_response_json TEXT,
+                    auto_sent_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    resolved_at TIMESTAMPTZ,
+                    resolved_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_suggestions_dialog_id ON ai_suggestions (dialog_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_suggestions_message_id ON ai_suggestions (message_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_suggestions_dialog_status "
+                "ON ai_suggestions (dialog_id, status)"
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS ai_learning_examples (
+                    id SERIAL PRIMARY KEY,
+                    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+                    dialog_id INTEGER REFERENCES dialogs(id) ON DELETE SET NULL,
+                    suggestion_id INTEGER REFERENCES ai_suggestions(id) ON DELETE SET NULL,
+                    user_question TEXT NOT NULL DEFAULT '',
+                    operator_answer TEXT NOT NULL DEFAULT '',
+                    quality VARCHAR(16) NOT NULL DEFAULT 'accepted',
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending_review',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    reviewed_at TIMESTAMPTZ,
+                    reviewed_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_learning_examples_department_id "
+                "ON ai_learning_examples (department_id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_ai_learning_examples_status "
+                "ON ai_learning_examples (status)"
+            )
+        )
 
 
 @asynccontextmanager
@@ -932,6 +1101,12 @@ async def lifespan(app: FastAPI):
         mailing_worker.start()
         webhook_outbox_worker.start()
         fleet_sync_worker.start()
+        try:
+            from app.ai.worker import worker as ai_worker
+
+            ai_worker.start()
+        except Exception:
+            logger.exception("Failed to start AI worker")
         workers_running["value"] = True
         logger.info("Background workers started (leader)")
 
@@ -956,6 +1131,12 @@ async def lifespan(app: FastAPI):
             await fleet_sync_worker.stop()
         except Exception:
             logger.exception("Failed to stop fleet sync worker")
+        try:
+            from app.ai.worker import worker as ai_worker
+
+            await ai_worker.stop()
+        except Exception:
+            logger.exception("Failed to stop AI worker")
         for adapter in reversed(adapters):
             try:
                 await adapter.stop_worker()

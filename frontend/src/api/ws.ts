@@ -13,6 +13,20 @@ export type ChatSocketEvent =
       assigned_by?: { id: number; name: string | null } | null
     }
   | { type: 'dialog.typing'; dialog_id: number; channel_id?: number; department_id?: number | null; user_id?: number | null }
+  | {
+      type: 'ai.suggestion'
+      suggestion: {
+        id: number
+        dialog_id: number
+        message_id: number
+        status: string
+        draft_text: string
+        confidence: number
+        intent: string | null
+        needs_human: boolean
+        auto_sent?: boolean
+      }
+    }
 
 type Handlers = {
   onEvent: (event: ChatSocketEvent) => void
