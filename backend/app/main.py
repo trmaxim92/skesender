@@ -883,6 +883,12 @@ async def ensure_schema() -> None:
         )
         await conn.execute(
             text(
+                "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS ai_paused "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        await conn.execute(
+            text(
                 "ALTER TABLE kb_folders ADD COLUMN IF NOT EXISTS department_id "
                 "INTEGER REFERENCES departments(id) ON DELETE SET NULL"
             )

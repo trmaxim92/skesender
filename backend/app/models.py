@@ -404,6 +404,8 @@ class Dialog(Base):
     last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     unread: Mapped[int] = mapped_column(Integer, default=0)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # When True, AI must not draft/auto-reply until a new dialog is created.
+    ai_paused: Mapped[bool] = mapped_column(Boolean, default=False)
     department_id: Mapped[int | None] = mapped_column(
         ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
     )

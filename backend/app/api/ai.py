@@ -267,6 +267,9 @@ async def reject_suggestion(
         status=AiSuggestionStatus.REJECTED.value,
         user_id=user.id,
     )
+    from app.ai.handoff import pause_ai_for_dialog
+
+    await pause_ai_for_dialog(db, suggestion.dialog_id, reason="suggestion_rejected")
     await db.commit()
     await db.refresh(suggestion)
     return AiSuggestionOut.model_validate(suggestion)

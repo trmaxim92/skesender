@@ -18,6 +18,10 @@ from app.models import (
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_TOKEN_RE = re.compile(r"[\wа-яёА-ЯЁ]{3,}", flags=re.IGNORECASE)
+
+# Long KB articles (тарифы/комиссии) need more than a short head excerpt.
+_CHUNK_CHARS = 4500
 
 
 def strip_html(html: str) -> str:
@@ -37,18 +41,59 @@ class RagChunk:
         return {"kind": self.kind, "id": self.ref_id, "title": self.title}
 
 
+def _tokens(query: str) -> list[str]:
+    return [t.lower() for t in _TOKEN_RE.findall(query or "")]
+
+
 def _score(query: str, title: str, body: str) -> int:
     q = (query or "").lower().strip()
     if not q:
         return 0
-    hay = f"{title}\n{body}".lower()
+    title_l = (title or "").lower()
+    body_l = (body or "").lower()
+    hay = f"{title_l}\n{body_l}"
     score = 0
-    for token in re.findall(r"[\wа-яёА-ЯЁ]{3,}", q, flags=re.IGNORECASE):
-        if token.lower() in hay:
-            score += 2 if token.lower() in title.lower() else 1
+    for token in _tokens(q):
+        if token in title_l:
+            score += 4
+        elif token in body_l:
+            score += 1
     if q in hay:
         score += 5
+    # Strong title overlap (e.g. «комиссия парка»)
+    title_hits = sum(1 for t in _tokens(q) if t in title_l)
+    if title_hits >= 2:
+        score += 8
     return score
+
+
+def _excerpt(text: str, query: str, *, max_chars: int = _CHUNK_CHARS) -> str:
+    """Prefer a window around the first query-token hit, not only article head."""
+    plain = (text or "").strip()
+    if not plain:
+        return ""
+    if len(plain) <= max_chars:
+        return plain
+    lower = plain.lower()
+    positions: list[int] = []
+    for token in _tokens(query):
+        pos = lower.find(token)
+        if pos >= 0:
+            positions.append(pos)
+    if not positions:
+        return plain[:max_chars]
+    anchor = min(positions)
+    # Keep some lead-in before the match.
+    start = max(0, anchor - max_chars // 4)
+    end = min(len(plain), start + max_chars)
+    if end - start < max_chars:
+        start = max(0, end - max_chars)
+    chunk = plain[start:end].strip()
+    if start > 0:
+        chunk = "… " + chunk
+    if end < len(plain):
+        chunk = chunk + " …"
+    return chunk
 
 
 async def retrieve_context(
@@ -83,7 +128,7 @@ async def retrieve_context(
                         KnowledgeArticle.is_published.is_(True),
                     )
                     .order_by(KnowledgeArticle.updated_at.desc())
-                    .limit(80)
+                    .limit(120)
                 )
             )
             .scalars()
@@ -94,15 +139,17 @@ async def retrieve_context(
             plain = strip_html(article.body_html or "")
             ranked.append((_score(query, article.title or "", plain), article, plain))
         ranked.sort(key=lambda x: x[0], reverse=True)
-        for score, article, plain in ranked:
+        for idx, (score, article, plain) in enumerate(ranked):
             if score <= 0 and query.strip():
                 continue
+            # Top hit gets a larger window (long tariff/commission articles).
+            window = _CHUNK_CHARS if idx == 0 else max(1800, _CHUNK_CHARS // 2)
             chunks.append(
                 RagChunk(
                     kind="article",
                     ref_id=article.id,
                     title=article.title or f"Статья #{article.id}",
-                    text=plain[:1200],
+                    text=_excerpt(plain, query, max_chars=window),
                 )
             )
             if len(chunks) >= limit:
@@ -141,7 +188,9 @@ async def retrieve_context(
                     kind="example",
                     ref_id=ex.id,
                     title="Пример ответа оператора",
-                    text=f"Клиент: {ex.user_question}\nОператор: {ex.operator_answer}"[:1200],
+                    text=f"Клиент: {ex.user_question}\nОператор: {ex.operator_answer}"[
+                        :_CHUNK_CHARS
+                    ],
                 )
             )
             if len(chunks) >= limit:
@@ -165,12 +214,13 @@ async def retrieve_context(
             .all()
         )
         for article in articles:
+            plain = strip_html(article.body_html or "")
             chunks.append(
                 RagChunk(
                     kind="article",
                     ref_id=article.id,
                     title=article.title or f"Статья #{article.id}",
-                    text=strip_html(article.body_html or "")[:1200],
+                    text=_excerpt(plain, query),
                 )
             )
 

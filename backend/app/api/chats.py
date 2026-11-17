@@ -1106,6 +1106,15 @@ async def send_dialog_message(
     for event in events:
         await emit_event(event)
 
+    # Human outbound → pause AI for this dialog (resume only on a new dialog).
+    try:
+        from app.ai.handoff import pause_ai_for_dialog
+
+        await pause_ai_for_dialog(db, dialog_loaded, reason="operator_outbound")
+        await db.commit()
+    except Exception:
+        logger.exception("AI pause on operator outbound failed dialog=%s", dialog_id)
+
     # AI learning: if there was a pending suggestion, resolve + queue example.
     try:
         from app.ai.learning import record_from_operator_reply, resolve_suggestion

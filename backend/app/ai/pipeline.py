@@ -195,6 +195,9 @@ async def process_inbound_message(
     )
     if dialog is None:
         return None
+    if bool(getattr(dialog, "ai_paused", False)):
+        logger.debug("AI skip: paused for human dialog=%s", dialog_id)
+        return None
     message = await session.get(ChatMessage, message_id)
     if message is None or message.dialog_id != dialog_id:
         return None
@@ -232,7 +235,7 @@ async def process_inbound_message(
         session,
         department_id=dialog.department_id,
         query=message.text or "",
-        limit=6,
+        limit=4,
     )
     has_rag = bool(chunks)
     prompt = _build_prompt(
@@ -285,6 +288,12 @@ async def process_inbound_message(
     )
     session.add(suggestion)
     await session.flush()
+
+    # Handoff to human: keep this draft visible, but stop further AI on this dialog.
+    if needs_human:
+        from app.ai.handoff import pause_ai_for_dialog
+
+        await pause_ai_for_dialog(session, dialog, reason="needs_human")
 
     mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
     primary = {
