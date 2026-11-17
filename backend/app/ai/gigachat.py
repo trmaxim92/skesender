@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import logging
+import re
 import time
 import uuid
 from typing import Any
@@ -19,6 +21,8 @@ _token_cache: dict[str, Any] = {
     "fingerprint": None,
 }
 
+_AUTH_KEY_RE = re.compile(r"^[A-Za-z0-9+/]+=*$")
+
 
 class GigaChatError(RuntimeError):
     pass
@@ -32,6 +36,60 @@ def clear_token_cache() -> None:
 
 def _fingerprint(cfg: AiRuntimeConfig) -> str:
     return f"{cfg.client_id}|{cfg.scope}|{cfg.auth_url}|{bool(cfg.client_secret)}"
+
+
+def _clean_secret(value: str) -> str:
+    return (
+        (value or "")
+        .strip()
+        .replace("\r", "")
+        .replace("\n", "")
+        .replace(" ", "")
+    )
+
+
+def _looks_like_authorization_key(value: str) -> bool:
+    """Sber studio Authorization key = base64(client_id:client_secret)."""
+    if len(value) < 40 or not _AUTH_KEY_RE.fullmatch(value):
+        return False
+    try:
+        decoded = base64.b64decode(value, validate=True).decode("utf-8")
+    except Exception:
+        return False
+    if ":" not in decoded:
+        return False
+    left, right = decoded.split(":", 1)
+    return bool(left.strip() and right.strip())
+
+
+def build_basic_authorization(client_id: str, client_secret: str) -> str:
+    """Build `Basic …` for GigaChat OAuth.
+
+    Accepts either:
+    - raw Client Secret (UUID) together with Client ID
+    - ready Authorization key from Sber studio (already base64)
+    - value prefixed with ``Basic ``
+    """
+    cid = (client_id or "").strip()
+    secret = _clean_secret(client_secret)
+    if not secret:
+        raise GigaChatError("GigaChat Client Secret / Authorization key is empty")
+
+    if secret.lower().startswith("basic"):
+        # "Basic <key>" pasted as-is
+        key = secret[5:].lstrip(":").lstrip()
+        if not key:
+            raise GigaChatError("Authorization header value is empty")
+        return f"Basic {key}"
+
+    if _looks_like_authorization_key(secret):
+        # Already base64(client_id:client_secret) — do not encode again.
+        return f"Basic {secret}"
+
+    if not cid:
+        raise GigaChatError("GigaChat Client ID is required when using raw Client Secret")
+    token = base64.b64encode(f"{cid}:{secret}".encode("utf-8")).decode("ascii")
+    return f"Basic {token}"
 
 
 async def get_runtime() -> AiRuntimeConfig:
@@ -51,18 +109,17 @@ async def _fetch_token(client: httpx.AsyncClient, cfg: AiRuntimeConfig) -> str:
     if cached and _token_cache.get("fingerprint") == fp and expires_at > now + 60:
         return str(cached)
 
-    auth = (cfg.client_id, cfg.client_secret)
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
         "RqUID": str(uuid.uuid4()),
+        "Authorization": build_basic_authorization(cfg.client_id, cfg.client_secret),
     }
     data = {"scope": cfg.scope or "GIGACHAT_API_PERS"}
     response = await client.post(
         cfg.auth_url,
         data=data,
         headers=headers,
-        auth=auth,
     )
     if response.status_code >= 400:
         raise GigaChatError(f"GigaChat OAuth failed: {response.status_code} {response.text[:300]}")

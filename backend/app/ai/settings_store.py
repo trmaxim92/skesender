@@ -45,7 +45,14 @@ class AiRuntimeConfig:
 
     @property
     def configured(self) -> bool:
-        return bool(self.client_id.strip() and self.client_secret.strip())
+        # Secret may be raw Client Secret or ready Sber Authorization key (base64).
+        secret = self.client_secret.strip()
+        if not secret:
+            return False
+        if self.client_id.strip():
+            return True
+        # Authorization key alone is enough for OAuth.
+        return len(secret) >= 40
 
 
 def _row_to_runtime(row: AiGlobalSettings) -> AiRuntimeConfig:

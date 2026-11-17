@@ -273,7 +273,9 @@ async function review(id: number, st: 'approved' | 'rejected') {
             />
           </label>
           <label class="block sm:col-span-2">
-            <span :class="labelClass">Client Secret</span>
+            <span :class="labelClass">
+              Client Secret или Authorization key
+            </span>
             <input
               v-model="clientSecret"
               type="password"
@@ -282,10 +284,14 @@ async function review(id: number, st: 'approved' | 'rejected') {
               :disabled="!canWrite"
               :placeholder="
                 globalSettings.client_secret_set
-                  ? 'Секрет сохранён — введите новый, чтобы заменить'
-                  : 'Вставьте secret'
+                  ? 'Сохранён — введите новый, чтобы заменить'
+                  : 'UUID secret или Base64-ключ из кабинета Sber'
               "
             />
+            <span class="mt-1 block text-[11px] text-muted">
+              Из кабинета Sber можно вставить готовый Authorization key (Base64) — его не нужно
+              кодировать ещё раз.
+            </span>
           </label>
         </div>
 
