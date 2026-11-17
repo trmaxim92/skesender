@@ -860,9 +860,11 @@ class TelegramUserRuntime:
         last_error: str | None = ...,  # type: ignore[assignment]
     ) -> None:
         from app.channel_events import record_status_change
+        from app.integrations.channel_claim import claim_channel_external_id
 
         old_status: str | None = None
         old_error: str | None = None
+        displaced: list[int] = []
         async with SessionLocal() as session:
             channel = await session.get(Channel, channel_id)
             if channel is None:
@@ -874,7 +876,9 @@ class TelegramUserRuntime:
             if identity is not None:
                 channel.identity = identity
             if external_id is not None:
-                channel.external_id = external_id
+                displaced = await claim_channel_external_id(
+                    session, channel=channel, external_id=external_id
+                )
             if credentials_enc is not None:
                 channel.credentials_enc = credentials_enc
             if connected_at is not None:
@@ -882,6 +886,10 @@ class TelegramUserRuntime:
             if last_error is not ...:
                 channel.last_error = last_error
             await session.commit()
+
+        for other_id in displaced:
+            if other_id != channel_id:
+                await self.stop_channel(other_id)
 
         new_status = status if status is not None else old_status
         new_error = last_error if last_error is not ... else old_error
