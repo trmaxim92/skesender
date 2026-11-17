@@ -55,7 +55,19 @@ def _tokens(query: str) -> list[str]:
 
 def is_tariff_query(query: str) -> bool:
     q = (query or "").lower()
-    return any(k in q for k in ("тариф", "комисс", "условия парк", "условия работ"))
+    return any(
+        k in q
+        for k in (
+            "тариф",
+            "комисс",
+            "условия",
+            "вывод",
+            "банк",
+            "яндекс про",
+            "сутки",
+            "процент",
+        )
+    )
 
 
 def _expanded_tokens(query: str) -> list[str]:
@@ -177,7 +189,8 @@ async def retrieve_context(
                 continue
             # Top hit / tariff topics get a larger window from KB (no hard-coded facts).
             if tariff_q and idx == 0:
-                window = _TARIFF_CHUNK_CHARS
+                # Prefer full article when it fits — avoids cutting FAQ/rules at the end.
+                window = max(_TARIFF_CHUNK_CHARS, min(len(plain) + 32, 12000))
             elif idx == 0:
                 window = _CHUNK_CHARS
             else:

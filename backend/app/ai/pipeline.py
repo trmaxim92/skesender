@@ -68,6 +68,8 @@ _FLUFF_SENTENCE_RE = re.compile(
     r"|пожалуйста,?\s*обратитесь к[^.!?]*[.!?]"
     r"|обратитесь к вашему личному менеджеру[^.!?]*[.!?]"
     r"|если у вас есть другие вопросы[^.!?]*[.!?]"
+    r"|общая процентная комиссия[^.!?]*[.!?]"
+    r"|общая комиссия по двум составляющим[^.!?]*[.!?]"
     r")"
 )
 
@@ -175,6 +177,7 @@ def _build_prompt(
     chunks: list[RagChunk],
     department_slug: str | None,
     max_reply_words: int,
+    tariff_mode: bool = False,
 ) -> list[dict[str, str]]:
     dept_prompt = (profile.system_prompt or "").strip() or prompt_for_department_slug(
         department_slug
@@ -194,11 +197,19 @@ def _build_prompt(
         hist_lines.append(f"{role}: {(msg.text or '').strip()[:500]}")
     hist_block = "\n".join(hist_lines) or "(пусто)"
     contact = dialog.contact_name or "Клиент"
+    extra = ""
+    if tariff_mode:
+        extra = (
+            "\nВажно: в базе могут быть несколько тарифов. Ответь только фактами из блока базы. "
+            "Разделяй тарифы. Не смешивай комиссию парка и комиссию банка/вывода. "
+            "Не считай «общую комиссию» суммированием разных строк.\n"
+        )
     user = (
         f"Контакт: {contact}\n"
         f"Телефон/username: {dialog.contact_phone or dialog.contact_username or '-'}\n\n"
         f"История:\n{hist_block}\n\n"
-        f"База знаний и примеры:\n{kb_block}\n\n"
+        f"База знаний и примеры:\n{kb_block}\n"
+        f"{extra}\n"
         "Сформулируй ответ клиенту строго по правилам system."
     )
     return [
@@ -351,10 +362,11 @@ async def process_inbound_message(
         limit=5 if is_tariff_query(inbound_text) else 4,
     )
     has_rag = bool(chunks)
+    tariff_mode = is_tariff_query(inbound_text)
     reply_words = int(runtime.max_reply_words or 80)
     # Listing tariffs from KB may need a bit more room — still no hard-coded facts.
-    if is_tariff_query(inbound_text):
-        reply_words = max(reply_words, 160)
+    if tariff_mode:
+        reply_words = max(reply_words, 180)
     else:
         # Prefer short factual answers for ordinary FAQ.
         reply_words = min(reply_words, 60)
@@ -365,12 +377,16 @@ async def process_inbound_message(
         chunks=chunks,
         department_slug=dept_slug,
         max_reply_words=reply_words,
+        tariff_mode=tariff_mode,
     )
 
     try:
         raw = await chat_completion(
             messages=prompt,
             model=(profile.gigachat_model or runtime.default_model or "GigaChat"),
+            # Factual tariff/commission answers: stick closer to KB text.
+            temperature=0.1 if tariff_mode else None,
+            max_tokens=max(int(runtime.max_tokens or 512), 900) if tariff_mode else None,
             cfg=runtime,
         )
     except GigaChatError:
