@@ -29,7 +29,38 @@ _TOPIC_EXPAND: dict[str, tuple[str, ...]] = {
     "тариф": ("тариф", "комисс", "условия", "списан", "выплат", "процент"),
     "комисс": ("комисс", "тариф", "процент", "списан", "условия"),
     "условия": ("условия", "тариф", "комисс", "списан"),
+    "заказ": ("заказ", "поездок", "спрос", "яндекс"),
 }
+
+
+def _stem_variants(token: str) -> list[str]:
+    variants = [token]
+    for suf in ("ами", "ями", "ов", "ев", "ам", "ям", "ах", "ях", "ы", "и", "а", "у", "е"):
+        if len(token) > 4 and token.endswith(suf):
+            stem = token[: -len(suf)]
+            if len(stem) >= 3:
+                variants.append(stem)
+            break
+    return variants
+
+
+def is_no_orders_query(query: str) -> bool:
+    q = (query or "").lower()
+    if "заказ" not in q and "поездок" not in q:
+        return False
+    return any(
+        k in q
+        for k in (
+            "нет",
+            "нету",
+            "мало",
+            "не приход",
+            "не идут",
+            "пропал",
+            "снижен",
+            "пустой",
+        )
+    )
 
 
 def strip_html(html: str) -> str:
@@ -95,19 +126,37 @@ def _score(query: str, title: str, body: str) -> int:
     body_l = (body or "").lower()
     hay = f"{title_l}\n{body_l}"
     score = 0
+    title_hits = 0
+    body_hits = 0
     for token in _expanded_tokens(q):
-        if token in title_l:
+        matched_title = False
+        matched_body = False
+        for variant in _stem_variants(token):
+            if variant in title_l:
+                matched_title = True
+            elif variant in body_l:
+                matched_body = True
+        if matched_title:
+            title_hits += 1
             score += 4
-        elif token in body_l:
+        elif matched_body:
+            body_hits += 1
             score += 1
     if q in hay:
         score += 5
-    # Strong title overlap (e.g. «комиссия парка»)
-    title_hits = sum(1 for t in _tokens(q) if t in title_l)
     if title_hits >= 2:
         score += 8
     if is_tariff_query(q) and any(k in title_l for k in ("тариф", "комисс", "условия")):
         score += 6
+    if is_no_orders_query(q):
+        if any(k in title_l for k in ("заказ", "спрос", "поездок")):
+            score += 10
+        # Avoid leaking tariff article into «нет заказов» via weak body hits.
+        if any(k in title_l for k in ("комисс", "тариф")) and title_hits == 0:
+            score = min(score, 1)
+    # Weak single body-token hits are noise.
+    if title_hits == 0 and body_hits <= 1 and score < 5:
+        return 0
     return score
 
 

@@ -122,6 +122,23 @@ def _wants_operator(text: str) -> bool:
     return bool(_OPERATOR_CMD_RE.search(raw))
 
 
+def _is_simple_greeting(text: str) -> bool:
+    t = re.sub(r"[^\wа-яё]+", " ", (text or "").lower(), flags=re.IGNORECASE).strip()
+    return t in {
+        "привет",
+        "здравствуйте",
+        "здравствуй",
+        "добрый день",
+        "добрый вечер",
+        "доброе утро",
+        "доброй ночи",
+        "hi",
+        "hello",
+        "хай",
+        "салют",
+    }
+
+
 def _trim_fluff(reply: str) -> str:
     cleaned = _FLUFF_SENTENCE_RE.sub(" ", reply or "")
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
@@ -335,7 +352,86 @@ async def process_inbound_message(
         return None
 
     inbound_text = (message.text or "").strip()
+
+    # If a newer inbound already arrived, answer that one instead (debounce safety).
+    newer = await session.scalar(
+        select(ChatMessage.id)
+        .where(
+            ChatMessage.dialog_id == dialog_id,
+            ChatMessage.direction == MessageDirection.IN.value,
+            ChatMessage.deleted_at.is_(None),
+            ChatMessage.is_internal.is_(False),
+            ChatMessage.id > message_id,
+        )
+        .order_by(ChatMessage.id.desc())
+        .limit(1)
+    )
+    if newer is not None:
+        logger.info(
+            "AI skip stale inbound dialog=%s msg=%s newer=%s",
+            dialog_id,
+            message_id,
+            newer,
+        )
+        return None
+
     operator_request = _wants_operator(inbound_text)
+
+    # Short greeting without LLM — always answer, never pause the dialog.
+    if _is_simple_greeting(inbound_text):
+        reply = "Здравствуйте! Чем могу помочь?"
+        suggestion = AiSuggestion(
+            dialog_id=dialog_id,
+            message_id=message_id,
+            department_id=dialog.department_id,
+            status=AiSuggestionStatus.PENDING.value,
+            draft_text=reply,
+            confidence=95,
+            intent="greeting",
+            needs_human=False,
+            sources_json="[]",
+            raw_response_json=json.dumps(
+                {
+                    "reply": reply,
+                    "confidence": 95,
+                    "intent": "greeting",
+                    "needs_human": False,
+                },
+                ensure_ascii=False,
+            ),
+        )
+        session.add(suggestion)
+        await session.flush()
+        mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
+        can_auto = mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
+        channel = dialog.channel
+        if channel is None:
+            channel = await session.get(Channel, dialog.channel_id)
+        if can_auto and channel is not None and channel.status == ChannelStatus.ONLINE.value:
+            suggestion_id = suggestion.id
+            try:
+                sent = await send_ai_text(
+                    session,
+                    dialog=dialog,
+                    channel=channel,
+                    text=reply,
+                    reply_to_message_id=message_id,
+                )
+                suggestion = await session.get(AiSuggestion, suggestion_id)
+                if suggestion is not None:
+                    suggestion.status = AiSuggestionStatus.AUTO_SENT.value
+                    suggestion.auto_sent_message_id = sent.id
+                    suggestion.resolved_at = sent.created_at
+                    await session.flush()
+                    await session.commit()
+                    return PipelineResult(suggestion=suggestion, auto_sent=True)
+            except Exception:
+                logger.exception("AI greeting send failed dialog=%s", dialog_id)
+                suggestion = await session.get(AiSuggestion, suggestion_id)
+                if suggestion is not None:
+                    suggestion.status = AiSuggestionStatus.PENDING.value
+        await session.commit()
+        return PipelineResult(suggestion=suggestion, auto_sent=False)
 
     # Explicit «оператор» / «менеджер» → handoff without waiting for LLM.
     if operator_request:
@@ -485,11 +581,9 @@ async def process_inbound_message(
     session.add(suggestion)
     await session.flush()
 
-    # Handoff to human: keep this draft visible, but stop further AI on this dialog.
-    if needs_human:
-        from app.ai.handoff import pause_ai_for_dialog
-
-        await pause_ai_for_dialog(session, dialog, reason="needs_human")
+    # Do NOT pause the whole dialog on LLM needs_human — that blocked follow-ups
+    # like «Привет» → pause → «какие условия парка» ignored. Pause only on
+    # explicit operator command / reject / human outbound (see handoff hooks).
 
     mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
     primary = {
@@ -512,10 +606,29 @@ async def process_inbound_message(
     )
     if runtime.require_rag_for_auto and not has_rag:
         can_auto = False
+    # Greetings may auto without RAG; factual answers still need KB when required.
+    if (
+        runtime.require_rag_for_auto
+        and not has_rag
+        and intent_tokens & {"greeting", "thanks"}
+    ):
+        can_auto = mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
     if can_auto:
         auto_count = await _count_auto_replies(session, dialog_id)
         if auto_count >= int(profile.max_auto_replies_per_dialog or 10):
             can_auto = False
+    logger.info(
+        "AI decide dialog=%s msg=%s intent=%s conf=%s needs_human=%s has_rag=%s "
+        "dup=%s can_auto=%s",
+        dialog_id,
+        message_id,
+        intent,
+        confidence,
+        needs_human,
+        has_rag,
+        block_duplicate_auto,
+        can_auto,
+    )
 
     channel = dialog.channel
     if channel is None:

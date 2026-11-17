@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
-
 from app.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+# Wait for a short burst of client messages (привет + вопрос) then answer the latest.
+_DEBOUNCE_SEC = 1.4
+
 
 class AiWorker:
     def __init__(self) -> None:
-        self._queue: deque[tuple[int, int]] = deque()
+        self._latest: dict[int, int] = {}  # dialog_id -> latest message_id
+        self._debounce_tasks: dict[int, asyncio.Task] = {}
         self._wakeup = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._seen: set[int] = set()
+        self._inflight: set[int] = set()  # dialog ids currently processing
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -25,6 +28,9 @@ class AiWorker:
         logger.info("AI worker started")
 
     async def stop(self) -> None:
+        for task in list(self._debounce_tasks.values()):
+            task.cancel()
+        self._debounce_tasks.clear()
         if self._task is None:
             return
         self._task.cancel()
@@ -40,20 +46,47 @@ class AiWorker:
             return
         self._seen.add(message_id)
         if len(self._seen) > 5000:
-            # drop oldest half
             self._seen = set(list(self._seen)[-2500:])
-        self._queue.append((dialog_id, message_id))
+        self._latest[dialog_id] = message_id
+        # Restart debounce timer for this dialog.
+        prev = self._debounce_tasks.get(dialog_id)
+        if prev and not prev.done():
+            prev.cancel()
+        self._debounce_tasks[dialog_id] = asyncio.create_task(
+            self._debounce_fire(dialog_id),
+            name=f"ai-debounce-{dialog_id}",
+        )
+        self._wakeup.set()
+
+    async def _debounce_fire(self, dialog_id: int) -> None:
+        try:
+            await asyncio.sleep(_DEBOUNCE_SEC)
+        except asyncio.CancelledError:
+            return
         self._wakeup.set()
 
     async def _run(self) -> None:
         while True:
             try:
-                if not self._queue:
+                ready = [
+                    did
+                    for did, task in list(self._debounce_tasks.items())
+                    if task.done() and did not in self._inflight and did in self._latest
+                ]
+                if not ready:
                     self._wakeup.clear()
                     await self._wakeup.wait()
                     continue
-                dialog_id, message_id = self._queue.popleft()
-                await self._handle(dialog_id, message_id)
+                for dialog_id in ready:
+                    message_id = self._latest.pop(dialog_id, None)
+                    self._debounce_tasks.pop(dialog_id, None)
+                    if message_id is None:
+                        continue
+                    self._inflight.add(dialog_id)
+                    try:
+                        await self._handle(dialog_id, message_id)
+                    finally:
+                        self._inflight.discard(dialog_id)
             except asyncio.CancelledError:
                 raise
             except Exception:
