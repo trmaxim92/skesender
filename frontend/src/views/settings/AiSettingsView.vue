@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Bot, RefreshCw, Sparkles } from 'lucide-vue-next'
+import { RefreshCw, Sparkles } from 'lucide-vue-next'
 import {
   fetchAiGlobalSettings,
   fetchAiMetrics,
@@ -38,6 +38,15 @@ const savingGlobal = ref(false)
 const pinging = ref(false)
 const error = ref('')
 const ok = ref('')
+
+const inputClass =
+  'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none ring-brand focus:ring-2 disabled:opacity-60'
+const labelClass = 'mb-1 block text-xs font-semibold text-muted'
+const panelClass = 'space-y-4 rounded-2xl border border-line bg-panel p-4'
+const btnPrimary =
+  'inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-50'
+const btnGhost =
+  'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-50'
 
 async function loadDepartments() {
   departments.value = (await listDepartmentsRequest()).map(mapDepartment)
@@ -165,6 +174,7 @@ async function save() {
 
 async function ping() {
   pinging.value = true
+  error.value = ''
   try {
     status.value = await fetchAiStatus(true)
   } catch (e) {
@@ -189,375 +199,379 @@ async function review(id: number, st: 'approved' | 'rejected') {
 </script>
 
 <template>
-  <div class="ai-settings">
-    <header class="ai-settings__head">
-      <div>
-        <h1><Bot :size="22" /> ИИ (GigaChat)</h1>
-        <p>Секреты и настройки — только здесь, в модуле (не в .env)</p>
-      </div>
-      <button type="button" class="btn ghost" :disabled="pinging" @click="ping">
-        <RefreshCw :size="16" /> Проверить GigaChat
-      </button>
-    </header>
-
-    <p v-if="error" class="err">{{ error }}</p>
-    <p v-if="ok" class="ok">{{ ok }}</p>
-
-    <section v-if="globalSettings" class="card form">
-      <h2>Подключение GigaChat</h2>
-      <label class="check">
-        <input v-model="globalSettings.enabled" type="checkbox" :disabled="!canWrite" />
-        Модуль ИИ включён
-      </label>
-      <label>
-        Client ID
-        <input v-model="globalSettings.client_id" autocomplete="off" :disabled="!canWrite" />
-      </label>
-      <label>
-        Client Secret
-        <input
-          v-model="clientSecret"
-          type="password"
-          autocomplete="new-password"
-          :disabled="!canWrite"
-          :placeholder="
-            globalSettings.client_secret_set
-              ? 'Секрет сохранён — введите новый, чтобы заменить'
-              : 'Вставьте secret'
-          "
-        />
-      </label>
-      <div v-if="globalSettings.client_secret_set" class="actions">
-        <button type="button" class="btn ghost" :disabled="!canWrite || savingGlobal" @click="clearSecret">
-          Удалить secret
+  <div class="h-full overflow-auto p-4 md:p-6">
+    <div class="mx-auto max-w-3xl space-y-5 pb-10">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight">GigaChat</h2>
+          <p class="mt-1 text-sm text-muted">
+            Секреты и параметры генерации хранятся здесь (не в .env).
+          </p>
+        </div>
+        <button type="button" :class="btnGhost" :disabled="pinging" @click="ping">
+          <RefreshCw class="size-4" :class="pinging ? 'animate-spin' : ''" />
+          Проверить
         </button>
       </div>
-      <label>
-        Scope
-        <input v-model="globalSettings.scope" :disabled="!canWrite" />
-      </label>
-      <label>
-        Модель по умолчанию
-        <input v-model="globalSettings.default_model" :disabled="!canWrite" />
-      </label>
-      <label>
-        Auth URL
-        <input v-model="globalSettings.auth_url" :disabled="!canWrite" />
-      </label>
-      <label>
-        API base
-        <input v-model="globalSettings.api_base" :disabled="!canWrite" />
-      </label>
-      <label class="check">
-        <input v-model="globalSettings.verify_ssl" type="checkbox" :disabled="!canWrite" />
-        Проверять TLS (verify SSL)
-      </label>
-      <h3 class="subhead">Генерация (Sber)</h3>
-      <div class="grid2">
-        <label>
-          Temperature
+
+      <p v-if="error" class="text-sm text-danger">{{ error }}</p>
+      <p v-if="ok" class="text-sm text-ok">{{ ok }}</p>
+      <p v-if="loading && !globalSettings" class="text-sm text-muted">Загрузка…</p>
+
+      <section v-if="globalSettings" :class="panelClass">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="text-sm font-semibold">Подключение</h3>
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+              :class="
+                status?.ai_enabled ? 'bg-ok/15 text-ok' : 'bg-surface text-muted'
+              "
+            >
+              {{ status?.ai_enabled ? 'модуль вкл' : 'модуль выкл' }}
+            </span>
+            <span
+              class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+              :class="
+                status?.gigachat_configured
+                  ? 'bg-ok/15 text-ok'
+                  : 'bg-danger/15 text-danger'
+              "
+            >
+              {{ status?.gigachat_configured ? 'ключи заданы' : 'нет ключей' }}
+            </span>
+            <span
+              v-if="status?.gigachat_ping"
+              class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+              :class="
+                status.gigachat_ping.ok ? 'bg-ok/15 text-ok' : 'bg-danger/15 text-danger'
+              "
+            >
+              ping: {{ status.gigachat_ping.ok ? 'ok' : status.gigachat_ping.detail }}
+            </span>
+          </div>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
           <input
-            v-model.number="globalSettings.temperature"
-            type="number"
-            min="0"
-            max="2"
-            step="0.05"
+            v-model="globalSettings.enabled"
+            type="checkbox"
+            class="size-4 rounded border-line"
             :disabled="!canWrite"
           />
+          Модуль ИИ включён
         </label>
-        <label>
-          Max tokens
-          <input
-            v-model.number="globalSettings.max_tokens"
-            type="number"
-            min="16"
-            max="4096"
-            :disabled="!canWrite"
-          />
-        </label>
-        <label>
-          Repetition penalty
-          <input
-            v-model.number="globalSettings.repetition_penalty"
-            type="number"
-            min="0.1"
-            max="2"
-            step="0.05"
-            :disabled="!canWrite"
-          />
-        </label>
-        <label>
-          Лимит слов ответа
-          <input
-            v-model.number="globalSettings.max_reply_words"
-            type="number"
-            min="20"
-            max="300"
-            :disabled="!canWrite"
-          />
-        </label>
-      </div>
-      <label class="check">
-        <input v-model="globalSettings.require_rag_for_auto" type="checkbox" :disabled="!canWrite" />
-        Автоответ только при наличии RAG
-      </label>
-      <button
-        type="button"
-        class="btn primary"
-        :disabled="!canWrite || savingGlobal"
-        @click="saveGlobal"
-      >
-        <Sparkles :size="16" /> Сохранить подключение
-      </button>
-      <div v-if="status" class="row muted">
-        <span>Статус</span>
-        <strong>
-          {{ status.ai_enabled ? 'вкл' : 'выкл' }}
-          ·
-          {{ status.gigachat_configured ? 'ключи заданы' : 'ключи не заданы' }}
-        </strong>
-      </div>
-      <div v-if="status?.gigachat_ping" class="row">
-        <span>Ping</span>
-        <strong :class="status.gigachat_ping.ok ? 'ok' : 'err'">
-          {{ status.gigachat_ping.ok ? 'ok' : status.gigachat_ping.detail }}
-        </strong>
-      </div>
-    </section>
 
-    <section class="card">
-      <label>
-        Отдел
-        <select v-model.number="departmentId" :disabled="loading">
-          <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-        </select>
-      </label>
-    </section>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">Client ID</span>
+            <input
+              v-model="globalSettings.client_id"
+              :class="inputClass"
+              autocomplete="off"
+              :disabled="!canWrite"
+            />
+          </label>
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">Client Secret</span>
+            <input
+              v-model="clientSecret"
+              type="password"
+              :class="inputClass"
+              autocomplete="new-password"
+              :disabled="!canWrite"
+              :placeholder="
+                globalSettings.client_secret_set
+                  ? 'Секрет сохранён — введите новый, чтобы заменить'
+                  : 'Вставьте secret'
+              "
+            />
+          </label>
+        </div>
 
-    <section v-if="profile" class="card form">
-      <h2>Профиль отдела</h2>
-      <label class="check">
-        <input v-model="profile.enabled" type="checkbox" :disabled="!canWrite" />
-        Включить ИИ для отдела
-      </label>
-      <label>
-        Режим
-        <select v-model="profile.mode" :disabled="!canWrite">
-          <option value="assist">Только рекомендации</option>
-          <option value="hybrid">Гибрид (первичка + черновики)</option>
-          <option value="auto">Автоответы (с порогом)</option>
-        </select>
-      </label>
-      <label>
-        Системный промпт отдела
-        <textarea
-          v-model="profile.system_prompt"
-          rows="5"
-          :disabled="!canWrite"
-          placeholder="Роль: поддержка / продажи / реактивация…"
-        />
-      </label>
-      <label>
-        Порог автоответа (0–100)
-        <input
-          v-model.number="profile.auto_confidence_min"
-          type="number"
-          min="0"
-          max="100"
-          :disabled="!canWrite"
-        />
-      </label>
-      <label>
-        Макс. автоответов в диалоге
-        <input
-          v-model.number="profile.max_auto_replies_per_dialog"
-          type="number"
-          min="0"
-          max="50"
-          :disabled="!canWrite"
-        />
-      </label>
-      <label>
-        Модель GigaChat (отдел)
-        <input v-model="profile.gigachat_model" :disabled="!canWrite" />
-      </label>
-      <label>
-        Primary intents (через запятую)
-        <input v-model="profile.primary_intents" :disabled="!canWrite" />
-      </label>
-      <button type="button" class="btn primary" :disabled="!canWrite || saving" @click="save">
-        <Sparkles :size="16" /> Сохранить профиль
-      </button>
-    </section>
-
-    <section v-if="metrics" class="card metrics">
-      <h2>Метрики</h2>
-      <div class="grid">
-        <div><span>Всего</span><b>{{ metrics.suggestions_total }}</b></div>
-        <div><span>Ожидают</span><b>{{ metrics.pending }}</b></div>
-        <div><span>Принято</span><b>{{ metrics.accepted }}</b></div>
-        <div><span>Правки</span><b>{{ metrics.edited }}</b></div>
-        <div><span>Отказ</span><b>{{ metrics.rejected }}</b></div>
-        <div><span>Авто</span><b>{{ metrics.auto_sent }}</b></div>
-        <div><span>Обучение</span><b>{{ metrics.learning_pending }}</b></div>
-        <div><span>В RAG</span><b>{{ metrics.learning_approved }}</b></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Очередь обучения</h2>
-      <p v-if="!learning.length" class="muted">Нет примеров на модерации</p>
-      <article v-for="ex in learning" :key="ex.id" class="learn">
-        <p><strong>Клиент:</strong> {{ ex.user_question }}</p>
-        <p><strong>Оператор:</strong> {{ ex.operator_answer }}</p>
-        <div class="actions">
-          <button type="button" class="btn primary" :disabled="!canWrite" @click="review(ex.id, 'approved')">
-            В базу
-          </button>
-          <button type="button" class="btn ghost" :disabled="!canWrite" @click="review(ex.id, 'rejected')">
-            Отклонить
+        <div v-if="globalSettings.client_secret_set" class="flex">
+          <button
+            type="button"
+            :class="btnGhost"
+            :disabled="!canWrite || savingGlobal"
+            @click="clearSecret"
+          >
+            Удалить secret
           </button>
         </div>
-      </article>
-    </section>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span :class="labelClass">Scope</span>
+            <input v-model="globalSettings.scope" :class="inputClass" :disabled="!canWrite" />
+          </label>
+          <label class="block">
+            <span :class="labelClass">Модель по умолчанию</span>
+            <input
+              v-model="globalSettings.default_model"
+              :class="inputClass"
+              :disabled="!canWrite"
+            />
+          </label>
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">Auth URL</span>
+            <input
+              v-model="globalSettings.auth_url"
+              :class="[inputClass, 'font-mono text-xs']"
+              :disabled="!canWrite"
+            />
+          </label>
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">API base</span>
+            <input
+              v-model="globalSettings.api_base"
+              :class="[inputClass, 'font-mono text-xs']"
+              :disabled="!canWrite"
+            />
+          </label>
+        </div>
+
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            v-model="globalSettings.verify_ssl"
+            type="checkbox"
+            class="size-4 rounded border-line"
+            :disabled="!canWrite"
+          />
+          Проверять TLS (verify SSL)
+        </label>
+
+        <div class="border-t border-line pt-4">
+          <h4 class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+            Генерация (Sber)
+          </h4>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span :class="labelClass">Temperature</span>
+              <input
+                v-model.number="globalSettings.temperature"
+                type="number"
+                min="0"
+                max="2"
+                step="0.05"
+                :class="inputClass"
+                :disabled="!canWrite"
+              />
+            </label>
+            <label class="block">
+              <span :class="labelClass">Max tokens</span>
+              <input
+                v-model.number="globalSettings.max_tokens"
+                type="number"
+                min="16"
+                max="4096"
+                :class="inputClass"
+                :disabled="!canWrite"
+              />
+            </label>
+            <label class="block">
+              <span :class="labelClass">Repetition penalty</span>
+              <input
+                v-model.number="globalSettings.repetition_penalty"
+                type="number"
+                min="0.1"
+                max="2"
+                step="0.05"
+                :class="inputClass"
+                :disabled="!canWrite"
+              />
+            </label>
+            <label class="block">
+              <span :class="labelClass">Лимит слов ответа</span>
+              <input
+                v-model.number="globalSettings.max_reply_words"
+                type="number"
+                min="20"
+                max="300"
+                :class="inputClass"
+                :disabled="!canWrite"
+              />
+            </label>
+          </div>
+          <label class="mt-3 flex items-center gap-2 text-sm">
+            <input
+              v-model="globalSettings.require_rag_for_auto"
+              type="checkbox"
+              class="size-4 rounded border-line"
+              :disabled="!canWrite"
+            />
+            Автоответ только при наличии RAG
+          </label>
+        </div>
+
+        <button
+          type="button"
+          :class="btnPrimary"
+          :disabled="!canWrite || savingGlobal"
+          @click="saveGlobal"
+        >
+          <Sparkles class="size-4" />
+          Сохранить подключение
+        </button>
+      </section>
+
+      <section :class="panelClass">
+        <h3 class="text-sm font-semibold">Отдел</h3>
+        <label class="block max-w-md">
+          <span :class="labelClass">Профиль ИИ</span>
+          <select
+            v-model.number="departmentId"
+            :class="inputClass"
+            :disabled="loading || !departments.length"
+          >
+            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+          </select>
+        </label>
+      </section>
+
+      <section v-if="profile" :class="panelClass">
+        <h3 class="text-sm font-semibold">Профиль отдела</h3>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            v-model="profile.enabled"
+            type="checkbox"
+            class="size-4 rounded border-line"
+            :disabled="!canWrite"
+          />
+          Включить ИИ для отдела
+        </label>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span :class="labelClass">Режим</span>
+            <select v-model="profile.mode" :class="inputClass" :disabled="!canWrite">
+              <option value="assist">Только рекомендации</option>
+              <option value="hybrid">Гибрид (первичка + черновики)</option>
+              <option value="auto">Автоответы (с порогом)</option>
+            </select>
+          </label>
+          <label class="block">
+            <span :class="labelClass">Модель GigaChat (отдел)</span>
+            <input v-model="profile.gigachat_model" :class="inputClass" :disabled="!canWrite" />
+          </label>
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">Системный промпт</span>
+            <textarea
+              v-model="profile.system_prompt"
+              rows="5"
+              :class="inputClass"
+              :disabled="!canWrite"
+              placeholder="Роль: поддержка / продажи / реактивация…"
+            />
+          </label>
+          <label class="block">
+            <span :class="labelClass">Порог автоответа (0–100)</span>
+            <input
+              v-model.number="profile.auto_confidence_min"
+              type="number"
+              min="0"
+              max="100"
+              :class="inputClass"
+              :disabled="!canWrite"
+            />
+          </label>
+          <label class="block">
+            <span :class="labelClass">Макс. автоответов в диалоге</span>
+            <input
+              v-model.number="profile.max_auto_replies_per_dialog"
+              type="number"
+              min="0"
+              max="50"
+              :class="inputClass"
+              :disabled="!canWrite"
+            />
+          </label>
+          <label class="block sm:col-span-2">
+            <span :class="labelClass">Primary intents (через запятую)</span>
+            <input
+              v-model="profile.primary_intents"
+              :class="inputClass"
+              :disabled="!canWrite"
+            />
+          </label>
+        </div>
+        <button type="button" :class="btnPrimary" :disabled="!canWrite || saving" @click="save">
+          <Sparkles class="size-4" />
+          Сохранить профиль
+        </button>
+      </section>
+
+      <section v-if="metrics" :class="panelClass">
+        <h3 class="text-sm font-semibold">Метрики</h3>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Всего</div>
+            <div class="text-lg font-semibold">{{ metrics.suggestions_total }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Ожидают</div>
+            <div class="text-lg font-semibold">{{ metrics.pending }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Принято</div>
+            <div class="text-lg font-semibold">{{ metrics.accepted }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Правки</div>
+            <div class="text-lg font-semibold">{{ metrics.edited }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Отказ</div>
+            <div class="text-lg font-semibold">{{ metrics.rejected }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Авто</div>
+            <div class="text-lg font-semibold">{{ metrics.auto_sent }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">Обучение</div>
+            <div class="text-lg font-semibold">{{ metrics.learning_pending }}</div>
+          </div>
+          <div class="rounded-xl border border-line bg-surface px-3 py-2">
+            <div class="text-[11px] text-muted">В RAG</div>
+            <div class="text-lg font-semibold">{{ metrics.learning_approved }}</div>
+          </div>
+        </div>
+      </section>
+
+      <section :class="panelClass">
+        <h3 class="text-sm font-semibold">Очередь обучения</h3>
+        <p v-if="!learning.length" class="text-sm text-muted">Нет примеров на модерации</p>
+        <article
+          v-for="ex in learning"
+          :key="ex.id"
+          class="space-y-2 border-t border-line pt-3 first:border-t-0 first:pt-0"
+        >
+          <p class="text-sm">
+            <span class="font-semibold">Клиент:</span> {{ ex.user_question }}
+          </p>
+          <p class="text-sm">
+            <span class="font-semibold">Оператор:</span> {{ ex.operator_answer }}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnPrimary"
+              :disabled="!canWrite"
+              @click="review(ex.id, 'approved')"
+            >
+              В базу
+            </button>
+            <button
+              type="button"
+              :class="btnGhost"
+              :disabled="!canWrite"
+              @click="review(ex.id, 'rejected')"
+            >
+              Отклонить
+            </button>
+          </div>
+        </article>
+      </section>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.ai-settings {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 1.25rem 1rem 3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.ai-settings__head {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-}
-.ai-settings__head h1 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  font-size: 1.35rem;
-}
-.ai-settings__head p {
-  margin: 0.35rem 0 0;
-  opacity: 0.7;
-}
-.card {
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 12px;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-.card h2 {
-  margin: 0;
-  font-size: 1.05rem;
-}
-.subhead {
-  margin: 0.25rem 0 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  opacity: 0.85;
-}
-.grid2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-@media (max-width: 700px) {
-  .grid2 {
-    grid-template-columns: 1fr;
-  }
-}
-.form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.9rem;
-}
-.form input,
-.form select,
-.form textarea {
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-.check {
-  flex-direction: row !important;
-  align-items: center;
-  gap: 0.5rem !important;
-}
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  border-radius: 8px;
-  padding: 0.5rem 0.85rem;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  width: fit-content;
-}
-.btn.primary {
-  background: color-mix(in srgb, #2563eb 85%, black);
-  border-color: transparent;
-  color: #fff;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.metrics .grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-.metrics .grid div {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-.metrics span {
-  font-size: 0.8rem;
-  opacity: 0.65;
-}
-.learn {
-  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-  padding-top: 0.75rem;
-}
-.actions {
-  display: flex;
-  gap: 0.5rem;
-}
-.err {
-  color: #dc2626;
-}
-.ok {
-  color: #16a34a;
-}
-.muted {
-  opacity: 0.6;
-}
-@media (max-width: 700px) {
-  .metrics .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-</style>
