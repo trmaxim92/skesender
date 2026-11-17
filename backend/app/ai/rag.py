@@ -22,6 +22,14 @@ _TOKEN_RE = re.compile(r"[\wа-яёА-ЯЁ]{3,}", flags=re.IGNORECASE)
 
 # Long KB articles (тарифы/комиссии) need more than a short head excerpt.
 _CHUNK_CHARS = 4500
+_TARIFF_CHUNK_CHARS = 7000
+
+# Generic topic expansion (no park-specific facts — only retrieval hints).
+_TOPIC_EXPAND: dict[str, tuple[str, ...]] = {
+    "тариф": ("тариф", "комисс", "условия", "списан", "выплат", "процент"),
+    "комисс": ("комисс", "тариф", "процент", "списан", "условия"),
+    "условия": ("условия", "тариф", "комисс", "списан"),
+}
 
 
 def strip_html(html: str) -> str:
@@ -45,6 +53,28 @@ def _tokens(query: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(query or "")]
 
 
+def is_tariff_query(query: str) -> bool:
+    q = (query or "").lower()
+    return any(k in q for k in ("тариф", "комисс", "условия парк", "условия работ"))
+
+
+def _expanded_tokens(query: str) -> list[str]:
+    base = _tokens(query)
+    extra: list[str] = []
+    q = (query or "").lower()
+    for key, syns in _TOPIC_EXPAND.items():
+        if key in q or any(key in t for t in base):
+            extra.extend(syns)
+    # preserve order, unique
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in [*base, *extra]:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 def _score(query: str, title: str, body: str) -> int:
     q = (query or "").lower().strip()
     if not q:
@@ -53,7 +83,7 @@ def _score(query: str, title: str, body: str) -> int:
     body_l = (body or "").lower()
     hay = f"{title_l}\n{body_l}"
     score = 0
-    for token in _tokens(q):
+    for token in _expanded_tokens(q):
         if token in title_l:
             score += 4
         elif token in body_l:
@@ -64,6 +94,8 @@ def _score(query: str, title: str, body: str) -> int:
     title_hits = sum(1 for t in _tokens(q) if t in title_l)
     if title_hits >= 2:
         score += 8
+    if is_tariff_query(q) and any(k in title_l for k in ("тариф", "комисс", "условия")):
+        score += 6
     return score
 
 
@@ -76,7 +108,7 @@ def _excerpt(text: str, query: str, *, max_chars: int = _CHUNK_CHARS) -> str:
         return plain
     lower = plain.lower()
     positions: list[int] = []
-    for token in _tokens(query):
+    for token in _expanded_tokens(query):
         pos = lower.find(token)
         if pos >= 0:
             positions.append(pos)
@@ -139,11 +171,17 @@ async def retrieve_context(
             plain = strip_html(article.body_html or "")
             ranked.append((_score(query, article.title or "", plain), article, plain))
         ranked.sort(key=lambda x: x[0], reverse=True)
+        tariff_q = is_tariff_query(query)
         for idx, (score, article, plain) in enumerate(ranked):
             if score <= 0 and query.strip():
                 continue
-            # Top hit gets a larger window (long tariff/commission articles).
-            window = _CHUNK_CHARS if idx == 0 else max(1800, _CHUNK_CHARS // 2)
+            # Top hit / tariff topics get a larger window from KB (no hard-coded facts).
+            if tariff_q and idx == 0:
+                window = _TARIFF_CHUNK_CHARS
+            elif idx == 0:
+                window = _CHUNK_CHARS
+            else:
+                window = max(1800, _CHUNK_CHARS // 2)
             chunks.append(
                 RagChunk(
                     kind="article",

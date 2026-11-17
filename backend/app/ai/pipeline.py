@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.ai.gigachat import GigaChatError, chat_completion
 from app.ai.prompts import build_system_prompt, prompt_for_department_slug
-from app.ai.rag import RagChunk, retrieve_context
+from app.ai.rag import RagChunk, is_tariff_query, retrieve_context
 from app.models import (
     AiAgentMode,
     AiDepartmentProfile,
@@ -47,6 +47,53 @@ _ESCALATE_MARKERS = (
     "нужна помощь оператора",
     "обратитесь к оператору",
 )
+
+# Explicit handoff phrases from the client (not park-specific).
+_OPERATOR_CMD_RE = re.compile(
+    r"(?i)(?<![а-яёa-z0-9])("
+    r"оператор(?:а|у|ом|ы)?|"
+    r"менеджер(?:а|у|ом|ы)?|"
+    r"живой\s+человек|"
+    r"позови(?:те)?\s+(?:оператора|менеджера|человека)|"
+    r"свяжи(?:те)?\s+с\s+(?:оператором|менеджером)|"
+    r"перевед(?:и|ите)\s+на\s+(?:оператора|менеджера)|"
+    r"human|operator"
+    r")(?![а-яёa-z0-9])"
+)
+
+_FLUFF_SENTENCE_RE = re.compile(
+    r"(?i)\s*(?:"
+    r"точная сумма комиссии зависит[^.!?]*[.!?]"
+    r"|для получения подробной информации[^.!?]*[.!?]"
+    r"|пожалуйста,?\s*обратитесь к[^.!?]*[.!?]"
+    r"|обратитесь к вашему личному менеджеру[^.!?]*[.!?]"
+    r"|если у вас есть другие вопросы[^.!?]*[.!?]"
+    r")"
+)
+
+
+def _wants_operator(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    if low in {
+        "оператор",
+        "оператора",
+        "менеджер",
+        "менеджера",
+        "человек",
+        "operator",
+        "human",
+    }:
+        return True
+    return bool(_OPERATOR_CMD_RE.search(raw))
+
+
+def _trim_fluff(reply: str) -> str:
+    cleaned = _FLUFF_SENTENCE_RE.sub(" ", reply or "")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned or (reply or "").strip()
 
 
 @dataclass
@@ -224,6 +271,72 @@ async def process_inbound_message(
     if existing:
         return None
 
+    inbound_text = (message.text or "").strip()
+    operator_request = _wants_operator(inbound_text)
+
+    # Explicit «оператор» / «менеджер» → handoff without waiting for LLM.
+    if operator_request:
+        reply = "Передаю ваш диалог менеджеру. Ожидайте ответа."
+        confidence = 100
+        intent = "operator"
+        needs_human = True
+        has_rag = False
+        sources: list[dict] = []
+        raw = json.dumps(
+            {
+                "reply": reply,
+                "confidence": confidence,
+                "intent": intent,
+                "needs_human": True,
+                "citations": [],
+            },
+            ensure_ascii=False,
+        )
+        suggestion = AiSuggestion(
+            dialog_id=dialog_id,
+            message_id=message_id,
+            department_id=dialog.department_id,
+            status=AiSuggestionStatus.PENDING.value,
+            draft_text=reply,
+            confidence=confidence,
+            intent=intent,
+            needs_human=True,
+            sources_json="[]",
+            raw_response_json=raw,
+        )
+        session.add(suggestion)
+        await session.flush()
+        from app.ai.handoff import pause_ai_for_dialog
+
+        await pause_ai_for_dialog(session, dialog, reason="operator_command")
+
+        mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
+        can_auto = mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
+        channel = dialog.channel
+        if channel is None:
+            channel = await session.get(Channel, dialog.channel_id)
+        if can_auto and channel is not None and channel.status == ChannelStatus.ONLINE.value:
+            try:
+                sent = await send_ai_text(
+                    session,
+                    dialog=dialog,
+                    channel=channel,
+                    text=reply,
+                    reply_to_message_id=message_id,
+                )
+                suggestion.status = AiSuggestionStatus.AUTO_SENT.value
+                suggestion.auto_sent_message_id = sent.id
+                suggestion.resolved_at = sent.created_at
+                await session.flush()
+                await session.commit()
+                return PipelineResult(suggestion=suggestion, auto_sent=True)
+            except Exception:
+                logger.exception("AI operator handoff send failed dialog=%s", dialog_id)
+                suggestion.status = AiSuggestionStatus.PENDING.value
+                suggestion.auto_sent_message_id = None
+        await session.commit()
+        return PipelineResult(suggestion=suggestion, auto_sent=False)
+
     dept_slug = None
     if dialog.department_id is not None:
         dept = await session.get(Department, dialog.department_id)
@@ -234,17 +347,24 @@ async def process_inbound_message(
     chunks = await retrieve_context(
         session,
         department_id=dialog.department_id,
-        query=message.text or "",
-        limit=4,
+        query=inbound_text,
+        limit=5 if is_tariff_query(inbound_text) else 4,
     )
     has_rag = bool(chunks)
+    reply_words = int(runtime.max_reply_words or 80)
+    # Listing tariffs from KB may need a bit more room — still no hard-coded facts.
+    if is_tariff_query(inbound_text):
+        reply_words = max(reply_words, 160)
+    else:
+        # Prefer short factual answers for ordinary FAQ.
+        reply_words = min(reply_words, 60)
     prompt = _build_prompt(
         profile=profile,
         dialog=dialog,
         history=history,
         chunks=chunks,
         department_slug=dept_slug,
-        max_reply_words=runtime.max_reply_words,
+        max_reply_words=reply_words,
     )
 
     try:
@@ -258,7 +378,7 @@ async def process_inbound_message(
         return None
 
     parsed = _parse_llm_json(raw)
-    reply = str(parsed.get("reply") or "").strip()
+    reply = _trim_fluff(str(parsed.get("reply") or "").strip())
     if not reply:
         return None
     confidence = _normalize_confidence(parsed.get("confidence"))
