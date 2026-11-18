@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.ai.gigachat import GigaChatError, chat_completion
 from app.ai.prompts import build_system_prompt, prompt_for_department_slug
-from app.ai.rag import RagChunk, is_tariff_query, retrieve_context
+from app.ai.rag import RagChunk, is_price_objection, is_tariff_query, retrieve_context
 from app.models import (
     AiAgentMode,
     AiDepartmentProfile,
@@ -140,13 +140,23 @@ def _normalize_for_sim(text: str) -> set[str]:
     }
 
 
-def _too_similar(a: str, b: str, *, threshold: float = 0.72) -> bool:
+def _too_similar(a: str, b: str, *, threshold: float = 0.55) -> bool:
     ta, tb = _normalize_for_sim(a), _normalize_for_sim(b)
     if not ta or not tb:
         return False
     inter = len(ta & tb)
     union = len(ta | tb)
     return (inter / union) >= threshold if union else False
+
+
+def _looks_like_tariff_dump(text: str) -> bool:
+    t = (text or "").lower()
+    hits = sum(
+        1
+        for k in ("тариф", "комисс", "%", "вывод", "руб", "процент")
+        if k in t
+    )
+    return hits >= 3
 
 
 @dataclass
@@ -421,41 +431,38 @@ async def process_inbound_message(
         await session.commit()
         return PipelineResult(suggestion=suggestion, auto_sent=False)
 
-    # Explicit «оператор» / «менеджер» → handoff without waiting for LLM.
-    if operator_request:
-        reply = "Передаю ваш диалог менеджеру. Ожидайте ответа."
-        confidence = 100
-        intent = "operator"
-        needs_human = True
-        has_rag = False
-        sources: list[dict] = []
-        raw = json.dumps(
-            {
-                "reply": reply,
-                "confidence": confidence,
-                "intent": intent,
-                "needs_human": True,
-                "citations": [],
-            },
-            ensure_ascii=False,
-        )
+    async def _handoff_reply(
+        *,
+        reply: str,
+        intent: str,
+        pause_reason: str,
+    ) -> PipelineResult:
         suggestion = AiSuggestion(
             dialog_id=dialog_id,
             message_id=message_id,
             department_id=dialog.department_id,
             status=AiSuggestionStatus.PENDING.value,
             draft_text=reply,
-            confidence=confidence,
+            confidence=100,
             intent=intent,
             needs_human=True,
             sources_json="[]",
-            raw_response_json=raw,
+            raw_response_json=json.dumps(
+                {
+                    "reply": reply,
+                    "confidence": 100,
+                    "intent": intent,
+                    "needs_human": True,
+                    "citations": [],
+                },
+                ensure_ascii=False,
+            ),
         )
         session.add(suggestion)
         await session.flush()
         from app.ai.handoff import pause_ai_for_dialog
 
-        await pause_ai_for_dialog(session, dialog, reason="operator_command")
+        await pause_ai_for_dialog(session, dialog, reason=pause_reason)
 
         mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
         can_auto = mode in {AiAgentMode.HYBRID.value, AiAgentMode.AUTO.value}
@@ -478,11 +485,32 @@ async def process_inbound_message(
                 await session.commit()
                 return PipelineResult(suggestion=suggestion, auto_sent=True)
             except Exception:
-                logger.exception("AI operator handoff send failed dialog=%s", dialog_id)
+                logger.exception(
+                    "AI handoff send failed dialog=%s intent=%s", dialog_id, intent
+                )
                 suggestion.status = AiSuggestionStatus.PENDING.value
                 suggestion.auto_sent_message_id = None
         await session.commit()
         return PipelineResult(suggestion=suggestion, auto_sent=False)
+
+    # Explicit «оператор» / «менеджер» → handoff without waiting for LLM.
+    if operator_request:
+        return await _handoff_reply(
+            reply="Передаю ваш диалог менеджеру. Ожидайте ответа.",
+            intent="operator",
+            pause_reason="operator_command",
+        )
+
+    # Price objection / negotiation — never dump the same tariff list again.
+    if is_price_objection(inbound_text):
+        return await _handoff_reply(
+            reply=(
+                "Понял вас. Менять комиссию в чате не могу — передаю менеджеру, "
+                "он ответит по вашему запросу."
+            ),
+            intent="objection",
+            pause_reason="price_objection",
+        )
 
     dept_slug = None
     if dialog.department_id is not None:
@@ -550,7 +578,24 @@ async def process_inbound_message(
             last_ai_text = (msg.text or "").strip()
             break
     # Never auto-spam the same tariff blurb when the client changed the topic.
-    block_duplicate_auto = bool(last_ai_text and _too_similar(reply, last_ai_text))
+    similar_to_last = bool(last_ai_text and _too_similar(reply, last_ai_text))
+    repeating_tariff_wall = bool(
+        last_ai_text
+        and _looks_like_tariff_dump(last_ai_text)
+        and _looks_like_tariff_dump(reply)
+        and not tariff_mode
+    )
+    block_duplicate_auto = similar_to_last or repeating_tariff_wall
+    if block_duplicate_auto:
+        # Don't leave the client in silence — escalate instead of re-sending the wall.
+        return await _handoff_reply(
+            reply=(
+                "По этому вопросу уже ответил выше. Передаю менеджеру — "
+                "он продолжит диалог."
+            ),
+            intent="objection" if repeating_tariff_wall else "other",
+            pause_reason="duplicate_ai_reply",
+        )
 
     sources = [c.as_source() for c in chunks]
 
@@ -571,7 +616,7 @@ async def process_inbound_message(
 
     # Do NOT pause the whole dialog on LLM needs_human — that blocked follow-ups
     # like «Привет» → pause → «какие условия парка» ignored. Pause only on
-    # explicit operator command / reject / human outbound (see handoff hooks).
+    # explicit operator / price objection / duplicate wall / human outbound.
 
     mode = (profile.mode or AiAgentMode.HYBRID.value).strip().lower()
     primary = {

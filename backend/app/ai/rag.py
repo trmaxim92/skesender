@@ -84,7 +84,38 @@ def _tokens(query: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(query or "")]
 
 
+def is_price_objection(query: str) -> bool:
+    """Price pushback / negotiation — not a request to list tariffs."""
+    q = (query or "").lower().strip()
+    if not q:
+        return False
+    markers = (
+        "дорого",
+        "дешевл",
+        "скидк",
+        "снизьте",
+        "понизьте",
+        "уменьшите",
+        "сделайте ниже",
+        "сделай ниже",
+        "комиссию ниже",
+        "комиссия ниже",
+        "ниже комисс",
+        "другой парк",
+        "у другого",
+        "конкурент",
+        "не устраива",
+        "высокая комисс",
+        "комиссия высок",
+        "слишком больш",
+    )
+    return any(m in q for m in markers)
+
+
 def is_tariff_query(query: str) -> bool:
+    """Info request about tariffs/commission — excludes price objections."""
+    if is_price_objection(query):
+        return False
     q = (query or "").lower()
     return any(
         k in q
