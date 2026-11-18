@@ -97,17 +97,22 @@ async def send_ai_text(
     msg.delivery_error = None
     await db.flush()
 
-    preview = message_preview_text(msg.text or "", list(msg.attachments or []))
-    await clear_unread_after_outbound(db, dialog, outbound_at=msg.created_at)
+    # AI text replies have no attachments — never lazy-load here (MissingGreenlet).
+    preview = message_preview_text(msg.text or "", [])
+    # Re-load dialog after earlier commits so attributes stay usable in async session.
+    dialog_row = await db.get(Dialog, dialog.id)
+    if dialog_row is None:
+        raise IntegrationError("Dialog disappeared during AI send")
+    await clear_unread_after_outbound(db, dialog_row, outbound_at=msg.created_at)
     if not (
-        dialog.last_direction == MessageDirection.IN.value
-        and dialog.last_at
-        and dialog.last_at > msg.created_at
+        dialog_row.last_direction == MessageDirection.IN.value
+        and dialog_row.last_at
+        and dialog_row.last_at > msg.created_at
     ):
-        dialog.last_message = preview or caption
-        dialog.last_direction = MessageDirection.OUT.value
-        dialog.last_status = msg.status
-        dialog.last_at = msg.created_at
+        dialog_row.last_message = preview or caption
+        dialog_row.last_direction = MessageDirection.OUT.value
+        dialog_row.last_status = msg.status
+        dialog_row.last_at = msg.created_at
 
     await db.commit()
 
@@ -117,7 +122,12 @@ async def send_ai_text(
         .where(ChatMessage.id == msg_id)
     )
     loaded = result.scalar_one()
-    dialog_loaded = await db.get(Dialog, dialog.id)
+    dialog_result = await db.execute(
+        select(Dialog)
+        .options(selectinload(Dialog.channel), selectinload(Dialog.assignee))
+        .where(Dialog.id == dialog.id)
+    )
+    dialog_loaded = dialog_result.scalar_one_or_none()
     if dialog_loaded is not None:
         await emit_event(message_created_event(dialog_loaded, loaded, channel.transport))
     return loaded

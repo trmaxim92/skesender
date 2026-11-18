@@ -78,17 +78,15 @@ _ESCALATE_MARKERS = (
     "обратитесь к оператору",
 )
 
-# Explicit handoff phrases from the client (not park-specific).
+# Explicit handoff only — do NOT match «куда писать менеджеру».
 _OPERATOR_CMD_RE = re.compile(
-    r"(?i)(?<![а-яёa-z0-9])("
-    r"оператор(?:а|у|ом|ы)?|"
-    r"менеджер(?:а|у|ом|ы)?|"
-    r"живой\s+человек|"
-    r"позови(?:те)?\s+(?:оператора|менеджера|человека)|"
+    r"(?is)^\s*("
+    r"оператор(?:а|у)?|менеджер(?:а|у)?|человек|human|operator|"
+    r"(?:позови(?:те)?|дайте|нужен|нужна)\s+(?:оператора|менеджера|человека)|"
     r"свяжи(?:те)?\s+с\s+(?:оператором|менеджером)|"
-    r"перевед(?:и|ите)\s+на\s+(?:оператора|менеджера)|"
-    r"human|operator"
-    r")(?![а-яёa-z0-9])"
+    r"перевед(?:и|ите)\s+(?:на\s+)?(?:оператора|менеджера)|"
+    r"живой\s+человек"
+    r")\s*[!.]?$"
 )
 
 _FLUFF_SENTENCE_RE = re.compile(
@@ -108,18 +106,8 @@ def _wants_operator(text: str) -> bool:
     raw = (text or "").strip()
     if not raw:
         return False
-    low = raw.lower()
-    if low in {
-        "оператор",
-        "оператора",
-        "менеджер",
-        "менеджера",
-        "человек",
-        "operator",
-        "human",
-    }:
-        return True
-    return bool(_OPERATOR_CMD_RE.search(raw))
+    # Whole-message command only (avoids pausing on «писать менеджеру»).
+    return bool(_OPERATOR_CMD_RE.match(raw))
 
 
 def _is_simple_greeting(text: str) -> bool:

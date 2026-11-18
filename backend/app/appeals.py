@@ -64,6 +64,9 @@ async def ensure_open_appeal(session: AsyncSession, dialog: Dialog) -> Appeal:
             dialog.current_appeal_id = appeal.id
             # Новое обращение — снова без ответственного, пока кто-то не ответит первым.
             dialog.assignee_id = None
+            # Resume AI for the new appeal cycle.
+            if hasattr(dialog, "ai_paused"):
+                dialog.ai_paused = False
             await session.flush()
             created_new = True
     except IntegrityError:
