@@ -152,7 +152,7 @@ async def _handle_bot_started(session: AsyncSession, channel: Channel, update: d
         chat_id = user.get("user_id") or user.get("id")
     if chat_id is None:
         return
-    await get_or_create_dialog(
+    dialog = await get_or_create_dialog(
         session,
         channel=channel,
         external_chat_id=str(chat_id),
@@ -161,6 +161,8 @@ async def _handle_bot_started(session: AsyncSession, channel: Channel, update: d
         contact_username=(user or {}).get("username"),
         contact_avatar_url=_user_avatar(user),
     )
+    # bot_started creates an empty chat — still open an appeal so operators can write.
+    await ensure_open_appeal(session, dialog)
 
 
 async def _handle_message_created(

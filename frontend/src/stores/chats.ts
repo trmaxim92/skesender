@@ -201,7 +201,8 @@ export const useChatsStore = defineStore('chats', () => {
     const dialog = activeDialog.value
     if (!dialog) return false
     if (isViewingPastAppeal.value) return false
-    return dialog.appealStatus === 'open'
+    // null = orphan dialog without appeal yet (e.g. MAX bot_started); allow compose.
+    return dialog.appealStatus === 'open' || dialog.appealStatus == null
   })
 
   const filteredDialogs = computed(() =>

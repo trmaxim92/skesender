@@ -662,6 +662,10 @@ async def list_messages(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dialog not found")
     await _require_dialog_access(user, dialog, db)
 
+    # Heal orphan dialogs created by bot_started without an appeal.
+    if dialog.current_appeal_id is None and (appeal_id is None):
+        await ensure_open_appeal(db, dialog)
+
     if appeal_id is not None:
         appeal = await db.get(Appeal, appeal_id)
         if appeal is None or appeal.dialog_id != dialog.id:
@@ -915,11 +919,14 @@ async def send_dialog_message(
     await _require_dialog_access(user, dialog, db)
 
     current = await get_current_appeal(db, dialog)
-    if current is None or current.status != AppealStatus.OPEN.value:
+    if current is not None and current.status != AppealStatus.OPEN.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Обращение закрыто. Дождитесь нового сообщения клиента.",
         )
+    if current is None:
+        # Orphan dialog (e.g. MAX bot_started without inbound) — open appeal for reply.
+        current = await ensure_open_appeal(db, dialog)
 
     channel = await db.get(Channel, dialog.channel_id)
     if channel is None or not channel.credentials_enc:
